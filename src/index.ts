@@ -1,0 +1,117 @@
+/**
+ * dsh-canvas — Host plugin entry.
+ *
+ * The Node half opens the canvas storage domain, starts the two Remote
+ * services, registers the agent tools and the prompt contributions, and
+ * publishes the Typert manifest so the model layer can see the services.
+ *
+ * Registration order matters in one place only: the domain is opened *before*
+ * either runtime is constructed, because a runtime's constructor registers a
+ * Cordis service whose lifetime must be covered by a live domain.
+ */
+import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
+import type {} from '@deepseek-ai/dsh-typert-registry'
+import { CANVAS_DOMAIN } from './domain.ts'
+import { ArtifactIo } from './core/artifact-io.ts'
+import { SessionManager } from './core/session-manager.ts'
+import { CanvasRuntime } from './runtime.ts'
+import { CardRuntime } from './card-runtime.ts'
+import { registerTools } from './tools.ts'
+import { PLUGIN_ID, registerGlobalPrompt } from './prompt.ts'
+import { resolveCapabilities } from './capabilities.ts'
+import { TYPERT_MANIFEST } from './typert.ts'
+import type { ResolvedConfig, UpstreamPolicy } from './types.ts'
+
+/** Cordis plugin name. Must match `package.json` `name` and `cordis.patch.yml`. */
+export const name = PLUGIN_ID
+
+/** Services required before anything here can run. */
+export const inject = ['typert', 'tools', 'fs', 'sessions', 'agents', 'storageDomain', 'systemPrompt']
+
+/** Plugin configuration. Keys are overridable from `cordis.patch.yml`. */
+export interface Config {
+  /** Directory the folder picker opens at. Empty means the user's home directory. */
+  pickerRoot: string
+  /** Horizontal gap used when arranging cards, in canvas px. */
+  arrangeGap: number
+  /** Character budget of one artifact digest injected into a card session. */
+  summaryBudget: number
+  /** How many hops of the source chain `getSources` resolves. */
+  sourceDepth: number
+  /** What happens to a downstream card's session when its material changes (F5.7). */
+  upstreamPolicy: UpstreamPolicy
+}
+
+/** Configuration schema with defaults, validated at plugin load. */
+export const Config = z.object({
+  pickerRoot: z.string().default(''),
+  arrangeGap: z.number().min(8).max(400).default(88),
+  summaryBudget: z.number().min(200).max(200_000).default(4000),
+  sourceDepth: z.number().min(1).max(16).default(3),
+  upstreamPolicy: z.union(['silent', 'notify', 'pull']).default('notify'),
+})
+
+/**
+ * Resolve the validated config into the shape the runtimes consume.
+ *
+ * The picker's default root is the user's home rather than the process
+ * working directory: a canvas project is something the user chooses from their
+ * own files, and a browser started in an unrelated directory would otherwise
+ * open the picker somewhere meaningless.
+ */
+export function resolveConfig(config: Config): ResolvedConfig {
+  return {
+    pickerRoot: config.pickerRoot.trim() === '' ? (process.env['HOME'] ?? process.cwd()) : config.pickerRoot,
+    arrangeGap: config.arrangeGap,
+    summaryBudget: config.summaryBudget,
+    sourceDepth: config.sourceDepth,
+    upstreamPolicy: config.upstreamPolicy,
+  }
+}
+
+/** Start the canvas: domain, runtimes, tools, prompt, manifest. */
+export async function apply(ctx: Context, config?: Config): Promise<void> {
+  const resolved = resolveConfig(Config(config ?? {}) as Config)
+
+  const domain = await ctx.storageDomain.open(CANVAS_DOMAIN)
+  ctx.effect(() => () => domain.close(), `${PLUGIN_ID}: storage domain`)
+
+  const io = new ArtifactIo(ctx)
+  const sessions = new SessionManager(ctx)
+
+  const canvas = new CanvasRuntime(ctx, {
+    domain,
+    io,
+    sessions,
+    arrangeGap: resolved.arrangeGap,
+    sourceDepth: resolved.sourceDepth,
+    pickerRoot: resolved.pickerRoot,
+  })
+  const card = new CardRuntime(ctx, {
+    domain,
+    io,
+    sessions,
+    summaryBudget: resolved.summaryBudget,
+    sourceDepth: resolved.sourceDepth,
+    upstreamPolicy: resolved.upstreamPolicy,
+    capabilities: resolveCapabilities(ctx),
+  })
+
+  registerTools(ctx, { domain, canvas, card, sessions })
+  registerGlobalPrompt(ctx)
+
+  ctx.effect(() => {
+    const dispose = ctx.typert.register(TYPERT_MANIFEST)
+    return () => {
+      void dispose()
+    }
+  }, `${PLUGIN_ID}: typert manifest`)
+
+  // Card conversations are owned by this fiber; unloading the plugin must
+  // release them before the domain closes, so the durable logs stay on disk
+  // while their live agents stop.
+  ctx.effect(() => () => {
+    void sessions.releaseAll()
+  }, `${PLUGIN_ID}: card sessions`)
+}

@@ -1,0 +1,14 @@
+# dsh-canvas bundle: mount the host plugin under its package name.
+#
+# The host half opens the `dsh-canvas` storage domain and needs a routed storage
+# backend, so it is inserted after the storage domain consumer (order 100).
+# Override the Config defaults from src/index.ts by adding a `config` block:
+#   - insert:
+#       - id: dsh-canvas
+#         name: dsh-canvas
+#         config:
+#           workspaceRoot: ./canvas
+#           arrangeGap: 88
+- insert:
+    - id: dsh-canvas
+      name: dsh-canvas

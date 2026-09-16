@@ -1,0 +1,227 @@
+/**
+ * The pure layer: seating, source-edge rules, kind detection, identities.
+ *
+ * Nothing here needs a Cordis container, which is the point — a board bug is a
+ * geometry or a graph bug, and both are cheap to pin down exactly.
+ */
+import { describe, expect, it } from 'vitest'
+import { CARD_HEIGHT, CARD_WIDTH, arrangeSeats, depthsOf, nextFreeSeat } from '../src/core/board.ts'
+import { projectIdOf, shortDigest, slugify } from '../src/core/ids.ts'
+import { BUILTIN_KINDS, detectKind, digestOf, kindSupportsExport, outlineOf } from '../src/core/kind-registry.ts'
+import {
+  reconcileEdges,
+  referencedPaths,
+  sourceIdOf,
+  transitiveUpstreams,
+  validateEdge,
+} from '../src/core/source-store.ts'
+import type { CardId, Source } from '../src/types.ts'
+
+/** One edge, as the store keeps it. */
+const edge = (downstream: CardId, upstream: CardId, project = 'p1'): Source => ({
+  id: sourceIdOf(downstream, upstream),
+  project,
+  downstream,
+  upstream,
+  origin: 'manual',
+})
+
+describe('board seating', () => {
+  const cards = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+
+  it('lays a plain grid in reading order', () => {
+    const seats = arrangeSeats(cards, [], 'grid', 40)
+    expect(seats.map((seat) => seat.id)).toEqual(['a', 'b', 'c'])
+    expect(seats[1]?.position.x).toBe(seats[0]!.position.x + CARD_WIDTH + 40)
+    expect(seats[2]?.position.y).toBe(seats[0]!.position.y + CARD_HEIGHT + 40)
+  })
+
+  it('places every card one column right of the deepest material', () => {
+    const edges = [edge('b', 'a'), edge('c', 'b')]
+    const depths = depthsOf(cards, edges)
+    expect(depths.get('a')).toBe(0)
+    expect(depths.get('b')).toBe(1)
+    expect(depths.get('c')).toBe(2)
+
+    const seats = arrangeSeats(cards, edges, 'source-chain', 40)
+    const byId = new Map(seats.map((seat) => [seat.id, seat.position]))
+    expect(byId.get('b')!.x).toBe(byId.get('a')!.x + CARD_WIDTH + 40)
+    expect(byId.get('c')!.x).toBe(byId.get('b')!.x + CARD_WIDTH + 40)
+  })
+
+  it('keeps the furthest material as the depth when a card has several parents', () => {
+    const edges = [edge('b', 'a'), edge('c', 'b'), edge('c', 'a')]
+    expect(depthsOf(cards, edges).get('c')).toBe(2)
+  })
+
+  it('does not hang on a cycle in a corrupted record', () => {
+    const edges = [edge('a', 'b'), edge('b', 'a')]
+    const depths = depthsOf(cards, edges)
+    expect(depths.get('a')).toBeTypeOf('number')
+    expect(depths.get('b')).toBeTypeOf('number')
+  })
+
+  it('packs cards with no edges below the chain when organizing', () => {
+    const edges = [edge('b', 'a')]
+    const seats = arrangeSeats(cards, edges, 'organize', 40)
+    const loose = seats.find((seat) => seat.id === 'c')!
+    const chained = seats.find((seat) => seat.id === 'a')!
+    expect(loose.position.y).toBeGreaterThan(chained.position.y)
+    expect(loose.position.x).toBe(chained.position.x)
+  })
+
+  it('parks a new card clear of the right-most one', () => {
+    const seat = nextFreeSeat([{ id: 'a', position: { x: 100, y: 200 } }], 40)
+    expect(seat.x).toBe(100 + CARD_WIDTH + 40)
+    expect(seat.y).toBe(200)
+  })
+
+  it('is idempotent: arranging an arranged board changes nothing', () => {
+    const edges = [edge('b', 'a')]
+    const once = arrangeSeats(cards, edges, 'source-chain', 40)
+    const twice = arrangeSeats(
+      once.map((seat) => ({ id: seat.id, position: seat.position })),
+      edges,
+      'source-chain',
+      40,
+    )
+    expect(twice).toEqual(once)
+  })
+})
+
+describe('source edges', () => {
+  const known = ['a', 'b', 'c']
+
+  it('refuses a self edge', () => {
+    expect(validateEdge({ downstream: 'a', upstream: 'a' }, known, [])).toEqual({ ok: false, reason: 'self' })
+  })
+
+  it('refuses a card that is not on the board', () => {
+    expect(validateEdge({ downstream: 'a', upstream: 'ghost' }, known, [])).toEqual({
+      ok: false,
+      reason: 'unknown-card',
+    })
+  })
+
+  it('refuses a duplicate of an existing edge', () => {
+    expect(validateEdge({ downstream: 'b', upstream: 'a' }, known, [edge('b', 'a')])).toEqual({
+      ok: false,
+      reason: 'duplicate',
+    })
+  })
+
+  it('refuses an edge that would close a cycle', () => {
+    expect(validateEdge({ downstream: 'a', upstream: 'c' }, known, [edge('b', 'a'), edge('c', 'b')])).toEqual({
+      ok: false,
+      reason: 'cycle',
+    })
+  })
+
+  it('accepts a lawful edge', () => {
+    expect(validateEdge({ downstream: 'c', upstream: 'a' }, known, [edge('b', 'a')])).toEqual({ ok: true })
+  })
+
+  it('walks the upstream chain nearest first and stops at the configured depth', () => {
+    const edges = [edge('b', 'a'), edge('c', 'b'), edge('d', 'c')]
+    const wide = transitiveUpstreams('d', edges, 8)
+    expect(wide.direct).toEqual(['c'])
+    expect(wide.indirect).toEqual(['b', 'a'])
+
+    const shallow = transitiveUpstreams('d', edges, 1)
+    expect(shallow.direct).toEqual(['c'])
+    expect(shallow.indirect).toEqual([])
+  })
+
+  it('lists downstream cards from the upstream side', () => {
+    const edges = [edge('b', 'a'), edge('c', 'a')]
+    expect(edges.filter((item) => item.upstream === 'a').map((item) => item.downstream)).toEqual(['b', 'c'])
+  })
+
+  it('derives an idempotent storage id', () => {
+    expect(sourceIdOf('deck.html', 'brief.md')).toBe(sourceIdOf('deck.html', 'brief.md'))
+    expect(sourceIdOf('deck.html', 'brief.md')).not.toBe(sourceIdOf('brief.md', 'deck.html'))
+  })
+
+  it('reconciles only references that resolve to a seated card, and never removes', () => {
+    const existing = [edge('b', 'a')]
+    const added = reconcileEdges('c', ['a', 'ghost', 'c'], known, existing)
+    expect(added).toEqual([{ downstream: 'c', upstream: 'a' }])
+  })
+
+  it('extracts references that could imply an edge, ignoring absolute and inline URLs', () => {
+    const html = referencedPaths('site', '<img src="cover.png"><a href="https://x.dev/y.md">y</a><i src="data:image/png;base64,AA">', 'html')
+    expect(html).toContain('cover.png')
+    expect(html.some((value) => value.startsWith('https'))).toBe(false)
+    expect(html.some((value) => value.startsWith('data:'))).toBe(false)
+
+    expect(referencedPaths('markdown', 'see [brief](notes/brief.md#top) and ![c](c.png)', 'md')).toEqual([
+      'notes/brief.md',
+      'c.png',
+    ])
+  })
+})
+
+describe('kind registry', () => {
+  const probe = (over: Partial<Parameters<typeof detectKind>[0]>) => ({
+    path: '',
+    directory: false,
+    basename: '',
+    extension: '',
+    head: '',
+    children: [],
+    ...over,
+  })
+
+  it('recognises a deck from its markup, not just its extension', () => {
+    expect(detectKind(probe({ path: 'd.html', basename: 'd.html', extension: 'html', head: '<section class="slide">' }))).toBe('html-deck')
+    expect(detectKind(probe({ path: 'p.html', basename: 'p.html', extension: 'html', head: '<p>plain</p>' }))).toBe('site')
+  })
+
+  it('prefers site over folder for a directory with an entry point', () => {
+    expect(detectKind(probe({ path: 'site', directory: true, children: ['index.html', 'a.css'] }))).toBe('site')
+    expect(detectKind(probe({ path: 'site', directory: true, children: ['a.css'] }))).toBe('folder')
+  })
+
+  it('falls back to a generic file rather than guessing', () => {
+    expect(detectKind(probe({ path: 'x.bin', basename: 'x.bin', extension: 'bin' }))).toBe('file')
+  })
+
+  it('keeps every built-in kind addressable and exporting only what it can', () => {
+    for (const definition of BUILTIN_KINDS) {
+      expect(definition.id).toBe(definition.id.trim())
+      expect(definition.label.length).toBeGreaterThan(0)
+    }
+    expect(kindSupportsExport('html-deck', 'pdf')).toBe(true)
+    expect(kindSupportsExport('video', 'pdf')).toBe(false)
+  })
+
+  it('outlines structure instead of pasting the artifact', () => {
+    const markdown = '# Title\n\ntext\n\n## Part\n\n### Deep\n'
+    expect(outlineOf('markdown', markdown)).toEqual(['Title', 'Part', 'Deep'])
+    expect(outlineOf('data', 'a,b,c\n1,2,3')).toEqual(['a', 'b', 'c'])
+    expect(outlineOf('image', 'binary')).toEqual([])
+  })
+
+  it('honours the digest budget and says when it truncated', () => {
+    const digest = digestOf('markdown', '# A\n'.repeat(50), 40)
+    expect(digest).toContain('结构：A')
+    expect(digest).toContain('已截断')
+  })
+})
+
+describe('identities', () => {
+  it('is deterministic and stable across trailing slashes', () => {
+    expect(projectIdOf('/tmp/deck')).toBe(projectIdOf('/tmp/deck/'))
+  })
+
+  it('distinguishes two same-named roots', () => {
+    expect(projectIdOf('/a/deck')).not.toBe(projectIdOf('/b/deck'))
+  })
+
+  it('keeps the slug readable and bounded', () => {
+    expect(slugify('我的 画布 / Deck')).toBe('我的-画布-deck')
+    expect(slugify('!!!').length).toBeGreaterThan(0)
+    expect(slugify('x'.repeat(120)).length).toBeLessThanOrEqual(40)
+    expect(shortDigest('a')).not.toBe(shortDigest('b'))
+  })
+})

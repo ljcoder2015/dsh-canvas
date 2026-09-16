@@ -1,0 +1,29 @@
+{
+  "id": "dsh-canvas",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "description": "DeepSeek Harness 通用创作画布插件：文件即产物、卡片即会话、取材即数据。",
+  "engines": {
+    "dsh": ">=0.1.0-rc.6"
+  },
+  "contributes": {
+    "tools": [
+      "canvas.read_card",
+      "canvas.read_sources",
+      "canvas.link_source",
+      "canvas.get_sources",
+      "canvas.inject_card",
+      "canvas.read_board",
+      "canvas.arrange_on_board",
+      "canvas.create_on_board",
+      "canvas.organize_board",
+      "canvas.link_source_on_board",
+      "canvas.generate_image",
+      "canvas.export",
+      "canvas.publish"
+    ],
+    "skills": [
+      "canvas-operations"
+    ]
+  }
+}

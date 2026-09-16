@@ -1,0 +1,30 @@
+# deps + build
+node_modules/
+lib/
+client/dist/
+*.tsbuildinfo
+*.profraw
+
+# runtime data
+.flow/
+.flow-*/
+
+# IDE / tool caches
+.trae/
+.idea/
+.vscode/
+.DS_Store
+
+# logs
+*.log
+
+# env
+.env
+.env.local
+
+# agent workspace state (project memory belongs to the local machine)
+.workbuddy/
+
+# smoke test tmp
+/tmp/flow*
+/tmp/dsh-*
