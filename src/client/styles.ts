@@ -176,10 +176,14 @@ const css = `
 .dsh-canvas-promptmodal .dsh-canvas-dialog-head .dsh-canvas-chipbtn{margin-left:auto}
 
 /* ── fullscreen artifact viewer (F3.8) ──────────────────────────────────── */
-/* 双击卡片打开：一块近满屏的对话框，内容按形态各由各的组件渲染。
-   内边距只给正文；图片 / 视频 / iframe 要尽量大，其余要能滚。 */
-.dsh-canvas-scrim.is-viewer{z-index:9;padding:24px}
-.dsh-canvas-viewer{width:min(1080px,100%);height:min(86vh,100%)}
+/* 双击卡片打开：预览就是**整块画布**——对话框铺满画布区（同宽同高、不留边距、不切角），
+   内容按形态各由各的组件渲染；图片 / 视频 / iframe 因此拿到画布的全部面积。
+   选择器写成 .dsh-canvas-dialog.dsh-canvas-viewer（而不是单独的 .dsh-canvas-viewer）是
+   必须的：通用对话框那条 .dsh-canvas-dialog 的宽度 min(520px,100%) 与单类同权重、
+   且在文件里更靠后，只写单类会被它顶掉宽度（旧版就栽在这里，预览一直是 520px 宽）。
+   注意本文件是 TS 模板字符串——注释里不要出现反引号，会截断字符串（实测踩过两次）。 */
+.dsh-canvas-scrim.is-viewer{z-index:9;padding:0}
+.dsh-canvas-dialog.dsh-canvas-viewer{width:100%;height:100%;border:none;border-radius:0}
 .dsh-canvas-viewer .dsh-canvas-dialog-head{flex:none}
 .dsh-canvas-viewer-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:auto}
 .dsh-canvas-viewer-truncated{flex:none;padding:7px 16px;border-bottom:1px solid var(--dsh-hairline);
