@@ -109,9 +109,8 @@ export const zh = {
   // Fullscreen artifact viewer (F3.8)
   'canvas.viewer.loading': '正在读取产物…',
   'canvas.viewer.absent': '产物文件还没生成。',
-  'canvas.viewer.tooLarge': '文件过大，无法在此预览；请在右栏打开。',
+  'canvas.viewer.tooLarge': '文件过大，无法在此预览。',
   'canvas.viewer.truncated': '内容过大，这里只显示了前一部分。',
-  'canvas.viewer.openTab': '在右栏打开',
 
   // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': '这份产物不在任何画布项目中。',
@@ -253,9 +252,8 @@ export const en = {
   // Fullscreen artifact viewer (F3.8)
   'canvas.viewer.loading': 'Reading the artifact…',
   'canvas.viewer.absent': 'The artifact has not been written yet.',
-  'canvas.viewer.tooLarge': 'The file is too large to preview here; open it in the sidebar.',
+  'canvas.viewer.tooLarge': 'The file is too large to preview here.',
   'canvas.viewer.truncated': 'The content is large; only its first part is shown.',
-  'canvas.viewer.openTab': 'Open in sidebar',
 
   // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': 'This file is not inside a canvas project.',

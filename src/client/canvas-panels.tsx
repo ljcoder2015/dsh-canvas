@@ -136,8 +136,6 @@ export interface CanvasPanelsDeps {
   pickDirectory: () => Promise<string | null>
   /** 让一条会话成为当前会话（宿主的会话域）。 */
   openSession: (sessionId: string) => void
-  /** 按地址打开产物（右栏对应标签页）。 */
-  openResource: (address: string) => void
   /** 每次拿到最新项目列表时转交给产物根缓存，让新画布里的文件立刻可被画布标签页认领。 */
   onProjects?: (projects: readonly Project[]) => void
 }
@@ -208,7 +206,6 @@ export function registerCanvasPanels(ctx: ClientContext, deps: CanvasPanelsDeps)
           inject: () => ({
             bridge: deps.bridge,
             activateSession,
-            openResource: deps.openResource,
             projectId: project.id,
             onSelectProject: openCanvas,
           }),

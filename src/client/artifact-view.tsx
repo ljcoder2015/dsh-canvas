@@ -344,20 +344,17 @@ const VIEWERS: Readonly<Record<ViewerId, ComponentType<ViewerProps>>> = {
  * re-reads summaries for previews, but a modal that appears on demand should
  * not piggyback on state the board keeps for every card), renders the state
  * machine around the content — absent, over-cap, load error — and hands the
- * kind to the registry for the view itself. Its one action beyond closing is
- * the sidebar hand-off: some content this modal is not the right surface for,
- * and saying so without offering the door would be a dead end.
+ * kind to the registry for the view itself. Its head carries the artifact's
+ * name, its kind, and the way out; the modal has no other action.
  */
 export function ArtifactModal(props: {
   projectId: string
   cardId: string
   bridge: { readArtifact(projectId: string, cardId: string): Promise<ArtifactView> }
   t: Translate
-  /** Hand the card's artifact to the host as a sidebar resource tab. */
-  onOpenTab: (cardId: string) => void
   onClose: () => void
 }) {
-  const { projectId, cardId, bridge, t, onOpenTab, onClose } = props
+  const { projectId, cardId, bridge, t, onClose } = props
   const [view, setView] = useState<ArtifactView | undefined>(undefined)
   const [error, setError] = useState('')
 
@@ -421,15 +418,6 @@ export function ArtifactModal(props: {
           {cardId.split('/').pop() ?? cardId}
           <span className="dsh-canvas-card-meta">{view?.kind ?? ''}</span>
           <span className="dsh-canvas-spacer" />
-          {/* The viewer renders what it can; the sidebar tab is the escape
-              hatch for what it cannot (over-cap files, formats whose editor
-              lives elsewhere). Kept in the head so the copy that points at it
-              — "请在右栏打开" — has somewhere to point. */}
-          {view?.present === true ? (
-            <button className="dsh-canvas-chipbtn" onClick={() => onOpenTab(cardId)}>
-              {t('canvas.viewer.openTab')}
-            </button>
-          ) : null}
           <button className="dsh-canvas-chipbtn" onClick={onClose} aria-label={t('canvas.action.collapse')}>
             ×
           </button>

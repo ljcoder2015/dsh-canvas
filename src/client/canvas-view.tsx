@@ -163,8 +163,6 @@ export type CanvasBoardProps = InjectFace<CanvasInject> & {
   t: Translate
   /** The session list, read whole: the board needs every row for card state. */
   useSessions: SnapshotSelectorHook<SessionListState>
-  /** Open one artifact address. */
-  openResource: (address: string) => void
   /** Re-read trigger for a seat that can be navigated again. */
   revision?: number
   /** The address the seat was opened at, used to pick the canvas to draw. */
@@ -210,7 +208,9 @@ function projectHolding(projects: readonly Project[], path: string): Project | u
  *
  * The tab knows the address it was opened at — a card's `locate` action opens
  * the tab at that file — and its navigation revision doubles as the board's
- * re-read trigger. Opening an artifact is the tab's own documented action.
+ * re-read trigger. Everything the board can do with an artifact it does on the
+ * board itself (double-click previews it); the board needs nothing from the
+ * tab's own action set.
  *
  * @param props - the tab's composed props, including this entry's inject face.
  * @returns the board, hosted by the tab.
@@ -219,8 +219,6 @@ export function CanvasView(props: CanvasViewProps) {
   const { bridge, t, activateSession, useTabInfo, useSessions } = props
 
   const tab = useTabInfo()
-  const actions = tab.tab.actions
-  const openResource = useCallback((address: string) => actions.openResource(address), [actions])
 
   return (
     <CanvasBoard
@@ -228,7 +226,6 @@ export function CanvasView(props: CanvasViewProps) {
       t={t}
       activateSession={activateSession}
       useSessions={useSessions}
-      openResource={openResource}
       revision={tab.tab.navigation.revision}
       address={tab.tab.navigation.address}
     />
@@ -237,7 +234,7 @@ export function CanvasView(props: CanvasViewProps) {
 
 /** Render the infinite board. */
 export function CanvasBoard(props: CanvasBoardProps) {
-  const { bridge, t, activateSession, useSessions, openResource, onSelectProject } = props
+  const { bridge, t, activateSession, useSessions, onSelectProject } = props
 
   const navigationRevision = props.revision ?? 0
   const openedAddress = props.address ?? ''
@@ -624,22 +621,6 @@ export function CanvasBoard(props: CanvasBoardProps) {
         .catch(report)
     },
     [activateSession, bridge, projectId, report],
-  )
-
-  /**
-   * Open a card's artifact as a host resource tab. The only caller is the
-   * fullscreen viewer (double-click), which needs it as the way out of the
-   * cases it cannot render itself — over-cap files say so in as many words.
-   * The host's own address builder owns this grammar; the canvas only
-   * reproduces its documented absolute form, so the tab that opens is the same
-   * one a built-in viewer would have produced for that path.
-   */
-  const openArtifactTab = useCallback(
-    (cardId: string) => {
-      if (project === undefined) return
-      openResource(`dsh-resource://file/absolute/${project.root}/${cardId}`)
-    },
-    [project, openResource],
   )
 
   const exportCard = useCallback(
@@ -1337,7 +1318,6 @@ export function CanvasBoard(props: CanvasBoardProps) {
             cardId={viewing}
             bridge={bridge}
             t={t}
-            onOpenTab={openArtifactTab}
             onClose={() => setViewing(undefined)}
           />
         ) : null}

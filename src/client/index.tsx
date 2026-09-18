@@ -78,7 +78,6 @@ export function apply(ctx: ClientContext): void {
   const panels = registerCanvasPanels(ctx, {
     bridge,
     openSession: (sessionId: string) => faces.sessions.open(sessionId as SessionId),
-    openResource: (address: string) => ctx.sidebarRight.openResource(address),
     pickDirectory: () => (ctx as unknown as { uiWorkspace: { pickDirectory: () => Promise<string | null> } }).uiWorkspace.pickDirectory(),
     // The tab types' veto reads the same list; handing it over here keeps that
     // cache from refusing a canvas the user created a moment ago.
