@@ -905,20 +905,48 @@ export function CanvasBoard(props: CanvasBoardProps) {
     })
   }, [])
 
-  const fitBoard = useCallback(() => {
-    const rect = surfaceRef.current?.getBoundingClientRect()
-    if (rect === undefined || cards.length === 0) {
-      setView({ x: 0, y: 0, zoom: 1 })
-      return
-    }
-    const minX = Math.min(...cards.map((card) => card.position.x))
-    const minY = Math.min(...cards.map((card) => card.position.y))
-    const maxX = Math.max(...cards.map((card) => card.position.x)) + CARD_W
-    const maxY = Math.max(...cards.map((card) => card.position.y)) + CARD_H
-    const zoom = clampZoom(Math.min((rect.width - 64) / (maxX - minX), (rect.height - 128) / (maxY - minY)))
-    // 左侧留 32、底部留 128：底部那一段要避开左下的缩略图与右下的缩放控件。
-    setView({ zoom, x: 32 - minX * zoom, y: 32 - minY * zoom })
-  }, [cards])
+  /**
+   * 把整块画布纳入视野。
+   *
+   * **只缩不放**：装不下就缩小，装得下就停在 100%——把三张卡放大到 146% 只是让
+   * 卡片显得突兀，而「看全」在 100% 已经成立。
+   *
+   * 默认按当前卡位算，也可以按**别处刚算出来的卡位**算——自动排版调它时手上已经有
+   * host 返回的快照，不必等状态回灌（那会先按旧位取一次景、再跳一下）。取景也是要
+   * 落盘的视口（与键盘平移同一份），所以同样举起 `viewDirty`。
+   */
+  const fitBoard = useCallback(
+    (source: readonly BoardCard[] = cards) => {
+      viewDirty.current = true
+      const rect = surfaceRef.current?.getBoundingClientRect()
+      if (rect === undefined || source.length === 0) {
+        setView({ x: 0, y: 0, zoom: 1 })
+        return
+      }
+      const minX = Math.min(...source.map((card) => card.position.x))
+      const minY = Math.min(...source.map((card) => card.position.y))
+      const maxX = Math.max(...source.map((card) => card.position.x)) + CARD_W
+      const maxY = Math.max(...source.map((card) => card.position.y)) + CARD_H
+      const zoom = Math.min(1, clampZoom(Math.min((rect.width - 64) / (maxX - minX), (rect.height - 128) / (maxY - minY))))
+      // 左侧留 32、底部留 128：底部那一段要避开左下的缩放条与右下的缩略图。
+      setView({ zoom, x: 32 - minX * zoom, y: 32 - minY * zoom })
+    },
+    [cards],
+  )
+
+  /**
+   * 自动排版：左下角那枚按钮把画布交给 host 的 `organize` 策略重新摆位——链上的
+   * 卡片按取材深度成列、散卡在下方网格收拢（与 agent 的 `canvas_arrange_on_board`
+   * 是同一条通道、同一份算法，只是不经过模型）。排完立刻按**新卡位**取景，否则用户
+   * 看到的是「卡片跳走了」而不是「整理好了」。
+   */
+  const arrangeBoard = useCallback(() => {
+    if (projectId === '') return
+    void run(async () => {
+      const snapshot = await bridge.arrange(projectId, 'organize')
+      fitBoard(snapshot.cards)
+    })
+  }, [bridge, fitBoard, projectId, run])
 
   // ── keyboard ──────────────────────────────────────────────────────────────
 
@@ -1193,8 +1221,13 @@ export function CanvasBoard(props: CanvasBoardProps) {
           <button className="dsh-canvas-iconbtn" onClick={() => zoomBy(1.2)} title={t('canvas.zoom.in')}>
             +
           </button>
-          <button className="dsh-canvas-chipbtn" onClick={fitBoard}>
-            {t('canvas.zoom.reset')}
+          <button
+            className="dsh-canvas-chipbtn"
+            onClick={arrangeBoard}
+            disabled={cards.length === 0}
+            title={t('canvas.board.arrange')}
+          >
+            {t('canvas.board.arrange')}
           </button>
         </div>
 

@@ -32,7 +32,6 @@ export const zh = {
   'canvas.empty.board': '这个文件夹里还没有产物。',
   'canvas.zoom.in': '放大',
   'canvas.zoom.out': '缩小',
-  'canvas.zoom.reset': '适应画布',
 
   // Board dock
   'canvas.dock.add': '新增卡片',
@@ -83,6 +82,7 @@ export const zh = {
   'canvas.action.confirm': '确认',
   'canvas.action.delete': '删除',
   'canvas.action.retry': '重试',
+  'canvas.board.arrange': '自动排版',
 
   // Card overlay / panel
   'canvas.panel.latest': '最新一条',
@@ -176,7 +176,6 @@ export const en = {
   'canvas.empty.board': 'No artifacts in this folder yet.',
   'canvas.zoom.in': 'Zoom in',
   'canvas.zoom.out': 'Zoom out',
-  'canvas.zoom.reset': 'Fit board',
 
   // Board dock
   'canvas.dock.add': 'New card',
@@ -227,6 +226,7 @@ export const en = {
   'canvas.action.confirm': 'Confirm',
   'canvas.action.delete': 'Delete',
   'canvas.action.retry': 'Retry',
+  'canvas.board.arrange': 'Auto-arrange',
 
   // Card overlay / panel
   'canvas.panel.latest': 'Latest',
