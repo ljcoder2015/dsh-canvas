@@ -2,21 +2,23 @@
  * dsh-canvas — what appears around a selected card.
  *
  * Two pieces, both following the card: the action pill just above it, and the
- * card's control strip just below it. The strip is not a text box: the prompt
- * is written in the modal the ⤢ control opens (the board's cards show progress
- * and their artifact themselves, so an inline box only repeated them). What the
- * strip carries is what the card cannot say on its own — which materials feed
- * it, which model runs its turns, and how to get to the prompt.
+ * card's control strip just below it. The strip carries what the card cannot
+ * say on its own — the prompt box, the materials that feed it, the model that
+ * runs its turns, and the way into the fullscreen editor (⤢).
  *
- * The prompt modal is a mirror as much as an editor: with nothing of the user's
+ * The prompt box is a mirror as much as an editor: with nothing of the user's
  * own in it, it holds that card's latest message from the user, so the prompt a
  * card was most recently asked with is the one sitting in front of them to
  * refine. See `ComposerDraft` in `canvas-view.tsx` for how that is resolved
- * without the box fighting the user's typing.
+ * without the box fighting the user's typing. The ⤢ modal edits that same draft
+ * at full size — one box at two sizes, not two boxes.
  *
  * The material row is how one node consumes another node's artifact: the ⊕
  * menu lists the board's other cards, and picking one declares the source edge
- * and pushes its digest into the session in the same gesture.
+ * and pushes its digest into the session in the same gesture. Each chip is one
+ * declared edge and carries the delete button at its top-right: a chip and an
+ * edge are the same thing, so removing a chip removes exactly the relationship
+ * it stands for.
  */
 import { useEffect, useState } from 'react'
 import type { BoardCard, CardSummary } from '../types.ts'
@@ -32,17 +34,37 @@ import {
 } from './model-memory.ts'
 import type { Translate } from './locales.ts'
 
+/**
+ * One declared material edge of the selected card, as its chip renders it.
+ *
+ * A chip is an edge, and only an edge: `readSources` also walks indirect
+ * upstreams for the agent's benefit, but those are relationships of some card
+ * further up the chain — there would be nothing to delete from this one. So the
+ * strip lists exactly the direct edges the board reports, and joins each to its
+ * digest for the tooltip.
+ */
+export interface MaterialRef {
+  /** Storage id of the edge — the handle `unlinkSource` takes. */
+  id: string
+  /** The upstream card id. */
+  cardId: string
+  /** Bounded digest of the upstream artifact; `''` when it could not be read. */
+  summary: string
+}
+
 /** Props of the selected-card cluster. */
 export interface CardSelectionProps {
   bridge: CanvasBridge
   card: BoardCard
   summary: CardSummary | undefined
   state: CardState
-  /** Digests of the card's declared material chain, nearest first. */
-  materials: readonly CardSummary[]
+  /** This card's declared upstream edges, one chip each. */
+  materials: readonly MaterialRef[]
   /** Every other card on the board — what the add-material menu offers. */
   others: readonly BoardCard[]
   t: Translate
+  /** What the prompt box holds: the user's unsent edit, or the card's latest message. */
+  draft: string
   /** Make the card's session current so its conversation becomes the main surface. */
   onChat: () => void
   /** Export in the kind's first supported format. */
@@ -51,8 +73,14 @@ export interface CardSelectionProps {
   onRemove: () => void
   /** Declare an edge from `sourceId` and push its digest into the session. */
   onAddMaterial: (sourceId: string) => void
-  /** Open the prompt modal (⤢) — the one place a prompt is written. */
+  /** Delete the material edge carrying this storage id. */
+  onDropMaterial: (sourceId: string) => void
+  /** Open the prompt modal (⤢) — the same draft, at full size. */
   onExpand: () => void
+  /** Record the user's text without sending it. */
+  onDraftChange: (text: string) => void
+  /** Send the draft as the card session's next turn. */
+  onSend: () => void
 }
 
 /**
@@ -295,19 +323,21 @@ function ModelPicker({
 }
 
 /**
- * Render the action pill and the card's composer strip for one selected card.
+ * Render the action pill and the card's control strip for one selected card.
  *
- * The strip carries what the card itself cannot: which materials feed it (⊕),
- * which model runs its turns, and the way into the prompt modal (⤢). It has no
- * text box and no status line of its own — the prompt is written in the modal,
- * and the card face is where progress and the artifact are read.
+ * The strip is the card's whole console: the prompt box and its send button,
+ * the materials feeding it (chips with their own delete buttons, then ⊕ to add
+ * one), the way into the fullscreen editor (⤢), and the model running its
+ * turns. The card face is where progress and the artifact are read.
  */
 export function CardSelection(props: CardSelectionProps) {
   const {
-    bridge, card, summary, state, materials, others, t, onAddMaterial, onExpand,
+    bridge, card, summary, state, materials, others, t, draft, onAddMaterial, onDropMaterial,
+    onExpand, onDraftChange, onSend,
   } = props
   const [menu, setMenu] = useState(false)
   const hasExport = (summary?.kind ?? '') !== 'folder'
+  const canSend = draft.trim() !== ''
   // The memory is keyed by what the card *is*, not by which card it is: that is
   // what lets the next node of the same type start from the last choice.
   const nodeType = nodeTypeOf(card, summary)
@@ -328,8 +358,16 @@ export function CardSelection(props: CardSelectionProps) {
       <div className="dsh-canvas-overlay dsh-canvas-composer" style={{ left: `${card.position.x + 100}px`, top: `${card.position.y + 156}px`, transform: 'translateX(-50%)' }}>
         <div className="dsh-canvas-composer-materials">
           {materials.map((entry) => (
-            <span className="dsh-canvas-chip" key={entry.cardId} title={entry.summary}>
-              {entry.cardId.split('/').pop() ?? entry.cardId}
+            <span className="dsh-canvas-chip" key={entry.id} title={entry.summary === '' ? entry.cardId : entry.summary}>
+              <span className="dsh-canvas-chip-label">{entry.cardId.split('/').pop() ?? entry.cardId}</span>
+              <button
+                className="dsh-canvas-chipdrop"
+                title={t('canvas.composer.drop')}
+                aria-label={t('canvas.composer.drop')}
+                onClick={() => onDropMaterial(entry.id)}
+              >
+                ×
+              </button>
             </span>
           ))}
           <span className="dsh-canvas-composer-materialzone">
@@ -368,6 +406,21 @@ export function CardSelection(props: CardSelectionProps) {
           </button>
         </div>
 
+        <textarea
+          className="dsh-canvas-composer-input"
+          placeholder={t('canvas.composer.placeholder')}
+          value={draft}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onKeyDown={(event) => {
+            // ⌘/Ctrl + Enter sends; a bare Enter belongs to the text, because a
+            // prompt is usually several lines. Same chord as the ⤢ modal.
+            if (event.key === 'Enter' && !event.shiftKey && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault()
+              if (canSend) onSend()
+            }
+          }}
+        />
+
         <div className="dsh-canvas-composer-foot">
           <ModelPicker
             bridge={bridge}
@@ -378,6 +431,10 @@ export function CardSelection(props: CardSelectionProps) {
             t={t}
           />
           <span className="dsh-canvas-dot" data-state={state} />
+          <span className="dsh-canvas-spacer" />
+          <button className="dsh-canvas-chipbtn" data-primary="true" disabled={!canSend} onClick={onSend}>
+            {t('canvas.composer.send')}
+          </button>
         </div>
       </div>
     </>

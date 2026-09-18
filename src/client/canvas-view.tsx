@@ -41,7 +41,7 @@ import type { CanvasBridge } from './bridge.ts'
 import type { CanvasKey, Translate } from './locales.ts'
 import { activityOf, cardStateOf, summaryOf } from './session-read.ts'
 import { CardTile } from './card-tile.tsx'
-import { CardSelection } from './card-overlay.tsx'
+import { CardSelection, type MaterialRef } from './card-overlay.tsx'
 import { SourceEdges, seatAtAnchor, type PendingEdge } from './source-edges.tsx'
 import { FolderPicker } from './folder-picker.tsx'
 import { ArtifactModal } from './artifact-view.tsx'
@@ -707,18 +707,57 @@ export function CanvasBoard(props: CanvasBoardProps) {
    * Bring another node's artifact in as material: declare the edge (unless it
    * is already declared) and push its digest into the live session in the same
    * gesture, so the next turn sees it without a tool call.
+   *
+   * "Already declared" is asked of the board's **direct edges**, not of the
+   * digest list: that list also carries indirect upstreams, and treating one of
+   * those as already-linked silently skipped the link — picking a card from ⊕
+   * would push its digest but draw no line.
    */
   const addMaterial = useCallback(
     (card: BoardCard, sourceCardId: string) => {
       if (projectId === '' || card.id === sourceCardId) return
-      const declared = materials[card.id]?.some((entry) => entry.cardId === sourceCardId) ?? false
+      const declared = sources.some((edge) => edge.downstream === card.id && edge.upstream === sourceCardId)
       void run(async () => {
         if (!declared) await bridge.linkSource(projectId, sourceCardId, card.id)
         await bridge.openSession(projectId, card.id)
         await bridge.injectCard(projectId, card.id, sourceCardId, 'summary')
       })
     },
-    [bridge, materials, projectId, run],
+    [bridge, projectId, run, sources],
+  )
+
+  /**
+   * 选中卡片的取材 chips：一条 chip 就是一条边。
+   *
+   * `readSources` 连**间接**上游一并返回（那是 agent 沿着链要读的东西），但间接上游
+   * 是更上面某张卡的关系，删无可删——所以 chips 只列画布报出来的**直接边**，各自去
+   * 摘要表里配一条 tooltip。这样「chip 上的删除按钮」永远有确定的对象。
+   */
+  const selectionMaterials: readonly MaterialRef[] = useMemo(() => {
+    if (selectionCard === undefined) return []
+    const digests = materials[selectionCard.id] ?? []
+    return sources
+      .filter((edge) => edge.downstream === selectionCard.id)
+      .map((edge) => ({
+        id: edge.id,
+        cardId: edge.upstream,
+        summary: digests.find((entry) => entry.cardId === edge.upstream)?.summary ?? '',
+      }))
+  }, [materials, selectionCard, sources])
+
+  /**
+   * 删掉一条取材边。
+   *
+   * chip 右上角那枚按钮是画布上唯一的解除入口——线本身不可点（F4.4），所以这里直接
+   * 拿边的存储 id 去删。回读沿用所有改动共用的那一个触发器（`run` 成功即 +stamp），
+   * 于是线随卡片一起从画布上退场。
+   */
+  const dropMaterial = useCallback(
+    (sourceId: string) => {
+      if (projectId === '') return
+      void run(() => bridge.unlinkSource(projectId, sourceId))
+    },
+    [bridge, projectId, run],
   )
 
   // ── pan and zoom ──────────────────────────────────────────────────────────
@@ -1115,14 +1154,18 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 card={selectionCard}
                 summary={summaries[selectionCard.id]}
                 state={statusOf(selectionCard)}
-                materials={materials[selectionCard.id] ?? []}
+                materials={selectionMaterials}
                 others={cards.filter((entry) => entry.id !== selectionCard.id)}
                 t={t}
+                draft={promptDraft}
                 onChat={() => openCardSession(selectionCard)}
                 onExport={() => exportCard(selectionCard)}
                 onRemove={() => setRemoval(selectionCard.id)}
                 onAddMaterial={(sourceId) => addMaterial(selectionCard, sourceId)}
+                onDropMaterial={dropMaterial}
                 onExpand={() => setExpanded(true)}
+                onDraftChange={(text) => editDraft(selectionCard.id, text)}
+                onSend={() => sendPrompt(selectionCard, promptDraft)}
               />
             )}
           </div>

@@ -133,15 +133,21 @@ const css = `
 .dsh-canvas-overlay-head .dsh-canvas-spacer{margin-left:auto}
 .dsh-canvas-spacer{margin-left:auto}
 
-/* 选中卡片下方的那条控制带：取材 chips 与 ⊕ 引入入口 → 模型席位与状态点。
-   没有输入框、也没有「最新一句」——卡面自己说进度与产物，提示词在 ⤢ 弹窗里写。 */
+/* 选中卡片下方的那条控制带：取材 chips 与 ⊕ 引入入口 → 提示词输入框 → 模型席位、
+   状态点与发送。chips 是「一条 chip = 一条取材边」，所以每枚右上角都挂着自己的删除钮
+   （卡片上没有 overflow:hidden，角标才探得出去；文字的截断交给内部的 label）。 */
 .dsh-canvas-composer{display:flex;flex-direction:column;gap:8px}
-.dsh-canvas-composer-materials{display:flex;align-items:center;flex-wrap:wrap;gap:4px}
-.dsh-canvas-chip{display:inline-flex;align-items:center;max-width:130px;height:22px;box-sizing:border-box;padding:0 10px;
-  border:1px solid color-mix(in srgb,var(--dsh-breeze) 45%,transparent);border-radius:999px;
-  font:11px/20px var(--dsh-font);color:var(--dsh-breeze);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-canvas-composer-materials{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
+.dsh-canvas-chip{position:relative;display:inline-flex;align-items:center;max-width:170px;height:26px;box-sizing:border-box;
+  padding:0 8px 0 12px;border:1px solid color-mix(in srgb,var(--dsh-breeze) 45%,transparent);border-radius:999px;
+  font:12px/24px var(--dsh-font);color:var(--dsh-breeze)}
+.dsh-canvas-chip-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-canvas-chipdrop{position:absolute;top:-6px;right:-6px;display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;box-sizing:border-box;padding:0;border:1px solid var(--dsh-mid);border-radius:50%;
+  background:var(--dsh-card);color:var(--dsh-fg-3);font:11px/1 var(--dsh-font);cursor:pointer;z-index:1}
+.dsh-canvas-chipdrop:hover{background:var(--dsh-sunset);border-color:var(--dsh-sunset);color:#0A0A0A}
 .dsh-canvas-composer-materialzone{position:relative;display:inline-flex}
-.dsh-canvas-composer-materialzone .dsh-canvas-chipbtn{height:22px;padding:0 8px;font:14px/20px var(--dsh-font)}
+.dsh-canvas-composer-materialzone .dsh-canvas-chipbtn{height:26px;padding:0 9px;font:14px/24px var(--dsh-font)}
 .dsh-canvas-menu.is-raised{position:absolute;left:0;bottom:28px;z-index:7;box-shadow:none}
 .dsh-canvas-composer-menuempty{display:block;padding:7px 10px;font:12px/18px var(--dsh-font);color:var(--dsh-fg-3);white-space:nowrap}
 .dsh-canvas-composer-expand{margin-left:auto}

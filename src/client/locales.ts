@@ -93,6 +93,7 @@ export const zh = {
   // Card overlay / panel
   'canvas.panel.latest': '最新一条',
   'canvas.composer.material': '引入其它节点产物',
+  'canvas.composer.drop': '删除这条取材关系',
   'canvas.composer.placeholder': '输入提示词，发送给这张卡片…',
   'canvas.composer.send': '发送',
   'canvas.composer.empty': '画布上还没有其它卡片。',
@@ -242,6 +243,7 @@ export const en = {
   // Card overlay / panel
   'canvas.panel.latest': 'Latest',
   'canvas.composer.material': 'Bring in another node’s artifact',
+  'canvas.composer.drop': 'Remove this material link',
   'canvas.composer.placeholder': 'Type a prompt to send to this card…',
   'canvas.composer.send': 'Send',
   'canvas.composer.empty': 'No other cards on the board yet.',
