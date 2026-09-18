@@ -2,9 +2,10 @@
  * dsh-canvas — one card on the board.
  *
  * 200×140, matching `CARD_WIDTH`/`CARD_HEIGHT` in `core/board.ts` so the
- * seating the host computes and the seating the browser draws agree. Three
- * bands, top to bottom: the artifact preview, the name and kind, and the
- * session line with its status dot — the design's card, and nothing else on it.
+ * seating the host computes and the seating the browser draws agree. Two bands:
+ * the name line and the artifact preview, and nothing else on the card. There
+ * is no status dot — the card says "a turn is running" with motion, not with a
+ * lamp: the sweep below is the whole signal, and it is the only one.
  *
  * The tile owns exactly one piece of local state, the drag offset, so a drag
  * never round-trips through the host: the position is committed once, on
@@ -16,8 +17,7 @@
  * overflow — its ports hang outside its border. The content underneath stays
  * where it is: the sweep is the whole signal, and what the preview shows is
  * still the last artifact that actually exists.
- */
-import { useRef, useState } from 'react'
+ */import { useRef, useState } from 'react'
 import type { BoardCard, CardSummary, Point } from '../types.ts'
 import type { CardState } from './session-read.ts'
 import type { Translate } from './locales.ts'
@@ -47,14 +47,6 @@ export interface CardTileProps {
   /** Double-click: select the card and open its artifact fullscreen (F3.8). */
   onActivate: (cardId: string) => void
 }
-
-/** The translation key of one card state. */
-const STATE_KEY = {
-  running: 'canvas.status.running',
-  notified: 'canvas.status.notified',
-  idle: 'canvas.status.idle',
-  missing: 'canvas.status.missing',
-} as const
 
 /** Up to four preview lines: the artifact's outline, or a fallback. */
 function previewLines(summary: CardSummary | undefined, fallback: string): string[] {
@@ -135,7 +127,6 @@ export function CardTile(props: CardTileProps) {
 
       <div className="dsh-canvas-card-head">
         <div className="dsh-canvas-card-name">{card.id.split('/').pop() ?? card.id}</div>
-        <span className="dsh-canvas-dot" data-state={state} title={t(STATE_KEY[state])} />
       </div>
 
       <div className="dsh-canvas-card-preview">

@@ -84,12 +84,6 @@ export const zh = {
   'canvas.action.delete': '删除',
   'canvas.action.retry': '重试',
 
-  // Card state
-  'canvas.status.running': '运行中',
-  'canvas.status.notified': '有通知',
-  'canvas.status.idle': '空闲',
-  'canvas.status.missing': '文件已不在',
-
   // Card overlay / panel
   'canvas.panel.latest': '最新一条',
   'canvas.composer.material': '引入其它节点产物',
@@ -233,12 +227,6 @@ export const en = {
   'canvas.action.confirm': 'Confirm',
   'canvas.action.delete': 'Delete',
   'canvas.action.retry': 'Retry',
-
-  // Card state
-  'canvas.status.running': 'Running',
-  'canvas.status.notified': 'Has news',
-  'canvas.status.idle': 'Idle',
-  'canvas.status.missing': 'File is gone',
 
   // Card overlay / panel
   'canvas.panel.latest': 'Latest',

@@ -56,8 +56,9 @@ const css = `
 .dsh-canvas-layer{position:absolute;left:0;top:0;transform-origin:0 0}
 
 /* ── card ───────────────────────────────────────────────────────────────── */
-/* 节点样式对齐参考稿：标题行在顶（名字 + 状态点），预览铺满其余全部，
-   取材端口悬在左右两侧的垂直中点。状态用点的颜色说，不再占一行文字。 */
+/* 节点样式对齐参考稿：标题行在顶（只有名字，没有状态点），预览铺满其余全部，
+   取材端口悬在左右两侧的垂直中点。卡上不解释状态——运行由流光说，静止就是
+   「没事发生」；边框只归用户自己的两个动作（悬停、选中）。 */
 .dsh-canvas-card{position:absolute;width:200px;height:140px;box-sizing:border-box;display:flex;flex-direction:column;
   border:1px solid var(--dsh-hairline);border-radius:8px;background:var(--dsh-card);user-select:none;
   transition:border-color .12s ease,background .12s ease}
@@ -66,12 +67,12 @@ const css = `
 .dsh-canvas-card.is-absent .dsh-canvas-card-preview{opacity:.35}
 /* 生成中（会话 running）：整张卡片亮起**流光**——一道斜切 25° 的光带从左扫到右，
    1.8s 一趟，不停顿。名字与预览照常显示（陈旧不等于假：卡上留着的是最近一次真正
-   存在过的产物），光的往复本身就是「正在产出新内容」的整句话；描边同时带一点
-   sunset，与状态点是同一句话。
+   存在过的产物），光的往复本身就是「正在产出新内容」的整句话。卡面只微亮一档、
+   边框不变色：边框归悬停与选中，随运行变色会让卡片看起来像被框起来警告。
 
    光带画在独立的子层 .dsh-canvas-shimmer 上，不用卡片自己的 ::after：卡片不能
    overflow:hidden——两个取材端口是悬在卡外的，裁了就没法拖线了。 */
-.dsh-canvas-card.is-working{background:var(--dsh-slot);border-color:rgba(255,122,23,.4)}
+.dsh-canvas-card.is-working{background:var(--dsh-slot)}
 .dsh-canvas-shimmer{position:absolute;inset:0;overflow:hidden;border-radius:inherit;pointer-events:none}
 .dsh-canvas-shimmer::after{content:'';position:absolute;top:0;left:0;width:100%;height:100%;
   background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.08) 40%,
@@ -83,6 +84,8 @@ const css = `
 .dsh-canvas-card-preview-line{font:11px/16px var(--dsh-mono);color:var(--dsh-fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-canvas-card-preview-line:first-child{color:var(--dsh-fg-2)}
 .dsh-canvas-card-meta{font:10px/14px var(--dsh-mono);letter-spacing:.6px;color:var(--dsh-fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 状态点只剩左侧的实时卡片（tool-view.tsx）在用——画布卡片上那枚已经去掉：
+   那边用流光说「在跑」，不再用灯。 */
 .dsh-canvas-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--dsh-fg-3)}
 .dsh-canvas-dot[data-state=running]{background:var(--dsh-sunset);animation:dsh-canvas-pulse 1.4s ease-in-out infinite}
 .dsh-canvas-dot[data-state=notified]{background:var(--dsh-twilight)}
@@ -325,9 +328,11 @@ const css = `
 @keyframes dsh-canvas-shimmer{from{transform:skewX(-25deg) translateX(-120%)}to{transform:skewX(-25deg) translateX(120%)}}
 @keyframes dsh-canvas-pulse{0%,100%{opacity:1}50%{opacity:.3}}
 @media (prefers-reduced-motion:reduce){
-  /* 不再扫动，但状态不丢：光带停在正中（translateX(0)），卡面留一层静态提亮，
-     配状态点一起读「在跑」。 */
-  .dsh-canvas-shimmer::after{animation:none;transform:skewX(-25deg) translateX(0)}
+  /* 减少动态效果下**不熄灭流光**，只把动感降下来：速度减半、光带减淡。曾经的做法是
+     animation:none 加光带停在正中——实测那样整张卡片看上去毫无反馈，与「卡住」无从
+     区分，而光在动是这张卡唯一的进行中信号（减少，不等于抹掉）。左侧的实时卡片（见
+     tool-view）仍按用户偏好停掉状态点的脉动。 */
+  .dsh-canvas-shimmer::after{animation-duration:3.6s;opacity:.6}
   .dsh-canvas-dot[data-state=running]{animation:none}
 }
 

@@ -1153,7 +1153,6 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 bridge={bridge}
                 card={selectionCard}
                 summary={summaries[selectionCard.id]}
-                state={statusOf(selectionCard)}
                 materials={selectionMaterials}
                 others={cards.filter((entry) => entry.id !== selectionCard.id)}
                 t={t}

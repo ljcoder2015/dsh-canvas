@@ -23,7 +23,6 @@
 import { useEffect, useState } from 'react'
 import type { BoardCard, CardSummary } from '../types.ts'
 import type { CanvasBridge, CatalogModel, ModelCatalog } from './bridge.ts'
-import type { CardState } from './session-read.ts'
 import {
   nodeTypeOf,
   recallModel,
@@ -57,7 +56,6 @@ export interface CardSelectionProps {
   bridge: CanvasBridge
   card: BoardCard
   summary: CardSummary | undefined
-  state: CardState
   /** This card's declared upstream edges, one chip each. */
   materials: readonly MaterialRef[]
   /** Every other card on the board — what the add-material menu offers. */
@@ -332,7 +330,7 @@ function ModelPicker({
  */
 export function CardSelection(props: CardSelectionProps) {
   const {
-    bridge, card, summary, state, materials, others, t, draft, onAddMaterial, onDropMaterial,
+    bridge, card, summary, materials, others, t, draft, onAddMaterial, onDropMaterial,
     onExpand, onDraftChange, onSend,
   } = props
   const [menu, setMenu] = useState(false)
@@ -430,7 +428,6 @@ export function CardSelection(props: CardSelectionProps) {
             kind={nodeType}
             t={t}
           />
-          <span className="dsh-canvas-dot" data-state={state} />
           <span className="dsh-canvas-spacer" />
           <button className="dsh-canvas-chipbtn" data-primary="true" disabled={!canSend} onClick={onSend}>
             {t('canvas.composer.send')}
