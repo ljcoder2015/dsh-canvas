@@ -1,7 +1,21 @@
 # DeepSeek Harness 通用创作画布插件 · 产品文档
 
-**版本**：v1.2
+**版本**：v1.19
 **状态**：产品设计定稿；技术架构已按 `dsh-plugin-template` 与 Harness 子系统文档校准
+**v1.19 变更**：①生成中反馈（F3.7 重写）——运行态卡片由骨架图改为**流光**：斜切 25° 的光带整卡扫过（独立子层，卡片不能裁剪——端口悬在卡外），名字与预览照常显示，回合结束即停、卡面回显新产物；②卡片控制带（新增 F3.11）——选中卡片下方**去掉提示词输入框**与「还没有消息。」状态文字，只留取材 ⊕、⤢（提示词弹窗，写提示词的唯一入口）、模型席位与状态点
+**v1.18 变更**：取材线收敛为一副样子（F4.4 重写）——两个节点之间的连线改成与**拖拽中**完全同款：1px 细线、实线、无箭头，选中卡片只提亮不透明度；**去掉点线的交互**，线层 `pointer-events:none` 只负责看，解除取材走 agent 工具
+**v1.17 变更**：修复拖线闪动——取消一次拖拽后再次从锚点按下时，指针状态还停留在上次的终点，pending 线会先按旧位置画一帧再跳回锚点；现在按下即把线钉到本次锚点（`onConnectStart` 随事件同步重置指针）
+**v1.16 变更**：锚点拖线交互改版（F4.2 重写 + 新增 F4.8）——拖拽中的线改从**锚点（端口圆心）起笔**、终点就是指针，样式是**细线、无箭头**；放到空白处不再直接作废，而是就地弹出**「新增节点」弹窗**，点一种形态即当场建卡并连线（新卡的端口正好接住线头，落成后连线两端回到卡片上），点空白处 / Esc / 点弹层外任何地方则取消。实测同场翻出并修掉一个既有缺陷：手动连线的存储键 `a<-b` 不满足介质的路径安全校验，**取材边从未落过盘**；键改为与卡片表同一套转义（F4.3）
+**v1.15 变更**：dock 与快捷键弹层打磨（F1.7 修订）——dock 的新增按钮移到**最左**并改为**实心圆 + 画布强调色**，快捷键按钮退为幽灵钮；快捷键 Popover 改**一个键一行**（10 行，方向与缩放各配一句自己的话），键帽列对齐
+**v1.13 变更**：左栏画布区改版（F1.5 重写）——不再一行画布一枚按钮地铺进 `sidebar.panellist`，改为**一个包裹**：header（标题 + 右侧新建按钮）与画布列表；收起时整棵包裹让位给一枚图标，点图标即新建
+**v1.12 变更**：画布即工作区（F1.6）——创建画布时把画布根目录登记为宿主工作区，卡片会话开启即挂账，对话归到画布名下而不是「未分组」；新增 `src/core/workspace.ts`
+**v1.11 变更**：生成中反馈改版（F3.7）——运行态卡片由「边框流光 + 预览压暗」改为**骨架图闪光**：整卡转占位底色，名字与预览换成会跑光的骨架条；撤掉 conic 光弧与卡面扫光
+**v1.10 变更**：操作胶囊收敛——去掉「打开」与「建立取材」两枚按钮，只留没有其它入口的动作（§3.3 F3.10）；全屏预览头部新增「在右栏打开」，承接超限文件的去处
+**v1.9 变更**：输入框回填（F3.9）——未编辑时卡片提示词输入框显示用户最近一条自己发出的消息；新增 Host 读会话事件日志的 `card/read_last_prompt` 通道与 `src/core/session-log.ts`
+**v1.8 变更**：对话页面去掉画布卡片标签页——不再注册 `conversation.view` 席位，删除 `card-panel.tsx`；卡片内容展示走 F3.8 全屏预览与右栏产物 tab
+**v1.5 变更**：①卡片会话的**工具来源**（§4.5）——Web 面把模型面向的文件工具行从宿主组装移出、改由 agent preset 提供，自建卡片会话不加入 preset 就没有任何写盘手段；新增 `src/core/agent-preset.ts` 承载组装。②生成中反馈（F3.7）——运行态卡片加流光，信号直接取会话状态，不新造客户端乐观标志
+**v1.4 变更**：卡片会话的**模型来源**（§4.5）——自建 agent 必须补 `AgentOptions.provider/model`，且已记录的会话选择要在开卡时装回；新增 `src/core/model-routing.ts` 承载该策略
+**v1.3 变更**：工具名由 `canvas.xxx` 全量改为 `canvas_xxx`——供应商对 `tools[].name` 的字符集限制为 `^[a-zA-Z0-9_-]+$`，点号会被 400 拒绝（§3.6、§4.12 第 1 项）
 **定位**：以文件卡片为最小创作单元、以独立 Agent 会话为执行引擎、以取材关系为数据通道的无限画布工作台
 **参考**：[dsh-plugin-template](https://github.com/bugmaker2/dsh-plugin-template)（双端插件模板）、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`docs/cookbook/*`、`docs/subsystems/*`）
 
@@ -70,6 +84,9 @@
 | F1.2 | 文件系统映射 | 卡片 id 即文件路径，拖卡片进文件夹等于 `mv` |
 | F1.3 | 实时同步 | 画布内容与磁盘文件系统双向实时同步 |
 | F1.4 | 视图持久化 | 画布布局、缩放状态、卡片位置自动保存 |
+| F1.5 | 左栏画布区 | 一个包裹而非一排按钮：header 是「画布」标题 + **右侧新建按钮**（点它弹系统文件夹选择器，选定即建画布），下面列出已有画布、点行切换。侧栏收成 rail 时包裹整棵隐藏，只剩一枚画布图标（宿主那一行），**点图标即新建**。选中高亮由宿主全局标准席位 `usePanelInfo`（`activePanelId`）驱动 |
+| F1.6 | 画布即工作区 | 创建画布时同步把画布根目录登记为宿主工作区（标题=画布名，幂等：用户手动加过的同名目录解析到同一条记录、不改名），卡片会话开启时挂到该工作区账下——对话从此归到画布名下而不是「未分组」；重开旧画布时已绑会话一并补挂。全链路尽力而为：无工作区名册的部署整体空操作，注册/挂账失败只记日志不上抛 |
+| F1.7 | 指针与键盘 | 指针默认**选择箭头**：点卡片即选中、拖卡片即移动，空白处一按只是取消选择；平移握在**空格**里——按住空格整块表面（含卡片上方）变抓手，拖的是取景框而不是卡片（在捕获阶段拦下按压，卡片收不到）。键盘：W A S D 上左下右平移、Q / E 缩小 / 放大（按键重复照收，按住即连续）；键盘改的视口按停顿落盘（半秒无声提交一次），指针仍在抬手时提交。底部 dock 两枚按钮：**新增在最左**，实心圆 + 画布强调色（与卡片上的 primary 胶囊同源），旁边是快捷键按钮（幽灵钮）——点开 Popover 印出键位表，**一个键一行**、各配一句自己的话；表体与分派同源（`src/client/shortcuts.ts`），印出来的每一行都按得动 |
 
 ### 3.2 文件形态注册表
 
@@ -89,19 +106,25 @@
 | F3.3 | 会话隔离 | 卡片 A 的会话看不到卡片 B 的对话历史和文件内容 |
 | F3.4 | 会话持久化 | 对话历史持久化，卡片重开时自动恢复 |
 | F3.5 | 会话状态指示 | 卡片上显示会话状态（空闲/运行中/有通知） |
-| F3.6 | 卡片切换 | 点击卡片切换到对应会话面板 |
+| F3.6 | 卡片切换 | 卡片胶囊上的「对话」按钮把主区域切到该卡片会话（对话页面本身不再有画布卡片标签页，见 §4.8 注） |
+| F3.7 | 生成中反馈 | 会话运行中时卡片亮起**流光**：一道斜切 25° 的光带从左扫到右（1.8s 一趟、匀速不停顿），画在独立子层 `.dsh-canvas-shimmer` 上盖住整卡——卡片自身不能 `overflow:hidden`（取材端口悬在卡外）；名字与预览照常显示（卡上留着的是最近一次真正存在的产物），光的往复就是「正在产出」的整句话，状态点脉冲、描边带 sunset 同步示意。回合结束流光即停，画布按会话域的变动重读产物摘要、卡面回显新产物；`prefers-reduced-motion` 下不扫动，光带停在正中作静态提亮 |
+| F3.8 | 双击全屏预览 | 双击卡片全屏展示产物内容，按形态从查看器注册表取组件：Markdown 渲染、图片/视频、HTML/Deck 沙箱 iframe、CSV/JSON 表格、其余纯文本；产物全文经 `card/read_artifact` 传输（文本 2MB 截断、二进制 16MB 内转 data URL，超限如实提示） |
+| F3.9 | 提示词回填 | ⤢ 全屏提示词弹窗（写提示词的**唯一**入口，见 F3.11）未编辑时显示用户对该卡片**最近一条自己发出的消息**（逐字保留换行）：来自 Host 读会话事件日志的通道 `card/read_last_prompt`，冷会话（本页从未打开过）照读；插件注入的取材上下文不算用户的话，不回填。用户键入的草稿优先于回填、按卡片各自保留 |
+| F3.10 | 操作胶囊收敛 | 选中卡片上方的动作胶囊只留**没有其它入口的动作**：对话、导出、从画布移除。「打开」删除——产物展示归双击全屏预览（F3.8），预览头部自带「在右栏打开」承接超限文件；「建立取材」删除——取材已由卡片两侧端口（拖拽连线）与控制带 ⊕ 菜单两个入口覆盖，胶囊不再放第二扇更弱的门 |
+| F3.11 | 卡片控制带 | 选中卡片下方是一条**控制带**而不是输入框：取材 chips 与 ⊕ 引入入口、⤢ 打开提示词弹窗、模型席位与状态点。卡片上**没有**输入框，也没有「还没有消息。」一类的状态文字——进度由卡片自己的流光（F3.7）说，产物由卡面预览（F3.9 的回显）说；发送入口只有 ⤢ 弹窗与「对话」胶囊两条 |
 
 ### 3.4 取材关系
 
 | 编号 | 功能点 | 说明 |
 |------|--------|------|
 | F4.1 | 取材关系 | 卡片之间唯一的连线类型：B 取材于 A。有向、可多重（一张卡片可有多个上游、也可被多张卡片取材） |
-| F4.2 | 取材建立 | 从卡片拖线到另一张卡片即建立，不需要选择类型，只需要定方向 |
-| F4.3 | 取材持久化 | 取材数据作为画布元数据独立存储 |
-| F4.4 | 取材可视化 | 统一线型展示（虚线 + breeze 色），箭头由上游指向下游 |
+| F4.2 | 取材建立 | **从锚点拖线**：按住卡片侧边的端口拖出去，拖拽中的线从**锚点（端口圆心）**起笔、终点跟随指针，样式为**细线、无箭头**——它还不是一条关系，只是一个还没落地的动作。松手落在另一张卡片的端口上即直接建立（只需定方向，不需要选类型）；落在空白处则就地弹出「新增节点」弹窗（F4.8） |
+| F4.3 | 取材持久化 | 取材数据作为画布元数据独立存储。存储键由两端卡片 id 转义拼成（卡片 id 是路径、带点带杠，而 per-record 介质的键必须落在 `[a-zA-Z0-9_-]+`，与卡片表共用同一套定宽 `_xxxx` 转义），不安全键会在写盘时被介质整体拒绝 |
+| F4.4 | 取材可视化 | 落定的取材线与**拖拽中的线同款**：1px 细线、实线、无箭头、breeze 色（F4.2）——线上没有第二个样子，选中卡片时只把不透明度提亮一档。**线不可交互**：整层 `pointer-events:none`，线只负责看，永不拦截跨越它的拖拽（解除取材走 agent 工具，不在画布上点线） |
 | F4.5 | 自动对账 | 产物中真实引用的素材自动生成取材边（HTML 里的 `src`、Markdown 里的图片链接等） |
 | F4.6 | 上游链排布 | 按取材链分层：上游在左、下游在右，同层对齐 |
 | F4.7 | 上游追溯 | 查看当前卡片的完整上游链（含间接上游），以及取材于它的下游卡片 |
+| F4.8 | 空白落笔建卡 | 拖线放到**空白处**不再直接作废：放手点就地弹出「新增节点」弹窗（文本 / 图片 / 矢量图片，与 dock 新增同一份菜单），点一种形态即**当场建卡并连线**——新卡片按放手点落位，让它的端口正好接住刚才的线头，于是细线不是「跳」到卡片上、而是就地变成取材边（两端回到卡片边框锚点）；弹层向屏上空间更大的那一侧张开，线头不被自己盖住。**点弹层以外的任何地方（含卡片）、按 Esc、或手松在画布之外，都取消这一笔**——不留卡片也不留线 |
 
 ### 3.5 取材作为输入通道
 
@@ -117,21 +140,23 @@
 
 ### 3.6 Agent 跨卡片工具集
 
+工具名一律用 `canvas_` 前缀 + 下划线分隔（如 `canvas_read_card`）：名字会作为 `tools[].name` 发给模型供应商，字符集被限死在 `^[a-zA-Z0-9_-]+$`，带 `.` 的名字会被直接 400 拒绝。§4.12 的第 1 项开放项由此关闭。
+
 | 工具名 | 功能 | 参数 |
 |--------|------|------|
-| `canvas.read_card` | 读取指定卡片产物摘要 | `cardId` |
-| `canvas.read_sources` | 读取当前卡片所有上游（取材来源）的产物摘要 | 无 |
-| `canvas.link_source` | 声明本卡片取材于另一张卡片 | `sourceCardId` |
-| `canvas.get_sources` | 获取当前卡片的取材链（直接上游、间接上游、下游） | 无 |
-| `canvas.inject_card` | 将指定卡片产物注入当前会话 | `cardId, mode: 'summary' \| 'full'` |
-| `canvas.read_board` | 读取画布当前座次与取材边 | 无 |
-| `canvas.arrange_on_board` | 按取材链语义化摆位 | `strategy` |
-| `canvas.create_on_board` | 创建便签或卡片 | `type, content` |
-| `canvas.organize_board` | 归纳收纳 | 无 |
-| `canvas.link_source_on_board` | 画取材线 | `from, to` |
-| `canvas.generate_image` | 生图 | `prompt, cardId` |
-| `canvas.export` | 导出产物 | `cardId, format` |
-| `canvas.publish` | 发布产物 | `cardId` |
+| `canvas_read_card` | 读取指定卡片产物摘要 | `cardId` |
+| `canvas_read_sources` | 读取当前卡片所有上游（取材来源）的产物摘要 | 无 |
+| `canvas_link_source` | 声明本卡片取材于另一张卡片 | `sourceCardId` |
+| `canvas_get_sources` | 获取当前卡片的取材链（直接上游、间接上游、下游） | 无 |
+| `canvas_inject_card` | 将指定卡片产物注入当前会话 | `cardId, mode: 'summary' \| 'full'` |
+| `canvas_read_board` | 读取画布当前座次与取材边 | 无 |
+| `canvas_arrange_on_board` | 按取材链语义化摆位 | `strategy` |
+| `canvas_create_on_board` | 创建便签或卡片 | `type, content` |
+| `canvas_organize_board` | 归纳收纳 | 无 |
+| `canvas_link_source_on_board` | 画取材线 | `from, to` |
+| `canvas_generate_image` | 生图 | `prompt, cardId` |
+| `canvas_export` | 导出产物 | `cardId, format` |
+| `canvas_publish` | 发布产物 | `cardId` |
 
 ### 3.7 Agent 在画布上“在场”
 
@@ -287,7 +312,7 @@ Harness 只认 `package.json`。两个关键字段把它变成插件：
   "version": "1.0.0",
   "main": "lib/index.js",
   "engines": { "dsh": ">=0.1.0-rc.6" },
-  "contributes": { "tools": ["canvas.read_card", "canvas.read_related", "..."], "skills": ["canvas-operations"] }
+  "contributes": { "tools": ["canvas_read_card", "canvas_read_sources", "..."], "skills": ["canvas-operations"] }
 }
 ```
 
@@ -390,6 +415,10 @@ it('host 与 client 共用同一份 descriptor 列表', () => {
 | `kind-registry` | 文件证据 → 形态认定（纯函数：扩展名 + 内容嗅探） | `src/core/` |
 | `source-store` | 取材边的增删查与自动对账，落在存储领域之上 | `src/core/` |
 | `session-manager` | `cardId → sessionId` 绑定、会话状态（空闲/运行中/有通知） | `src/core/` |
+| `model-routing` | 卡片会话的模型来源：新会话用部署默认 `agentOptions`，已记录的会话选择在开卡时交回控制器 | `src/core/` |
+| `agent-preset` | 卡片会话的**工具来源**：从部署的 agent preset 组装，否则该会话没有任何文件写入工具（见 §4.5「卡片会话的工具从哪里来」） | `src/core/` |
+| `session-log` | 输入框回填的取数侧：从会话事件日志读用户最近一条**自己发出的**消息（`source.kind === 'user'` 才算），冷会话经部署的 `ctx.sessionQuery.readSession` 读持久化（见 §3.3 F3.9） | `src/core/` |
+| `workspace` | 画布即工作区（F1.6）：经部署的 `ctx.workspaceRegistry` 把画布根目录登记为工作区（`create(root, title)` 幂等）并把卡片会话挂账（`attachSession`，要求会话头 cwd 规范化后等于工作区路径）；无名册部署整体空操作，失败只记日志 | `src/core/` |
 
 ```typescript
 // src/runtime.ts —— Host Remote 服务
@@ -417,7 +446,7 @@ export const inject = ['tools']
 
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
-    name: 'canvas.read_sources',
+    name: 'canvas_read_sources',
     description: '读取当前卡片所有上游（取材来源）产物的摘要。',
     parameters: { depth: { type: 'number' } },
     output: {
@@ -441,6 +470,22 @@ export function apply(ctx: Context): void {
 **按卡片收敛可见工具集**（会话隔离的落地手段）：工具注册表是分层的——`ctx.tools.register()` 可在调用方作用域内注册（作用域内工具遮蔽全局同名工具），`ctx.tools.restrict({ allow, deny })` 可为某个 agent 作用域裁剪全局工具，`ctx.tools.get(name, scope)` / `schemas(scope?)` 按作用域解析。因此「卡片 A 的会话拿不到卡片 B 的产物」不是靠 prompt 约定，而是靠**注册作用域 + 可见性过滤**。
 
 **卡片会话的创建路径**（重要约束）：`ctx.sessions.create()` 由**调用方 fiber 拥有**，fiber 销毁即会话下架；而会话日志的持久化写入器由 **agent 生命周期**在发布时挂上——**脱离 agent 生命周期创建的会话不落盘**。所以卡片会话必须经 agent 工厂（`prepare` + `enter` + `announce` 事务）创建，插件只负责记录 `cardId → sessionId` 与生命周期编排。
+
+**卡片会话的模型从哪里来**（本条是上一条的代价，落地于 `src/core/model-routing.ts`）：普通会话由 `dsh-api-session-controller` 组装，组装内容除 agent 本身还有两样——`AgentOptions.provider/model`（取自 `agentDefaultModel.currentSelection()`）与"本会话的模型选择"（控制器在 agent 作用域上装一个选择引用）。卡片会话由插件自己经工厂创建，**这两样都得自己补**：
+
+1. **`agentOptions` 必须给**：agent loop 用 `AgentOptions.provider/model` 构建每一次请求，缺失时直接报 `agent "<id>" has no provider/model`；同时部署的提示词段落（persona prefix）用 `{{provider}}`/`{{model}}` 取同一个字段，缺了连**系统提示词装配都过不去**（`prompt variable "{{model}}" has no value for this assembly`）。所以创建与恢复卡片 agent 时都带上部署默认模型。
+2. **本会话已记录的选择要装回去**：选择活在会话日志里（`modelSelection` 投影的 `pending`／`lastUsed`），而 agent 每次重开都是新的。控制器装选择的那个内部方法不是公开 API，但**触发它的调用是公开的**——`sessionController.selectModel`，与宿主输入框模型席位同一条 wire 调用。插件的做法：agent 一发布就把会话自己的选择交给这次调用（每个 agent 一次），于是"上次选的模型"跨插件重载仍然生效，而策略本身始终归控制器所有。
+3. **顺序即优先级**：全新会话用部署默认 → 有记录的选择覆盖它 → 会话存活期间的模型切换（输入框选的那次）覆盖以上两者（控制器的选择引用在装配与请求两处都生效）。
+
+**卡片会话的工具从哪里来**（与前一条同源，落地于 `src/core/agent-preset.ts`）：模型面向的**文件工具不在 Host 组装里**。`dsh-web-app` 的 patch 把基座的 `tool-fs`／`tool-bash`／`tool-pwsh`／`tool-jobs`／`tool-fs-search`／`skill-filesystem`／`tool-skill`／`tool-goal`／`plan-mode`／`tool-subagent*` 全部 disable，改由每个会话**挂载一个 agent preset** 来组装——这是 Web 面的既定分工，不是配置疏漏。
+
+卡片会话既然是普通会话，就必须同样走 preset，而它的产物**只能靠普通文件工具写出来**（它自己的提示词段落就是这么告诉它的）。不加入 preset 的后果是：会话只继承宿主组装，即本插件全局注册的 `canvas_*`，而模型被要求用 `write`／`edit` 编辑产物文件，每一次调用都返回 `unknown tool`，产物停在 absent，整个回合以"解释自己为什么交不出文件"收尾——从模型视角看这个失败极其莫名，因为它并不知道自己的工具表是怎么组装的。
+
+因此：
+
+1. **加入 preset 是卡片会话的成立条件，不是优化**。preset 在常驻作用域下组装一次，agent"加入"的方式是让它的作用域键 parent 到那个挂载点；**唯一受支持的调用点是 agent 工厂的 `setup(agentCtx)` 回调**——只有在那里组装尚未发布，preset 组装失败才能让整次创建回滚，而不是发布一个半组装的 agent。创建与恢复两条路径共用同一个 setup。
+2. **preset 在任何 agent 创建之前解析并预校验**（`resolve()` 取部署默认，`standingKeyFor()` 验组装）。失败**故意不被吞掉**：一个 preset 坏掉的部署同样给不了卡片会话写盘能力，诚实的答复是"那条配置坏了"，而不是开出一条默默干不了活的会话。
+3. **无 roster 的部署是 no-op 而非失败**：裸 harness、单测这类环境没有 `agentPresets` 服务，此时模型面向的工具行本来就留在宿主组装里、全局层人人可见，没有可加入的东西。服务按名结构读取（`ctx.get('agentPresets')`），同一份 bundle 同时跑在有 roster 与无 roster 两种部署下。
 
 **卡片元信息注入系统提示词**：用 `ctx.systemPrompt.section()` / `.context()` / `.variable()` 在卡片会话的作用域内注册段落与动态上下文（路径、形态、项目风格档案、上游取材来源摘要），作用域内条目遮蔽全局同名条目；一次性提醒走 `agent.inject({ content, source: { kind: 'plugin', plugin: 'dsh-canvas' } })`——它追加的是持久化上下文，下一次模型请求即可见，但**不会唤醒空闲 agent**。
 
@@ -559,8 +604,9 @@ export function apply(ctx: ClientContext): void {
 |------|------|------|
 | 停靠式画布（与对话同屏） | `rightbar.session` → `sidebar.right.pane.tab` | 每个会话一份的停靠面，可打开/分栏/浮出/关闭；最贴近「画布工作台」的形态 |
 | 全屏画布覆盖层 | `shell.overlay` | root 作用域覆盖层，适合沉浸式编辑与演示 |
-| 卡片会话面板 | `conversation.view` | `list` + `session` 作用域，会话视图环里的一个 tab，点卡片即切到该会话 |
 | canvas.* 的实时卡片 | `tool.call.toolview` | `keyed` 槽位，按 wire 工具名接管渲染，即 F7.2 的「代码直播框」 |
+
+> 注：`conversation.view`（会话视图环）**不再注册**——v1.8 起对话页面只保留宿主内置的「对话 / 轨迹」标签；卡片内容的展示走双击全屏预览（F3.8）与右栏产物 tab，`card-panel.tsx` 模块随之删除。
 
 注册范式（模板同款，注意先 `inject` 再 `register`）：
 
@@ -651,7 +697,7 @@ Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在�
 | 项 | 初版设想 | 校准后机制 | 影响 |
 |----|----------|------------|------|
 | 插件清单 | `.deepseek-plugin/plugin.json` 声明 `inject: [tools, storage, ui, session]` | Harness 只认 `package.json` 的 `dsh.bundle` / `dsh.client`；`cordis.patch.yml` 挂载；`dsh.plugin.json` 面向注册表；依赖注入用 Cordis 的 `export const inject` | 清单写法重写，**无「ui」这类注入项** |
-| Host 工具 | `ctx.tools.register('canvas.read_card', {...})` | `ctx.tools.register(defineTool({ name, description, parameters, output, execute }))`，需要 `inject: ['tools']` | 工具定义补 `output.schema` + `render` |
+| Host 工具 | `ctx.tools.register('canvas_read_card', {...})` | `ctx.tools.register(defineTool({ name, description, parameters, output, execute }))`，需要 `inject: ['tools']` | 工具定义补 `output.schema` + `render`；名字须落在 `^[a-zA-Z0-9_-]+$`（§3.6） |
 | 跨卡片调用 | Agent 直接持有 `canvas.getCard()` | 双端一律经 Typert Remote：契约 → Host manifest → Client 贡献 | 每个方法一条 descriptor，三处引用同一数组 |
 | 页面/预览 | 自造 `preview(path) => Component` | 右栏 tab 类型注册表 + 资源地址认领 | 形态注册表一半落到宿主已有席位 |
 | 取材存储 | 自建「画布元数据文件」 | `defineDomain` + `ctx.storageDomain.open()`，`domain/changed` 通知 | 不需要自造持久化与变更广播 |
@@ -663,7 +709,7 @@ Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在�
 
 ### 4.12 需要在动手前钉死的开放项
 
-1. **工具名是否允许 `.`**：`canvas.read_card` 这类名字需与宿主工具名的字符集约定核对；不允许则改用 `canvas_read_card`，但影响 §3.6 的工具清单与 `tool.call.toolview` 的 keys。
+1. ~~**工具名是否允许 `.`**~~ **已关闭（2026-09-17）**：实测把 `canvas.read_card` 这类名字发给模型供应商，请求被 400 拒绝——`Invalid 'tools[0].name': string does not match pattern. Expected a string that matches the pattern '^[a-zA-Z0-9_-]+$'`。宿主不对工具名做校验或改写，原样透传，所以字符集必须由插件自己守住。已全面改用 `canvas_read_card` 形式（§3.6 工具清单、`contract.ts` 的 `TOOL_NAMES`、`dsh.plugin.json` 的 `contributes.tools`、客户端 `tool.call.toolview` 的 keys 同步），并在 `tests/contract.spec.ts` 里用 `TOOL_NAME_PATTERN` 钉死。
 2. **多卡片会话的并发与归属**：每张卡片一个 agent 是否可行（数量上限、并发轮次、资源占用），以及画布面板切换会话时的 fiber 生命周期。
 3. **形态认定与 tab 认领的一致性**：Host 侧 `kind-registry` 的判定结果与 Client 侧 `patterns` / `canOpen` 必须给出一致答案，否则会出现「卡片显示为 A 形态、点开却是内置查看器」。
 4. **PPTX 一秒级导出**（F10.2）的落地者：这取决于宿主是否已有 PPTX 生成能力，插件不应自带重型渲染引擎。
@@ -682,7 +728,7 @@ Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在�
 | P0 | 卡片-会话绑定：创建卡片时经 agent 生命周期创建会话，关闭时保留 |
 | P0 | 文件驱动画布：卡片 ↔ 磁盘文件一一对应（经 `ctx.fs`，卡片 id 为工作区相对路径） |
 | P0 | 形态注册表：至少支持 `html-deck` 和 `site`（Host 认定 + Client tab 类型认领） |
-| P0 | `canvas.read_sources` 工具：Agent 能读取上游取材卡片产物摘要 |
+| P0 | `canvas_read_sources` 工具：Agent 能读取上游取材卡片产物摘要 |
 | P0 | 取材边：唯一连线类型，手动连线 + 自动对账两条来源都要通 |
 | P0 | 取材数据持久化：存入画布存储领域，`domain/changed` 驱动画布刷新 |
 | P1 | 直接编辑：双击改字经 `ctx.fs.writeText`（带版本守卫）写回源文件 |
@@ -724,6 +770,9 @@ Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在�
 | 文件访问 | 统一走 `ctx.fs` seam | 自带版本守卫、沙箱策略与写前 waterfall，直接可用 |
 | 画布承载席位 | 右栏停靠面为主、全屏覆盖层为辅 | Web Client 主区域属于对话，不自造席位 |
 | 产物预览 | 复用右栏 tab 类型注册表 | 按资源地址认领，`extension` 档压过内置查看器，卸载即恢复 |
+| 卡片会话的模型 | 自建 agent 时补 `agentOptions`，会话选择经 `sessionController.selectModel` 装回 | 卡片会话不走控制器的组装路径，缺前者装配即失败、缺后者跨重载丢选择；而选择策略本身仍归控制器 |
+| 模型选择器写在哪 | 会话级（宿主投影）为真源，节点类型记忆只作"新会话继承" | 会话一旦自己选过就以会话为准，跨节点类型的记忆不覆盖已用过的卡片 |
+| 卡片会话的工具 | 从部署的 agent preset 组装（`ctx.agentPresets.mount` 于工厂 `setup`） | Web 面已把面向模型的文件工具行从宿主组装移出、改由 preset 提供；自建会话不加入就一个写盘工具都没有，而产物只能靠普通文件工具写出来 |
 
 
 ## 七、产品边界
@@ -751,6 +800,23 @@ Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在�
 | v1.0 | — | 产品设计定稿：七大章节，功能点清单 F1.1–F10.4 |
 | v1.1 | 2026-09-15 | 按 `dsh-plugin-template` 与 Harness 子系统文档校准**第四章技术架构**：改为双端插件（Host Cordis + Client Web）；清单从 `.deepseek-plugin/plugin.json` 改为 `package.json` + `cordis.patch.yml` + `dsh.plugin.json`；工具注册改为 `defineTool` + `ctx.tools.register`；双端通信确立为「一份 wire 契约、三处引用」；关系存储落到存储领域（`defineDomain` + `domain/changed`）；形态注册表拆为 Host 认定 + Client 右栏 tab 类型认领；新增席位选择、文件读写与编辑回流、构建质量与安装三节；新增 §4.11 差异纪要与 §4.12 六个开放项；§五 补双端骨架与画布席位两条 P0 及技术前置条件；§六 补四条决策。 |
 | v1.2 | 2026-09-15 | **去掉关系线系统，只保留「取材」一种连线。** §1.1／§1.2／§1.3 改为「取材即数据」；§2.4「关系」改为「取材」（含手动连线与自动对账两个来源）；§3.4 由七条六类关系改为 F4.1–F4.7 的取材边清单（建立、持久化、可视化、自动对账、上游链排布、上游追溯）；§3.5 标题改为「取材作为输入通道」；§3.6 工具改名（`read_related`→`read_sources`、`link_card`→`link_source`、`get_relations`→`get_sources`、`relate_on_board`→`link_source_on_board`，去掉 `relationType` 参数）；§4 同步：`core/relation-store.ts`→`source-store.ts`、domain 的 `relations` 表→`sources` 表（`downstream`/`upstream`/`origin`）、`Relation` 接口→`Source`、契约示例改为 `dsh-canvas#card/read_sources`；§5 删除「先支持取材关系」与「六类关系完整支持」，改为取材边两条来源；§6 增「连线范畴」决策；§7 增「不做通用关系图谱」边界。 |
+| v1.3 | 2026-09-17 | 工具名去点号（实测供应商 400）：§3.6 表与字符集说明、`dsh.plugin.json` 的 `contributes.tools`、运行时提示消息改用 `TOOL_NAMES` 插值、`tests/contract.spec.ts` 钉死 `TOOL_NAME_PATTERN`；§4.12 第 1 项关闭。 |
+| v1.4 | 2026-09-17 | **补齐卡片会话的模型来源**（实测 `prompt variable "{{model}}" has no value` 导致的整轮失败）：§4.5 新增「卡片会话的模型从哪里来」三段与 `model-routing` 模块；§6 增两条决策。成因是卡片会话由插件自建、不走控制器的组装路径，因此缺 `AgentOptions.provider/model`（装配与请求都要）与已记录选择的重装。 |
+| v1.5 | 2026-09-17 | ①**补齐卡片会话的工具来源**（实测产物文件始终 absent、`write`/`edit`/`bash` 全返回 `unknown tool`）：§4.5 新增「卡片会话的工具从哪里来」三段与 `agent-preset` 模块。成因是 Web 面（`dsh-web-app`）把面向模型的工具行从宿主组装里 disable、改由每会话挂载 agent preset，而自建卡片会话未加入 preset，只继承全局 `canvas_*`。修法：`cardPreset()` 在创建前解析并预校验部署默认 preset，`composeCardAgent()` 在工厂 `setup(agentCtx)` 里 `mount`（创建与恢复同路），`meta.agentPreset` 记名；无 roster 部署整体 no-op。②新增 F3.7 生成中反馈（运行态卡片流光），信号取会话状态而非客户端乐观标志。 |
+| v1.6 | 2026-09-17 | **新增 F3.8 双击全屏预览**：§3.3 加 F3.8。新增 wire 通道 `card/read_artifact`（descriptor、`ArtifactView` 类型与 schema、`ArtifactIo.view()`、`CardRuntime.readArtifact`、typert 成员、Client face/bridge）与 `src/client/artifact-view.tsx`——`VIEWERS` 注册表按 kind 分派（markdown 渲染 / 图片 / Deck 沙箱 iframe `allow-scripts` 无同源 / CSV·JSON 表格 / 纯文本兜底），`renderMarkdown` 先整体转义再拼标签，`parseDelimited` 处理引号与 CRLF；`tests/artifact-view.spec.ts` 16 项钉住映射、转义、解析与 schema。 |
+| v1.7 | 2026-09-17 | **左栏管理区层级化（§3.1 加 F1.5）**：「新增画布」行更名「画布」（`canvas.manage.new`），升级为父节点；每个画布是其子行。父节点与子行用**同一枚板图标**（用户裁决：不加角标、不做层级肘线与尺寸差）；子行图形带 `dsh-canvas-glyph-child` 钩子类——纯把手不参与造型，styles.ts 在侧栏收成 rail 时以宿主发布的 `data-sidebar-collapsed` 为锚、`:has()` 反选整行隐藏（本表唯一的全局选择器，特此记名）。panellist 席位本身是平铺的行（无嵌套、不感知折叠），折叠隐藏只能落在插件自己的图形钩子 + 这条全局规则上。 |
+| v1.8 | 2026-09-17 | **对话页面去掉画布卡片标签页**：`index.tsx` 不再向 `conversation.view` 注册 `dsh-canvas:card`，删除 `card-panel.tsx` 与仅供它使用的三个文案键；对话页标签条只剩宿主内置「对话 / 轨迹」。卡片会话本身不受影响，内容展示走 F3.8 全屏预览与右栏产物 tab；`bridge.findCardBySession` 保留（右栏产物 tab 仍在用）。 |
+| v1.9 | 2026-09-17 | **输入框回填（§3.3 加 F3.9）**：未编辑时卡片提示词输入框显示用户对该卡片最近一条自己发出的消息。关键在「自己的」三个字：会话日志里 `user/message` 事件既承载用户输入也承载插件注入（`agent.inject` 的取材上下文），只以消息 `source` 区分，读侧只认 `source.kind === 'user'`。读的是**会话事件日志**而非浏览器实时投影——投影只对本页打开过的会话存在，而输入框恰恰要回答「这张我还没打开过的卡片上次让我干什么」。新增 `card/read_last_prompt` wire 通道（descriptor + `LastPrompt` 类型/schema、`src/core/session-log.ts` 的 `lastUserPromptOfEvents` + `sessionQueryFace`、`CardRuntime.readLastPrompt`、typert 成员、Client face/bridge）与 Client 侧按卡片的 `ComposerDraft`（edit / echo / 无）三层；`tests/session-log.spec.ts` 8 项钉住注入排除、逐字换行与坏行容错。 |
+| v1.10 | 2026-09-17 | **操作胶囊收敛（§3.3 加 F3.10）**：卡片动作胶囊去掉「打开」（`canvas.action.open`，键随按钮一并删除）与「建立取材」（`canvas.action.link`），`CardSelectionProps` 的 `onOpen`/`onLink` 与 Client 侧 `openCardArtifact` 随之退役；保留 对话 / 导出 / 从画布移除。能力不丢：产物打开归双击全屏预览，`ArtifactModal` 头部新增「在右栏打开」（`canvas.viewer.openTab`，原已存在的闲置键），超限文件「请在右栏打开」的提示从此有了着落；取材仍走卡片端口与输入框 ⊕ 菜单。 |
+| v1.11 | 2026-09-17 | **生成中反馈改版为骨架图闪光（F3.7 重写）**：运行态卡片由「conic 光弧绕边框 + 斜向扫光 + 预览压暗」改为整卡骨架——卡面落 `--dsh-slot` 占位底色，名字行由 `.dsh-canvas-card-name` 自己充任骨架条（文字转透明、条高 9px + 3.5px 上下外边距凑回 16px 行高，动画起落不引起回流，文本留在 DOM 供读屏），预览由 JSX 换成固定四根 `.dsh-canvas-skel`（条数不随产物内容变，免得被读成「内容的一部分」）；闪光是 400% 宽的 gradient（`--dsh-skel-fill`）以 `dsh-canvas-skeleton` 1.6s 匀速走位，名字条与占位条同拍。撤掉 `@property --dsh-flow-angle`、`dsh-canvas-flow`、`dsh-canvas-sheen` 与两个伪元素；`prefers-reduced-motion` 下条子在、闪光停。端到端实测（`/tmp/pptr/skeleton.js`）：running 态 5 条 `dsh-canvas-skeleton` 动画同时在跑，名字条 9px、四根占位条 88/70/82/46%。 |
+| v1.19 | 2026-09-18 | **流光反馈与控制带（F3.7 重写 + 新增 F3.11，F3.9 改挂弹窗）**：①卡片监听会话状态（`useSessions`，唯一真源），用户发出消息、回合进入 running 即亮起**流光**——`skewX(-25deg)` 的光带从 -120% 扫到 +120%，1.8s 匀速往复；画在独立子层 `.dsh-canvas-shimmer` 上（卡片不能 `overflow:hidden`，端口悬在卡外），名字与预览照常显示。回合结束流光即停，画布按会话域变动重读产物摘要，**卡面回显最新产物**（端到端实测：预览 旧产物→流光验证完成，磁盘同步）。`prefers-reduced-motion` 下光带停在正中作静态提亮。骨架条的 `.dsh-canvas-skel`、`--dsh-skel*` 变量与 `dsh-canvas-skeleton` 关键帧全部退役。②选中卡片下方**去掉提示词输入框**与「还没有消息。」状态文字（`canvas.panel.none` 键删除），只留取材 chips + ⊕、⤢、模型席位、状态点；发送入口收敛为 ⤢ 全屏弹窗（草稿与回填逻辑原样保留）与「对话」胶囊。连带清理：`cardSession` 键控会话钩子与 `latestLine` 的读侧只剩无人使用，`CanvasInject.keyedHooks`、`SessionFeed`、`canvas.action` 外的整套接线（index/canvas-tab/canvas-panels）一并退役；`removal` 状态上一版已收敛，这次顺带删掉无消费者的 `.dsh-canvas-sendbtn` 与 `.dsh-canvas-overlay-line` 样式。端到端实测（`.workbuddy/e2e/shimmer.js`，真发一条消息跑完整回合）：控制带 textarea=0、无「还没有消息」、模型与 ⤢ 在；发送后 ≤0.3s 内 state=running、`dsh-canvas-shimmer` 1.8s linear 在跑；结束后流光层为 0、state=notified、预览回显新产物；无页面错误。注意测试卡要先选中**目标卡**（v1 的脚本选中了画布上第一张卡，读到的是别的卡的 missing 态）。 |
+| v1.18 | 2026-09-18 | **取材线收敛为一副样子（§3.4 F4.4 重写）**：两个节点之间的连线改成与**拖拽中**完全同款——1px 细线、实线、无箭头、breeze 色，虚线与箭头一并退场；选中卡片时只把不透明度从 .85 提到 1（`is-active`），线型不变。**去掉点线的交互**：`onPick` 与 16px 命中带 `.dsh-canvas-edge-hit` 删除，线层本就 `pointer-events:none`，线只负责看、永不拦截跨越它的拖拽；解除取材走 agent 工具 `canvas_unlink_source`，画布上不再有点线入口（客户端 `removal` 状态随之收敛为仅卡片一种）。`is-pending` 类保留在拖拽线上但不挂样式，只作工具标记。端到端实测：两条落定线 computed style 与拖拽线逐项相同（width 1px / dash none / opacity .85 / marker null），线中点 `elementsFromPoint` 命中的是画布表面而非连线层，点线后边数与顶栏均无变化。 |
+| v1.17 | 2026-09-18 | **修复拖线闪动**：取消一次拖拽后再次从锚点按下（未动鼠标）时，pending 线先按**上次的终点**画一帧再跳回锚点——`pointer` 状态跨拖拽复用，`onConnectStart` 只重置了「从哪连」没重置「连到哪」。修法：签名扩为 `(cardId, side, at)`，按下即把指针钉到本次锚点（`clientToCanvas` 抽出，与 `setLinkFrom` 同帧批处理）。回归实测：按下不动时 pending 终点-起点仅差控制点圆整的 2px，移动后照常跟随。 |
+| v1.16 | 2026-09-18 | **锚点拖线交互改版（§3.4 F4.2 重写 + 新增 F4.8）**：①拖拽中的线改从**锚点（端口圆心，卡片边框外 20px——与 styles.ts 的端口悬出距离是一对）**起笔、终点就是指针本身，样式**细线、无箭头**（`.dsh-canvas-edge.is-pending`：1px 实线）——它还不是一条关系，只是一个没落地的动作；「拉一根细线」与「有一条取材」由此一眼可辨。②放到**空白处**不再直接作废：就地弹出「新增节点」弹窗（与 dock 同一份 DOCK_SPECS），点一种形态即建卡 + 连线——`seatAtAnchor` 按放手点反推卡位，让新卡片的端口正好接住线头，落成后连线两端回到卡片边框锚点（F4.4 的虚线 + 箭头）；弹窗钉在画布坐标上随画布平移、外层 `scale(1/z)` 抵消取景缩放，并按放手时屏上空间向更大的一侧张开。③取消路径：点弹层以外任何地方（捕获阶段收，卡片与端口的 `stopPropagation` 挡不住它）、Esc、手松在画布之外，都不留卡片也不留线；弹窗开着时细线钉在放手点上，让人看见这一笔将连到哪里。④**同场修掉一个既有缺陷**：`sourceIdOf` 产 `a<-b` 直作 per-record 存储键，被介质的路径安全校验（`^[a-zA-Z0-9_-]+$`）整笔拒绝——**手动取材从未落过盘**；卡片表早有 `encodeSegment` 定宽转义，收编进 `core/ids.ts` 后取材键改用同一套（`a__b`），记录体仍带明文两端、键不需要反解。`tests/source-edges.spec.ts` 13 项钉住锚点几何、落位反推、细线路径与键安全。端到端实测（`/tmp/pptr/drop.js`）：pending 起点=锚点 (1396,175)、终点=指针、1px 无箭头；放手弹层 3 行 + 提示、贴近右缘自动左翻；点「图片」后新卡座位与期望逐位一致 (1131,248)、边数 2→3 且新边从卡片锚点 (1376,175) 出发；再拖点空白后卡片数与边数纹丝不动；从 in 锚点拖出落卡在左、边方向新卡→本卡；落盘文件 `untitled-3_002epng__untitled-2_002emd.json` 等均为路径安全键。 |
+| v1.15 | 2026-09-18 | **dock 与快捷键弹层打磨（F1.7 修订）**：① dock 的**新增按钮移到最左**，从幽灵钮改为**实心圆 + 画布强调色**（sunset，与卡片上 `data-primary` 胶囊同源；26px，hover 提亮、active 压暗），快捷键按钮退回幽灵钮居右——dock 由此有了一枚明确的主入口；② 快捷键 Popover 改**一个键一行**：原 W A S D 挤一行「上 / 左 / 下 / 右」、Q E 挤一行，读的时候要在脑子里拆开，现在 10 行各配一句自己的话（Space 行的「拖动」从键帽挪进说明句），键帽列钉 86px 下限让右列对齐（英文长键名宁可独行不齐也不截字）。实现：`SHORTCUT_SHEET` 一行一枚键帽（新键 canvas.keys.up/left/down/right/zoomOut/zoomIn，退 canvas.keys.move/zoom 与 canvas.key.drag），测试加「无一行并排两枚键帽」与「行文案互异（React key）」两条。中途走错过一次：先改到了侧栏画布区的 header（已还原——标题在左、幽灵新建钮在右不变）。 |
+| v1.14 | 2026-09-18 | **画布交互改版（§3.1 加 F1.7）**：指针默认是**选择箭头**——此前表面 cursor:grab、空白一按即开始平移，与「点空白取消选择」两个语义挤在一次按压里；现在空白一按只取消选择，平移改按住**空格**拖动，且在捕获阶段拦下按压（卡片自己的拖动收不到它），于是「空格 + 拖」在卡片上方也成立。键盘：W A S D 上左下右、Q / E 缩放（`src/client/shortcuts.ts` 的 `shortcutOf`，PAN_STEP 72px、ZOOM_STEP 1.12，按键重复照收）；监听挂 window，因此要自己守门——`isTypingTarget` 排除一切吃文字的控件、修饰键组合不碰、同屏多块画布（右栏标签页 + 主面板）由模块级名册 + lastTouched 判归属。键盘没有抬手可提交，视口改为**停顿落盘**（400ms 计时重置）；缩放按钮同路。dock 在「新增」旁加键盘按钮，点开快捷键 Popover——表体 `SHORTCUT_SHEET` 与分派共用同一份声明，印出来的一定按得动。实测：空白拖不动、空格拖平移 120/70 且松开复位、卡片上空格拖卡片画布坐标不动、W/D 精确 ±72、E/Q 倍率精确 1.12/回退、输入框打 wasd 视口不动而文字进框、弹层 6 行齐备且 Esc/点空白关闭、刷新后视口保持 111%。 |
+| v1.13 | 2026-09-18 | **左栏画布区改版为包裹（§3.1 F1.5 重写）**：`sidebar.panellist` 是宿主渲染的**按钮列表**，行里放不下第二枚按钮、更放不下列表子树，画布一多就是按钮墙。改法：只注册**一行**（画布区自己，id `dsh-canvas:canvas:new`，其 `main` 同名面板就是新建流程），由 `src/client/canvas-nav.tsx` 的席位组件把包裹经 `createPortal` 挂进宿主的面板列表——容器定位不靠类名（打包哈希），从自己那枚图形的钩子类 `dsh-canvas-nav-anchor` 上溯最近的 `<nav>`，挂 MutationObserver 在容器重建时重新定位。展开：header（标题 + 右侧加号新建按钮）+ 画布列表（选中态读宿主全局标准席位 `usePanelInfo` 的 `activePanelId`）；收起：宿主 `data-sidebar-collapsed` 一发布，包裹 `display:none`、宿主那一行还回来——图标即新建入口（styles.ts 仅有的两条全局选择器）。画布列表数据源抽为 `src/client/project-catalog.ts`（快照 + 订阅，喂 `useSyncExternalStore`）。端到端实测：展开态 header/加号/三行画布齐备且宿主行隐藏；点画布行主区域切换且行高亮；收起态包裹隐藏、图标可点。实现当日补一刀：实测发现点 header 标题也会触发新建——席位组件渲染在宿主新建行的按钮里，React Portal 的合成事件沿 **React 树**（而非 DOM）冒泡，点包裹任何处都被宿主行当成点了自己。包裹根部 `stopPropagation`（click 与 dblclick）拦掉；最终行为：header 区域不新增、加号才新增、收起态 rail 图标新增，包裹内按钮自身 onClick 不受影响；`tests/project-catalog.spec.ts` 7 项。 |
+| v1.12 | 2026-09-17 | **画布即工作区（§3.1 加 F1.6）**：画布本是文件夹，卡片会话也以画布根为 cwd，但宿主侧栏按**工作区账目 + 会话头 cwd 双重匹配**分组（`@deepseek-ai/dsh-workspace`），只缺账目这一半，于是所有卡片会话都落在「未分组」。修法：新增 `src/core/workspace.ts` 承载 `claimCanvasWorkspace`——①`createProject` 时以 `workspaceRegistry.create(root, 画布名)` 登记工作区（幂等，手动加过的同名目录不改名），并把已绑会话一并 `attachSession`（重开旧画布即从「未分组」搬回）；②`card/openSession` 建会话/复用会话后即挂账（进程内按 `路径\u0000会话` 记忆，重开卡片免费）。全链路尽力而为：`ctx.workspaceRegistry` 不在 inject 列表（裸 harness 无名册）→ 整体空操作；注册/挂账失败（cwd 规范化不等等）只记日志不上抛。`tests/workspace.spec.ts` 7 项钉住登记参数、跳过空绑定、进程内幂等与两级静默降级。端到端实测：对既有 E2E 画布重跑 `canvas/createProject` → `storages/workspace.json` 出现 `提示词回填 E2E` 行并立即收编旧会话；`card/openSession` 新会话即时入账；侧栏截图确认对话在画布名下、「未分组」清空。 |
 
 **文档结束。**
 

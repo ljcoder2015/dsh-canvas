@@ -37,10 +37,20 @@ export function cardStateOf(summary: SessionSummary | undefined, present: boolea
   return 'idle'
 }
 
+/**
+ * Structural view of the session list, for the same reason as
+ * {@link SnapshotShape}: the fields the type calls required are still fields
+ * the store can hand over before it has assembled them.
+ */
+interface ListShape {
+  readonly ids?: unknown
+  readonly byId?: Record<string, SessionSummary | undefined>
+}
+
 /** The session row bound to a card, or `undefined` before the session exists. */
 export function summaryOf(state: SessionListState, sessionId: string): SessionSummary | undefined {
   if (sessionId === '') return undefined
-  return state.byId[sessionId]
+  return (state as ListShape).byId?.[sessionId]
 }
 
 /**
@@ -56,10 +66,12 @@ export function summaryOf(state: SessionListState, sessionId: string): SessionSu
  * @returns an integer that changes whenever the list meaningfully changed.
  */
 export function activityOf(state: SessionListState): number {
+  const view = state as ListShape
+  const ids: readonly string[] = Array.isArray(view.ids) ? (view.ids as readonly string[]) : []
   let running = 0
   let latest = 0
-  for (const id of state.ids) {
-    const row = state.byId[id]
+  for (const id of ids) {
+    const row = view.byId?.[id]
     if (row === undefined) continue
     if (row.running) running += 1
     if (row.updatedAt > latest) latest = row.updatedAt
@@ -73,8 +85,45 @@ interface TextBearing {
   readonly name?: unknown
 }
 
-/** Pull the readable text out of one block list, in order. */
-function textOf(blocks: readonly unknown[]): string {
+/**
+ * Structural view of one conversation node: only the fields this module reads.
+ *
+ * Every field is `unknown` on purpose. The node union is the framework's, and
+ * a node built by a view target this module does not know is still a node the
+ * store will hand over; naming a narrower shape here would only move the lie
+ * from the checker to the runtime.
+ */
+interface NodeShape {
+  readonly kind?: unknown
+  readonly content?: unknown
+  readonly blocks?: unknown
+}
+
+/**
+ * Structural view of a conversation snapshot.
+ *
+ * The board is handed snapshots the store may not have finished assembling: a
+ * session row can be listed while its window is still `cold`/`loading`, and
+ * the `nodes` list the overlay reads is documented as a *legacy compatibility
+ * mirror* that exists only once the conversation has been assembled. Reading
+ * through this shape is what keeps a half-built snapshot from throwing — a
+ * selector that throws takes down the whole slot hosting the board, which is
+ * how a cold session took the canvas page with it.
+ */
+interface SnapshotShape {
+  readonly nodes?: unknown
+  readonly partial?: unknown
+}
+
+/**
+ * Pull the readable text out of one block list, in order.
+ *
+ * Tolerates an absent or malformed list: the caller is reading a store that
+ * may hand over a partially assembled snapshot, and "no blocks" is a normal
+ * state, not an error.
+ */
+function textOf(blocks: unknown): string {
+  if (!Array.isArray(blocks)) return ''
   const parts: string[] = []
   for (const block of blocks) {
     const candidate = block as TextBearing
@@ -99,12 +148,18 @@ export interface LatestLine {
  * noise: the overlay is one line, and a tool name is not something the user
  * said. The caller decides what to show when nobody has spoken yet.
  *
+ * Every read here is defensive. A snapshot with no node list (window still
+ * cold, or a session whose conversation has not been assembled yet) reads as
+ * "nobody has spoken", which is exactly what the caller draws — the overlay
+ * would rather show its empty state than crash the board it sits on.
+ *
  * @param snapshot - one session's conversation snapshot.
  * @returns the speaker and the line.
  */
 export function latestLine(snapshot: ConversationSnapshot | undefined): LatestLine {
   if (snapshot === undefined) return { from: '', text: '' }
-  const nodes = snapshot.nodes
+  const view = snapshot as SnapshotShape
+  const nodes: readonly NodeShape[] = Array.isArray(view.nodes) ? (view.nodes as readonly NodeShape[]) : []
 
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
     const node = nodes[index]
@@ -121,9 +176,9 @@ export function latestLine(snapshot: ConversationSnapshot | undefined): LatestLi
     }
   }
 
-  const partial = snapshot.partial
-  if (partial !== null) {
-    const text = textOf(partial.blocks)
+  const partial = view.partial
+  if (partial !== null && partial !== undefined) {
+    const text = textOf((partial as { blocks?: unknown }).blocks)
     if (text !== '') return { from: 'assistant', text }
   }
 

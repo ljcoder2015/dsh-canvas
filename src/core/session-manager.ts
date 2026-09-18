@@ -15,6 +15,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CardId, ProjectId, SessionId } from '../types.ts'
+import { encodeSegment } from './ids.ts'
 
 /** One live card session. */
 export interface CardSession {
@@ -30,9 +31,30 @@ export interface CardSession {
 /** Creates one card's agent. Injected so this manager stays container-free. */
 export type CardSessionFactory = (ownerCtx: Context) => Promise<{ agent: Agent; dispose: () => Promise<void> }>
 
-/** Storage key of a card inside its project. */
+/**
+ * Storage key of a card inside its project.
+ *
+ * Per-record storage turns keys into file-path segments, so a key may only
+ * hold `[a-zA-Z0-9_-]` — the card id (a relative path with `/` and `.`) is
+ * hex-escaped, `_` itself included, which keeps the mapping reversible
+ * without a lookup table.
+ */
 export function cardKeyOf(project: ProjectId, cardId: CardId): string {
-  return `${project}\u0000${cardId}`
+  return `${project}-${encodeSegment(cardId)}`
+}
+
+/**
+ * Card id of a key stored under one known project (reverse of
+ * {@link cardKeyOf}). The caller always has the project at hand — it comes
+ * from the record's own `project` field, so the key needs no delimiter.
+ */
+export function cardIdOfKey(project: ProjectId, key: string): CardId {
+  return decodeSegment(key.slice(project.length + 1))
+}
+
+/** Undo {@link encodeSegment}; fixed-width escapes cannot be ambiguous. */
+function decodeSegment(segment: string): string {
+  return segment.replace(/_([0-9a-f]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
 }
 
 /**

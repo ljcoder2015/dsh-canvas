@@ -1,9 +1,9 @@
 /**
- * dsh-canvas — the code live view for `canvas.*` tool calls (F7.2).
+ * dsh-canvas — the code live view for `canvas_*` tool calls (F7.2).
  *
  * While a card's agent works, its board calls go past the user as ordinary tool
  * cards. The product doc gives the canvas its own rendering of those calls on
- * the keyed `tool.call.toolview` seat, so a `canvas.arrange_on_board` shows what
+ * the keyed `tool.call.toolview` seat, so a `canvas_arrange_on_board` shows what
  * it is moving instead of a JSON blob.
  *
  * One honest caveat, stated where it matters: the seat's owner is not a
@@ -119,7 +119,7 @@ export function CanvasToolView(props: CanvasToolViewProps) {
 }
 
 /**
- * Take over the rendering of every `canvas.*` tool call.
+ * Take over the rendering of every `canvas_*` tool call.
  *
  * One keyed entry per tool name, so a board call renders as a canvas card and
  * every other tool keeps whatever the product already gives it.

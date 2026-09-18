@@ -13,30 +13,42 @@ import type { InvocationDescriptor } from '@deepseek-ai/dsh-typert-protocol'
 /**
  * Model-facing tool names, declared once.
  *
- * Harness tool names are free-form: the PTC SDK generator quotes any name that
- * is not a valid identifier (`tools["canvas.read_card"](args)`), so the dotted
- * names from the product doc's §3.6 are legal. They are kept here rather than
- * inline at each registration so the tool registry, the client's
- * `tool.call.toolview` slots and the doc's tool table stay one edit apart.
+ * The charset is not ours to choose: every name travels to the model provider
+ * as `tools[].name`, and the wire pattern is `^[a-zA-Z0-9_-]+$` — a dotted
+ * `canvas.read_card` is refused with a 400 before the model ever sees it
+ * (verified against the live endpoint, 2026-09-17). So the namespace separator
+ * is an underscore here, not the doc's dot; the harness itself does not
+ * constrain or rewrite the name.
+ *
+ * They are kept in one table rather than inline at each registration so the
+ * tool registry, the client's `tool.call.toolview` slots and the doc's tool
+ * table stay one edit apart.
  */
 export const TOOL_NAMES = {
-  readCard: 'canvas.read_card',
-  readSources: 'canvas.read_sources',
-  linkSource: 'canvas.link_source',
-  getSources: 'canvas.get_sources',
-  injectCard: 'canvas.inject_card',
-  readBoard: 'canvas.read_board',
-  arrangeOnBoard: 'canvas.arrange_on_board',
-  createOnBoard: 'canvas.create_on_board',
-  organizeBoard: 'canvas.organize_board',
-  linkSourceOnBoard: 'canvas.link_source_on_board',
-  generateImage: 'canvas.generate_image',
-  export: 'canvas.export',
-  publish: 'canvas.publish',
+  readCard: 'canvas_read_card',
+  readSources: 'canvas_read_sources',
+  linkSource: 'canvas_link_source',
+  getSources: 'canvas_get_sources',
+  injectCard: 'canvas_inject_card',
+  readBoard: 'canvas_read_board',
+  arrangeOnBoard: 'canvas_arrange_on_board',
+  createOnBoard: 'canvas_create_on_board',
+  organizeBoard: 'canvas_organize_board',
+  linkSourceOnBoard: 'canvas_link_source_on_board',
+  generateImage: 'canvas_generate_image',
+  export: 'canvas_export',
+  publish: 'canvas_publish',
 } as const
 
 /** Every model-facing tool name this plugin registers. */
 export const TOOL_NAME_LIST: readonly string[] = Object.values(TOOL_NAMES)
+
+/**
+ * The charset a tool name must satisfy to survive the provider's request
+ * validation. Kept next to the table it constrains so a future rename that
+ * reintroduces a `.` fails a test instead of a live request.
+ */
+export const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/
 
 /** Identifiers that address one canvas project. */
 export const projectIdSchema = z.string().trim().min(1).max(120)
@@ -46,8 +58,12 @@ export const cardIdSchema = z.string().trim().min(1).max(400)
 export const sourceIdSchema = z.string().trim().min(1).max(500)
 /** Storage identity of one shared note. */
 export const noteIdSchema = z.string().trim().min(1).max(200)
-/** Absolute directory of a project root, or a directory inside it. */
-export const directoryPathSchema = z.string().trim().min(1).max(1024)
+/** Absolute directory of a project root, or a directory inside it.
+ *
+ * An empty string is the picker's "host decides" marker: both the folder
+ * listing and the project binding resolve it to the configured picker root.
+ */
+export const directoryPathSchema = z.string().trim().max(1024)
 
 /** One canvas coordinate pair. */
 export const pointSchema = z.object({ x: z.number(), y: z.number() }).readonly()
@@ -123,6 +139,19 @@ export const cardSummarySchema = z
     updatedAt: z.number(),
   })
   .readonly()
+/** One artifact's fullscreen view payload (F3.8). */
+export const artifactViewSchema = z
+  .object({
+    cardId: cardIdSchema,
+    kind: z.string(),
+    present: z.boolean(),
+    text: z.string().max(2_000_000),
+    dataUrl: z.string().max(40_000_000),
+    truncated: z.boolean(),
+    bytes: z.number(),
+    updatedAt: z.number(),
+  })
+  .readonly()
 /** Resolved upstream/downstream neighborhood of one card (F4.7). */
 export const sourceChainSchema = z
   .object({
@@ -187,6 +216,10 @@ export const pendingIntentSchema = z
 export const sessionBindingSchema = z
   .object({ cardId: cardIdSchema, sessionId: z.string(), created: z.boolean() })
   .readonly()
+/** The user's own latest message to a card's session, verbatim (F3.9). */
+export const lastPromptSchema = z
+  .object({ text: z.string().max(2_000_000), time: z.number() })
+  .readonly()
 
 /** Constrain an artifact digest to a canonical, wire-safe object. */
 const json = (name: string, wire: string, typeSymbol: string, schema: z.ZodType) => ({
@@ -210,7 +243,7 @@ const P = {
   sourceId: json('sourceId', 'sourceId', 'dsh-canvas#SourceId', sourceIdSchema),
   noteId: json('noteId', 'noteId', 'dsh-canvas#NoteId', noteIdSchema),
   path: json('path', 'path', 'dsh-canvas#DirectoryPath', directoryPathSchema),
-  name: json('name', 'name', 'dsh-canvas#ProjectName', z.string().trim().min(1).max(120)),
+  name: json('name', 'name', 'dsh-canvas#ProjectName', z.string().trim().max(120)),
   content: json('content', 'content', 'dsh-canvas#FileContent', z.string().max(2_000_000)),
   text: json('text', 'text', 'dsh-canvas#NoteText', z.string().trim().min(1).max(2_000)),
   mode: json('mode', 'mode', 'dsh-canvas#InjectionMode', z.enum(['summary', 'full'])),
@@ -227,6 +260,7 @@ const P = {
   ),
   intentPayload: json('payload', 'payload', 'dsh-canvas#IntentPayload', z.string().max(200_000)),
   intentImage: json('image', 'image', 'dsh-canvas#IntentImage', z.string().max(4_000_000)),
+  prompt: json('prompt', 'prompt', 'dsh-canvas#PromptText', z.string().trim().min(1).max(32_000)),
   version: json('version', 'version', 'dsh-canvas#FsVersion', z.string().min(1).max(200)),
   style: json('style', 'style', 'dsh-canvas#StyleProfile', styleProfileSchema),
 }
@@ -246,9 +280,11 @@ const R = {
   style: resultOf('dsh-canvas#StyleProfile', styleProfileSchema),
   summary: resultOf('dsh-canvas#CardSummary', cardSummarySchema),
   summaryList: resultOf('dsh-canvas#CardSummaryList', z.array(cardSummarySchema)),
+  artifact: resultOf('dsh-canvas#ArtifactView', artifactViewSchema),
   write: resultOf('dsh-canvas#WriteResult', writeResultSchema),
   export: resultOf('dsh-canvas#ExportResult', exportResultSchema),
   session: resultOf('dsh-canvas#SessionBinding', sessionBindingSchema),
+  lastPrompt: resultOf('dsh-canvas#LastPrompt', lastPromptSchema),
   pending: resultOf('dsh-canvas#PendingIntentList', z.array(pendingIntentSchema)),
   boolean: resultOf('dsh-canvas#Boolean', z.boolean()),
   count: resultOf('dsh-canvas#Count', z.number()),
@@ -349,6 +385,10 @@ export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.summary,
   },
   {
+    id: 'dsh-canvas#card/read_artifact', service: 'card', namespace: 'card', method: 'readArtifact',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.artifact,
+  },
+  {
     id: 'dsh-canvas#card/read_sources', service: 'card', namespace: 'card', method: 'readSources',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.summaryList,
   },
@@ -387,6 +427,14 @@ export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
   {
     id: 'dsh-canvas#card/publish_card', service: 'card', namespace: 'card', method: 'publishCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.export,
+  },
+  {
+    id: 'dsh-canvas#card/send_message', service: 'card', namespace: 'card', method: 'sendMessage',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.prompt], cancellation: signal, result: R.session,
+  },
+  {
+    id: 'dsh-canvas#card/read_last_prompt', service: 'card', namespace: 'card', method: 'readLastPrompt',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.lastPrompt,
   },
 ]
 

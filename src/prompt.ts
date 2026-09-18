@@ -48,7 +48,7 @@ const UPSTREAM_CONTEXT_ORDER = 130
  * Register the canvas tool guidance globally.
  *
  * Deliberately states the cards-only precondition in the tool's own words
- * rather than leaving it implicit: `canvas.*` resolves *which card is asking*
+ * rather than leaving it implicit: `canvas_*` resolves *which card is asking*
  * from the calling agent, so the same call outside a card session is refused
  * on purpose.
  */
@@ -137,7 +137,7 @@ export function installCardScope(agentCtx: Context, input: CardScopeInput): void
 export function upstreamChangedMessage(upstream: CardId, downstream: CardId, digest: string): UserMessage {
   const body =
     digest === ''
-      ? `Material changed: canvas card \`${upstream}\` was rewritten. Call \`canvas.read_card\` if you need its new content before continuing.`
+      ? `Material changed: canvas card \`${upstream}\` was rewritten. Call \`${TOOL_NAMES.readCard}\` if you need its new content before continuing.`
       : `Material changed: canvas card \`${upstream}\` was rewritten, and \`${downstream}\` is declared to source from it. Its new digest:\n\n${digest}`
   return createUserMessage({
     content: [{ type: 'text', text: body }],
@@ -164,7 +164,7 @@ function renderMaterialEntry(summary: CardSummary): string {
 /**
  * Render the material block from upstream digests (F5.2).
  *
- * Used by the pull path — `canvas.inject_card` in `summary` mode — where the
+ * Used by the pull path — `canvas_inject_card` in `summary` mode — where the
  * digests are read at the moment of injection and are therefore current.
  *
  * Deliberately *not* wired into the per-turn material context in
@@ -173,7 +173,7 @@ function renderMaterialEntry(summary: CardSummary): string {
  * invalidates such a cache — a card whose artifact is rewritten by an ordinary
  * file edit would keep feeding the prompt a stale digest. The context carries
  * the chain (which cards, which kinds) and points the model at
- * `canvas.read_sources`, which reads through and cannot go stale.
+ * `canvas_read_sources`, which reads through and cannot go stale.
  *
  * Empty when the card sources from nothing — an empty contribution is dropped
  * rather than leaving a heading with no content.
@@ -203,5 +203,21 @@ export function injectionMessage(source: CardSummary, mode: 'summary' | 'full', 
       form: 'notice',
       summary: boundContextSummary(`取材 ${source.cardId}`),
     },
+  })
+}
+
+/**
+ * Build the user's own prompt, typed into a card's composer on the board.
+ *
+ * The source is `kind: 'user'` — the words are the user's, not the plugin's —
+ * which is the same attribution the harness's own conversation composer uses.
+ * Delivery is the caller's business: {@link userPromptMessage} is handed to
+ * `agent.followup`, so a prompt typed while the agent runs queues as the next
+ * turn instead of racing the active one.
+ */
+export function userPromptMessage(prompt: string): UserMessage {
+  return createUserMessage({
+    content: [{ type: 'text', text: prompt }],
+    source: { kind: 'user' },
   })
 }

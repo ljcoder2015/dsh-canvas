@@ -33,8 +33,9 @@ import type { CanvasDomain } from './domain.ts'
 import { ArtifactIo } from './core/artifact-io.ts'
 import { arrangeSeats, nextFreeSeat, type SeatInput } from './core/board.ts'
 import { projectIdOf } from './core/ids.ts'
-import { cardKeyOf, SessionManager } from './core/session-manager.ts'
+import { cardIdOfKey, cardKeyOf, SessionManager } from './core/session-manager.ts'
 import { kindLabel } from './core/kind-registry.ts'
+import { claimCanvasWorkspace } from './core/workspace.ts'
 import {
   reconcileEdges,
   referencedPaths,
@@ -128,8 +129,10 @@ export class CanvasRuntime extends TypertRemoteService {
   @Remote
   async createProject(name: string, path: string, signal?: AbortSignal): Promise<{ project: Project; discovered: number }> {
     signal?.throwIfAborted()
-    const scan = await this.deps.io.scanProject(path, signal)
-    const root = await this.deps.io.displayPathOf(path, '.', signal).catch(() => path)
+    // The picker's empty path means "start where the configured root starts".
+    const directory = path.trim() === '' ? this.deps.pickerRoot : path
+    const scan = await this.deps.io.scanProject(directory, signal)
+    const root = await this.deps.io.displayPathOf(directory, '.', signal).catch(() => directory)
     const id = projectIdOf(root)
 
     const existing = this.projects.get(id)
@@ -144,10 +147,10 @@ export class CanvasRuntime extends TypertRemoteService {
     }
 
     const seated = this.cardsOf(id)
-    const known = new Set(seated.map(([key]) => key.split('\u0000')[1] ?? key))
+    const known = new Set(seated.map(([key]) => cardIdOfKey(id, key)))
     const fresh = scan.filter((cardId) => !known.has(cardId))
     const seats: SeatInput[] = seated.map(([key, record]) => ({
-      id: key.split('\u0000')[1] ?? key,
+      id: cardIdOfKey(id, key),
       position: record.position,
     }))
 
@@ -165,7 +168,16 @@ export class CanvasRuntime extends TypertRemoteService {
     }
 
     const record = this.projects.get(id)
-    return { project: this.projectOf(id, record as ProjectRecord), discovered: fresh.length }
+    const project = this.projectOf(id, record as ProjectRecord)
+    // 画布即工作区（F1.6）：建画布的同时把这个根目录登记成宿主工作区，并把已经绑过
+    // 会话的卡片一并交账——重开一张旧画布，它的对话也就当场从「未分组」挪到这张画布
+    // 名下。尽力而为，没有工作区名册的部署里整体是空操作。
+    await claimCanvasWorkspace(
+      this.ctx,
+      { root: project.root, title: project.name },
+      this.cardsOf(id).map(([, card]) => card.sessionId),
+    )
+    return { project, discovered: fresh.length }
   }
 
   /** Forget a project. The files on disk are never touched. */
@@ -201,7 +213,7 @@ export class CanvasRuntime extends TypertRemoteService {
     const project = this.requireProject(projectId)
     const cards = await Promise.all(
       this.cardsOf(projectId).map(async ([key, record]) => {
-        const cardId = key.split('\u0000')[1] ?? key
+        const cardId = cardIdOfKey(projectId, key)
         const probe = await this.deps.io.probe(project.root, cardId, signal)
         return {
           id: cardId,
@@ -276,7 +288,7 @@ export class CanvasRuntime extends TypertRemoteService {
     this.requireProject(projectId)
     const entries = this.cardsOf(projectId)
     const seats = arrangeSeats(
-      entries.map(([key, record]) => ({ id: key.split('\u0000')[1] ?? key, position: record.position })),
+      entries.map(([key, record]) => ({ id: cardIdOfKey(projectId, key), position: record.position })),
       [...this.sources.entries()].filter(([, record]) => record.project === projectId).map(([id, record]) => ({ id, ...record })),
       strategy,
       this.deps.arrangeGap,
@@ -302,7 +314,7 @@ export class CanvasRuntime extends TypertRemoteService {
   ): Promise<BoardSource> {
     signal?.throwIfAborted()
     this.requireProject(projectId)
-    const known = this.cardsOf(projectId).map(([key]) => key.split('\u0000')[1] ?? key)
+    const known = this.cardsOf(projectId).map(([key]) => cardIdOfKey(projectId, key))
     const existing = this.edgeList(projectId)
     const verdict = validateEdge({ upstream, downstream }, known, existing)
     if (!verdict.ok) {
@@ -359,7 +371,7 @@ export class CanvasRuntime extends TypertRemoteService {
     signal?.throwIfAborted()
     const project = this.requireProject(projectId)
     const entries = this.cardsOf(projectId)
-    const known = entries.map(([key]) => key.split('\u0000')[1] ?? key)
+    const known = entries.map(([key]) => cardIdOfKey(projectId, key))
     const knownSet = new Set(known)
     const existing = this.edgeList(projectId)
     const addedEdges: Source[] = []

@@ -14,6 +14,7 @@
 import type { RemoteFailure, RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   ArrangeStrategy,
+  ArtifactView,
   BoardCard,
   BoardSnapshot,
   BoardSource,
@@ -21,6 +22,7 @@ import type {
   ExportFormat,
   ExportResult,
   FolderEntry,
+  LastPrompt,
   Note,
   PendingIntent,
   Point,
@@ -33,6 +35,10 @@ import type {
   WriteResult,
 } from '../types.ts'
 import type { CanvasFace, CardFace } from './remote.ts'
+import type { ModelSelectionView } from './model-memory.ts'
+
+/** How long a session-list read is reused for the model projection lookup. */
+const SESSION_LIST_TTL_MS = 2_000
 
 /** A failed canvas call, carrying the protocol's stable `<domain>/<reason>` code. */
 export class CanvasRemoteError extends Error {
@@ -61,6 +67,54 @@ async function unwrap<T>(call: Promise<RemoteResult<T>>): Promise<T> {
   throw new CanvasRemoteError(result.error)
 }
 
+// ── the host session namespace's model face ────────────────────────────────
+//
+// The card composer's model picker reads the Host-generation catalog and
+// writes a per-session durable selection through the framework's own
+// `session` Remote namespace (`dsh-api-session-controller`). The face is
+// declared locally and minimally: that package is not a dependency here, and
+// its global Typert augmentation is not part of this program.
+
+/** One model inside a provider group of the Host catalog. */
+export interface CatalogModel {
+  readonly id: string
+  readonly name: string
+  readonly description?: string
+}
+
+/** One provider's slice of the Host catalog. */
+export interface CatalogGroup {
+  readonly id: string
+  readonly name: string
+  readonly models: readonly CatalogModel[]
+}
+
+/** The Host-generation model catalog, as the picker renders it. */
+export interface ModelCatalog {
+  /** The selection unconfigured sessions use. */
+  readonly default: { readonly provider: string; readonly model: string }
+  readonly groups: readonly CatalogGroup[]
+}
+
+/** One row of the host's session list, as far as this bridge reads it. */
+interface SessionListRow {
+  readonly sessionId: string
+  /** The host's projection values for that row; `modelSelection` is the one read here. */
+  readonly projections?: { readonly values?: Record<string, unknown> }
+}
+
+/** Minimal view of the mounted `session` Remote namespace. */
+interface SessionModelFace {
+  modelCatalog(): Promise<RemoteResult<ModelCatalog>>
+  selectModel(request: {
+    sessionId: string
+    provider: string
+    model: string
+    reasoningEffort?: string
+  }): Promise<RemoteResult<unknown>>
+  list(request: { cursor?: string }, signal?: AbortSignal): Promise<RemoteResult<{ items: readonly SessionListRow[] }>>
+}
+
 /** One card located on the board, with the project that owns it. */
 export interface LocatedCard {
   project: Project
@@ -82,6 +136,9 @@ export interface LocatedCard {
 export class CanvasBridge {
   #canvas: CanvasFace | undefined
   #card: CardFace | undefined
+  #session: SessionModelFace | undefined
+  /** Last session-list read, so a burst of composer mounts is one wire call. */
+  #sessionList: { at: number; rows: readonly SessionListRow[] } | undefined
 
   /** @param signal - aborted when the plugin unloads; every call carries it. */
   constructor(private readonly signal: AbortSignal) {}
@@ -90,10 +147,13 @@ export class CanvasBridge {
    * Hand the mounted namespaces to the bridge.
    * @param canvas - the mounted `canvas` namespace.
    * @param card - the mounted `card` namespace.
+   * @param session - the framework's `session` namespace, when mounted; only
+   *   the model picker consults it, so its absence degrades that one control.
    */
-  attach(canvas: CanvasFace, card: CardFace): void {
+  attach(canvas: CanvasFace, card: CardFace, session?: SessionModelFace): void {
     this.#canvas = canvas
     this.#card = card
+    this.#session = session
   }
 
   /** The `canvas` namespace, or a clear failure while it is not mounted. */
@@ -208,6 +268,11 @@ export class CanvasBridge {
     return unwrap(this.card.readSummary(projectId, cardId, this.signal))
   }
 
+  /** The fullscreen view payload of one artifact (F3.8). */
+  readArtifact(projectId: string, cardId: string): Promise<ArtifactView> {
+    return unwrap(this.card.readArtifact(projectId, cardId, this.signal))
+  }
+
   /** The digests of one card's direct materials. */
   readSources(projectId: string, cardId: string): Promise<CardSummary[]> {
     return unwrap(this.card.readSources(projectId, cardId, this.signal))
@@ -221,6 +286,81 @@ export class CanvasBridge {
   /** Open, or re-attach, the Agent session bound to a card (F3.1). */
   openSession(projectId: string, cardId: string): Promise<SessionBinding> {
     return unwrap(this.card.openSession(projectId, cardId, this.signal))
+  }
+
+  /** Submit the user's prompt typed in the card composer as the session's next turn (F3.2). */
+  sendMessage(projectId: string, cardId: string, prompt: string): Promise<SessionBinding> {
+    return unwrap(this.card.sendMessage(projectId, cardId, prompt, this.signal))
+  }
+
+  /**
+   * The user's own latest message to a card's session, verbatim (F3.9).
+   *
+   * Read from the session log on the Host, so it answers for a card whose
+   * conversation this page has never opened — the case the composer's seed
+   * exists for.
+   */
+  readLastPrompt(projectId: string, cardId: string): Promise<LastPrompt> {
+    return unwrap(this.card.readLastPrompt(projectId, cardId, this.signal))
+  }
+
+  // ── session: model selection ──────────────────────────────────────────────
+
+  /** The Host-generation model catalog, shared by every session's picker. */
+  modelCatalog(): Promise<ModelCatalog> {
+    if (this.#session === undefined) throw new Error('dsh-canvas: the session Remote namespace is not mounted')
+    return unwrap(this.#session.modelCatalog())
+  }
+
+  /**
+   * Make a durable per-session model selection. The choice lands in the
+   * session's selection projection and governs its next model request — the
+   * same wire call the host composer's model seat makes.
+   */
+  async selectModel(sessionId: string, provider: string, model: string): Promise<void> {
+    if (this.#session === undefined) throw new Error('dsh-canvas: the session Remote namespace is not mounted')
+    await unwrap(this.#session.selectModel({ sessionId, provider, model }))
+  }
+
+  /**
+   * Read one session's model-selection projection.
+   *
+   * `session/list` carries every row's projection values, so this is the
+   * authoritative answer for a session the client may never have opened —
+   * unlike the client-side projection store, which is seeded from a session's
+   * history and therefore says nothing about a card nobody has looked at yet.
+   * The list read is memoised for a moment, because the composer mounts once
+   * per selected card and clicking around a board should not be one wire call
+   * per click.
+   *
+   * @param sessionId - the card session being shown.
+   * @returns the projection view, or `undefined` when the session is not in the
+   *   list (nothing to say) — see `selectionOf` for reading the view itself.
+   */
+  async readModelSelection(sessionId: string): Promise<ModelSelectionView | undefined> {
+    if (this.#session === undefined) throw new Error('dsh-canvas: the session Remote namespace is not mounted')
+    const cached = this.#sessionList
+    const fresh = cached !== undefined && Date.now() - cached.at < SESSION_LIST_TTL_MS
+    // The cache only ever answers a *hit*. A miss — a card whose session was
+    // created a moment ago — reads through, so "not found" can never come from
+    // a snapshot taken before the session existed.
+    const hit = fresh ? cached.rows.find((entry) => entry.sessionId === sessionId) : undefined
+    const row = hit ?? (await this.fetchSessionList()).find((entry) => entry.sessionId === sessionId)
+    const value = row?.projections?.values?.modelSelection
+    return value === undefined || value === null ? undefined : (value as ModelSelectionView)
+  }
+
+  /** Read the session list and keep it as the projection lookup's snapshot. */
+  private async fetchSessionList(): Promise<readonly SessionListRow[]> {
+    const rows = (await unwrap(this.session.list({}, this.signal))).items
+    this.#sessionList = { at: Date.now(), rows }
+    return rows
+  }
+
+  /** The `session` Remote namespace, or a clear failure while it is not mounted. */
+  private get session(): SessionModelFace {
+    if (this.#session === undefined) throw new Error('dsh-canvas: the session Remote namespace is not mounted')
+    return this.#session
   }
 
   /** Stop the card's live agent. Its log stays on disk. */

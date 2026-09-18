@@ -7,7 +7,7 @@
  * all rather than an empty section.
  */
 import { describe, expect, it } from 'vitest'
-import { renderMaterial } from '../src/prompt.ts'
+import { renderMaterial, userPromptMessage } from '../src/prompt.ts'
 import type { CardSummary } from '../src/types.ts'
 
 /** One digest, with only the fields under test spelled out. */
@@ -48,5 +48,18 @@ describe('renderMaterial', () => {
     const text = renderMaterial([digest(), digest({ cardId: 'deck.html', kind: 'html-deck' })])
     expect(text.match(/^- \*\*/gm)).toHaveLength(2)
     expect(text.indexOf('brief.md')).toBeLessThan(text.indexOf('deck.html'))
+  })
+})
+
+describe('userPromptMessage', () => {
+  it('attributes the words to the user, not to the plugin', () => {
+    const message = userPromptMessage('把封面改成横版')
+    expect(message.role).toBe('user')
+    expect(message.source).toEqual({ kind: 'user' })
+  })
+
+  it('carries the prompt as its single text block', () => {
+    const message = userPromptMessage('按 brief 生成 deck')
+    expect(message.content).toEqual([{ type: 'text', text: '按 brief 生成 deck' }])
   })
 })

@@ -143,6 +143,31 @@ export interface CardSummary {
   updatedAt: number
 }
 
+/**
+ * Everything one artifact's fullscreen view needs (F3.8).
+ *
+ * Exactly one of `text` / `dataUrl` carries content, decided by the artifact's
+ * kind on the host: text kinds read whole (capped), binary media become a data
+ * URL the browser can hand to `<img>` / `<video>` directly — the plugin wire
+ * has no streaming and no resource URLs, so the payload rides in the response.
+ */
+export interface ArtifactView {
+  cardId: CardId
+  /** Kind id as the artifact classifier resolved it at read time. */
+  kind: string
+  /** Whether the bound file exists on disk. */
+  present: boolean
+  /** Full decoded text for text-shaped kinds; `''` otherwise. */
+  text: string
+  /** `data:<mime>;base64,…` for binary media; `''` otherwise. */
+  dataUrl: string
+  /** True when content was cut at the wire cap rather than read whole. */
+  truncated: boolean
+  /** Byte size, or 0 when unknown. */
+  bytes: number
+  updatedAt: number
+}
+
 /** One entry of the resolved source chain (F4.7). */
 export interface SourceChain {
   cardId: CardId
@@ -185,7 +210,21 @@ export interface SessionBinding {
   created: boolean
 }
 
-/** How `canvas.arrange_on_board` lays the board out (F4.6). */
+/**
+ * The user's own most recent message to a card's session, verbatim (F3.9).
+ *
+ * This is what an untouched composer shows, and it is deliberately *not* the
+ * session's latest message: plugin-pushed context rides the same log and must
+ * never be offered back to the user as their own words.
+ */
+export interface LastPrompt {
+  /** The message text, line breaks and all — the box hands it back for editing. */
+  text: string
+  /** Epoch ms of the message's event, or `0` when the log does not carry one. */
+  time: number
+}
+
+/** How `canvas_arrange_on_board` lays the board out (F4.6). */
 export type ArrangeStrategy = 'source-chain' | 'grid' | 'organize'
 
 /** Export formats a kind may offer (F10.1). */
@@ -202,7 +241,7 @@ export interface ResolvedConfig {
   arrangeGap: number
   /** Cap on the characters of one upstream artifact digest injected into a card session (F5.2). */
   summaryBudget: number
-  /** Depth of the transitive source chain resolved by `canvas.get_sources`. */
+  /** Depth of the transitive source chain resolved by `canvas_get_sources`. */
   sourceDepth: number
   /** Default response policy when an upstream artifact changes (F5.7). */
   upstreamPolicy: UpstreamPolicy

@@ -21,25 +21,16 @@ import type { ClientContext, ISessions, SessionId } from '@deepseek-ai/dsh-clien
 import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
-import { DSH_CANVAS_REMOTE } from './remote.ts'
+import { DSH_CANVAS_REMOTE, type CanvasFace, type CardFace } from './remote.ts'
 import { NS, en, zh } from './locales.ts'
 import { CanvasBridge } from './bridge.ts'
 import { adoptStyles } from './styles.ts'
 import { registerCanvasTabs } from './canvas-tab.ts'
+import { registerCanvasPanels } from './canvas-panels.tsx'
 import { registerToolViews } from './tool-view.tsx'
-import { CardSessionView, type CardSessionViewProps } from './card-panel.tsx'
-import { foreignSeats } from './seats.ts'
 
-/** Required browser services: the Remote gateway, copy, sessions, and both sidebar halves. */
-export const inject = ['slots', 'remote', 'locale', 'sessions', 'sidebarRight', 'sidebarRightTabs']
-
-/**
- * The seat the card's face rides in the conversation view ring.
- *
- * Owned by the conversation package, which is not a dependency here, so it is
- * addressed through `seats.ts` and contributed only if the seat exists.
- */
-const CONVERSATION_VIEW_SLOT = 'conversation.view'
+/** Required browser services: the Remote gateway, copy, sessions, layout, and both sidebar halves. */
+export const inject = ['slots', 'layout', 'remote', 'locale', 'sessions', 'sidebarRight', 'sidebarRightTabs', 'uiWorkspace']
 
 /**
  * Read the two services this half needs off a context that declares one of them
@@ -69,7 +60,6 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => () => abort.abort(), 'dsh-canvas: remote calls')
 
   const bridge = new CanvasBridge(abort.signal)
-  const t = ctx.locale.bind(NS)
   const faces = clientFaces(ctx)
 
   // ── seats (synchronous, so no declaration can be missed) ──────────────────
@@ -77,46 +67,50 @@ export function apply(ctx: ClientContext): void {
   const roots = registerCanvasTabs(ctx, {
     bridge,
     activateSession: (sessionId: string) => faces.sessions.open(sessionId as SessionId),
-    cardSession: (sessionId: string) => faces.sessions.binding(sessionId as SessionId)?.session,
   })
 
   registerToolViews(ctx)
 
-  const seats = foreignSeats(ctx)
-  ctx.effect(
-    () =>
-      seats.inject(CONVERSATION_VIEW_SLOT, () =>
-        seats.register(
-          {
-            name: CONVERSATION_VIEW_SLOT,
-            id: 'dsh-canvas:card',
-            order: 30,
-            label: () => ctx.locale.bind(NS)('canvas.view.label'),
-            inject: () => ({
-              bridge,
-              t,
-              openResource: (address: string) => ctx.sidebarRight.openResource(address),
-            }),
-          },
-          // The seat is contributed through `seats.ts` because its owner is not
-          // a dependency, so its props arrive untyped and the component's own
-          // interface — framework `sessionId` plus this entry's inject face —
-          // is what describes them.
-          (props: never) => <CardSessionView {...(props as unknown as CardSessionViewProps)} />,
-        ),
-      ),
-    'dsh-canvas: card view',
-  )
+  // The sidebar's canvas management area and the main column's canvas panels.
+  // Both are seats, so they go up with the rest of them; the first read of the
+  // canvas list waits for the mount below, because the call surface does not
+  // exist before it.
+  const panels = registerCanvasPanels(ctx, {
+    bridge,
+    openSession: (sessionId: string) => faces.sessions.open(sessionId as SessionId),
+    openResource: (address: string) => ctx.sidebarRight.openResource(address),
+    pickDirectory: () => (ctx as unknown as { uiWorkspace: { pickDirectory: () => Promise<string | null> } }).uiWorkspace.pickDirectory(),
+    // The tab types' veto reads the same list; handing it over here keeps that
+    // cache from refusing a canvas the user created a moment ago.
+    onProjects: (projects) => roots.ingest(projects),
+  })
 
   // ── Remote mount ──────────────────────────────────────────────────────────
 
   ctx.effect(async () => {
     const dispose = await faces.remote.$mount(DSH_CANVAS_REMOTE)
-    bridge.attach(faces.remote.canvas, faces.remote.card)
+    // The mounted namespaces are services in the global reflect store under
+    // `remote.canvas` / `remote.card`, provided by sibling fibers of this
+    // plugin. The fiber walk behind `ctx.remote.<name>` only visits ancestors,
+    // so the composed property throws "without inject" here; the lenient
+    // global read is the one face that sees them.
+    const reflect = (ctx as unknown as { reflect: { get(name: string, strict?: boolean): unknown } }).reflect
+    const canvas = reflect.get('remote.canvas', false) as CanvasFace | undefined
+    const card = reflect.get('remote.card', false) as CardFace | undefined
+    if (canvas === undefined || card === undefined) {
+      throw new Error('dsh-canvas: the mounted Remote namespaces are missing from the service registry')
+    }
+    // The framework's own session namespace is optional here: only the card
+    // composer's model picker reads it, and that degrades to a plain notice.
+    const session = reflect.get('remote.session', false) as Parameters<CanvasBridge['attach']>[2] | undefined
+    bridge.attach(canvas, card, session)
     // Warm the project-root cache: it is what the tab types' `canOpen` veto
     // consults, and it must already hold an answer by the first routing
     // decision rather than the one after it.
     void roots.refresh()
+    // Same list, second consumer: this is what puts the canvas rows in the
+    // sidebar and the canvas panels behind them.
+    panels.refresh()
     return () => {
       void dispose()
     }

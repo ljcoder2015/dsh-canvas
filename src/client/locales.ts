@@ -34,13 +34,39 @@ export const zh = {
   'canvas.zoom.out': '缩小',
   'canvas.zoom.reset': '适应画布',
 
+  // Board dock
+  'canvas.dock.add': '新增卡片',
+  'canvas.dock.keys': '快捷键',
+  'canvas.dock.text': '文本',
+  'canvas.dock.image': '图片',
+  'canvas.dock.vector': '矢量图片',
+
+  // 取材线拖到空白处放手时弹出的「新增节点」（F4.8）
+  'canvas.drop.title': '新增节点',
+  'canvas.drop.hint': '点空白处取消',
+
+  // 快捷键说明（表体与键位同在 src/client/shortcuts.ts：印出来的就是按得动的）
+  // 一张键一枚行：并排两枚键的行读起来要在脑子里拆开，所以方向与缩放都各占一行。
+  'canvas.keys.title': '键盘快捷键',
+  'canvas.keys.space': '按住并拖动，平移画布',
+  'canvas.keys.up': '画布上移',
+  'canvas.keys.left': '画布左移',
+  'canvas.keys.down': '画布下移',
+  'canvas.keys.right': '画布右移',
+  'canvas.keys.zoomOut': '缩小画布',
+  'canvas.keys.zoomIn': '放大画布',
+  'canvas.keys.wheel': '平移视图；按住 Ctrl / ⌘ 即缩放',
+  'canvas.keys.card': '移动卡片',
+  'canvas.keys.preview': '全屏预览产物',
+  'canvas.key.wheel': '滚轮',
+  'canvas.key.dragCard': '拖动卡片',
+  'canvas.key.dblclick': '双击卡片',
+
   // Actions
   'canvas.action.newProject': '新增画布项目',
   'canvas.action.pickProject': '选择文件夹',
-  'canvas.action.open': '打开',
   'canvas.action.chat': '对话',
   'canvas.action.link': '建立取材',
-  'canvas.action.unlink': '解除取材',
   'canvas.action.export': '导出',
   'canvas.action.publish': '发布',
   'canvas.action.arrange': '按取材链摆位',
@@ -56,6 +82,7 @@ export const zh = {
   'canvas.action.cancel': '取消',
   'canvas.action.confirm': '确认',
   'canvas.action.delete': '删除',
+  'canvas.action.retry': '重试',
 
   // Card state
   'canvas.status.running': '运行中',
@@ -65,7 +92,13 @@ export const zh = {
 
   // Card overlay / panel
   'canvas.panel.latest': '最新一条',
-  'canvas.panel.none': '还没有消息。打开对话开始。',
+  'canvas.composer.material': '引入其它节点产物',
+  'canvas.composer.placeholder': '输入提示词，发送给这张卡片…',
+  'canvas.composer.send': '发送',
+  'canvas.composer.empty': '画布上还没有其它卡片。',
+  'canvas.composer.model': '模型',
+  'canvas.composer.modelLoading': '正在加载模型目录…',
+  'canvas.composer.modelEmpty': '该提供方暂无可用模型。',
   'canvas.panel.title': '卡片',
   'canvas.panel.path': '产物',
   'canvas.panel.kind': '形态',
@@ -78,11 +111,23 @@ export const zh = {
   'canvas.panel.noIntents': '没有排队中的意图。',
   'canvas.panel.session': '会话',
 
-  // Session view ring
-  'canvas.view.label': '画布卡片',
-  'canvas.view.unbound': '当前会话不属于任何画布卡片。',
-  'canvas.view.noSession': '这条会话还没有绑定的产物。',
+  // Fullscreen artifact viewer (F3.8)
+  'canvas.viewer.loading': '正在读取产物…',
+  'canvas.viewer.absent': '产物文件还没生成。',
+  'canvas.viewer.tooLarge': '文件过大，无法在此预览；请在右栏打开。',
+  'canvas.viewer.truncated': '内容过大，这里只显示了前一部分。',
+  'canvas.viewer.openTab': '在右栏打开',
+
+  // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': '这份产物不在任何画布项目中。',
+
+  // Sidebar canvas area
+  // 画布区在左栏是一个包裹：header（标题 + 新建）+ 画布列表。标题就是画布区的名字，
+  // 新建按钮的文案是动作名（见 canvas.action.*）。收起时包裹整棵不显示，只剩宿主
+  // 那一行的图标，点它就等于新建。
+  'canvas.manage.new': '画布',
+  'canvas.manage.add': '新建画布',
+  'canvas.manage.picking': '请在系统选择器中选定一个文件夹…',
 
   // Folder picker
   'canvas.picker.title': '选择一个文件夹作为画布项目',
@@ -138,13 +183,39 @@ export const en = {
   'canvas.zoom.out': 'Zoom out',
   'canvas.zoom.reset': 'Fit board',
 
+  // Board dock
+  'canvas.dock.add': 'New card',
+  'canvas.dock.keys': 'Shortcuts',
+  'canvas.dock.text': 'Text',
+  'canvas.dock.image': 'Image',
+  'canvas.dock.vector': 'Vector image',
+
+  // The "new node" popup a source-edge drag opens when it is let go on empty space (F4.8)
+  'canvas.drop.title': 'New node',
+  'canvas.drop.hint': 'Click empty space to cancel',
+
+  // Shortcut sheet (the rows and the keys live together in src/client/shortcuts.ts)
+  // One key per row: a row that prints two keys has to be split apart in the head.
+  'canvas.keys.title': 'Keyboard shortcuts',
+  'canvas.keys.space': 'Hold and drag to pan',
+  'canvas.keys.up': 'Move the board up',
+  'canvas.keys.left': 'Move the board left',
+  'canvas.keys.down': 'Move the board down',
+  'canvas.keys.right': 'Move the board right',
+  'canvas.keys.zoomOut': 'Zoom out',
+  'canvas.keys.zoomIn': 'Zoom in',
+  'canvas.keys.wheel': 'Pan the view; hold Ctrl / ⌘ to zoom',
+  'canvas.keys.card': 'Move the card',
+  'canvas.keys.preview': 'Open the artifact fullscreen',
+  'canvas.key.wheel': 'Wheel',
+  'canvas.key.dragCard': 'Drag card',
+  'canvas.key.dblclick': 'Double-click',
+
   // Actions
   'canvas.action.newProject': 'New canvas project',
   'canvas.action.pickProject': 'Choose a folder',
-  'canvas.action.open': 'Open',
   'canvas.action.chat': 'Chat',
   'canvas.action.link': 'Link source',
-  'canvas.action.unlink': 'Unlink source',
   'canvas.action.export': 'Export',
   'canvas.action.publish': 'Publish',
   'canvas.action.arrange': 'Arrange by source chain',
@@ -160,6 +231,7 @@ export const en = {
   'canvas.action.cancel': 'Cancel',
   'canvas.action.confirm': 'Confirm',
   'canvas.action.delete': 'Delete',
+  'canvas.action.retry': 'Retry',
 
   // Card state
   'canvas.status.running': 'Running',
@@ -169,7 +241,13 @@ export const en = {
 
   // Card overlay / panel
   'canvas.panel.latest': 'Latest',
-  'canvas.panel.none': 'No messages yet. Open the conversation to start.',
+  'canvas.composer.material': 'Bring in another node’s artifact',
+  'canvas.composer.placeholder': 'Type a prompt to send to this card…',
+  'canvas.composer.send': 'Send',
+  'canvas.composer.empty': 'No other cards on the board yet.',
+  'canvas.composer.model': 'Model',
+  'canvas.composer.modelLoading': 'Loading the model catalog…',
+  'canvas.composer.modelEmpty': 'No models available from this provider.',
   'canvas.panel.title': 'Card',
   'canvas.panel.path': 'Artifact',
   'canvas.panel.kind': 'Kind',
@@ -182,11 +260,20 @@ export const en = {
   'canvas.panel.noIntents': 'Nothing queued.',
   'canvas.panel.session': 'Session',
 
-  // Session view ring
-  'canvas.view.label': 'Canvas card',
-  'canvas.view.unbound': 'The current session is not bound to a canvas card.',
-  'canvas.view.noSession': 'This conversation has no bound artifact.',
+  // Fullscreen artifact viewer (F3.8)
+  'canvas.viewer.loading': 'Reading the artifact…',
+  'canvas.viewer.absent': 'The artifact has not been written yet.',
+  'canvas.viewer.tooLarge': 'The file is too large to preview here; open it in the sidebar.',
+  'canvas.viewer.truncated': 'The content is large; only its first part is shown.',
+  'canvas.viewer.openTab': 'Open in sidebar',
+
+  // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': 'This file is not inside a canvas project.',
+
+  // Sidebar canvas area
+  'canvas.manage.new': 'Canvas',
+  'canvas.manage.add': 'New canvas',
+  'canvas.manage.picking': 'Pick a folder in the system dialog…',
 
   // Folder picker
   'canvas.picker.title': 'Choose a folder as a canvas project',

@@ -2,7 +2,10 @@ import eslint from '@eslint/js'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['lib/**', 'node_modules/**'] },
+  // `lib/**` is build output. `.workbuddy/**` is project tooling and scratch
+  // space (E2E probes, the dev-service home, memory notes) — Node-side scripts
+  // that are not part of the plugin and are not written against these rules.
+  { ignores: ['lib/**', 'node_modules/**', '.workbuddy/**'] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {

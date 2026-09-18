@@ -41,3 +41,17 @@ export function projectIdOf(root: string): string {
   const base = normalised.split('/').pop() ?? 'canvas'
   return `${slugify(base)}-${shortDigest(normalised)}`
 }
+
+/**
+ * Escape everything outside the storage key alphabet as fixed-width `_xxxx`.
+ *
+ * The JSON medium's `per-record` layout turns a record key into a path segment
+ * and rejects everything outside `[a-zA-Z0-9_-]+` at write — and card ids are
+ * paths, so they carry dots and slashes. The escape is fixed-width, so it can
+ * neither be ambiguous nor collide with a separator that also avoids `_`:
+ * a literal `_` in the input always comes out as `_005f`, which means the
+ * sequence `__` can only ever be a delimiter someone put there on purpose.
+ */
+export function encodeSegment(segment: string): string {
+  return segment.replace(/[^a-zA-Z0-9-]/g, (char) => `_${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
+}

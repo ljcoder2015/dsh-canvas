@@ -9,6 +9,13 @@
  * The tile owns exactly one piece of local state, the drag offset, so a drag
  * never round-trips through the host: the position is committed once, on
  * release. Everything else arrives as props.
+ *
+ * While the card's session runs, the tile adds one child: `.dsh-canvas-shimmer`,
+ * a skewed light band sweeping across the card (see `styles.ts`). It is a layer
+ * of its own rather than the card's `::after`, because the card cannot clip its
+ * overflow — its ports hang outside its border. The content underneath stays
+ * where it is: the sweep is the whole signal, and what the preview shows is
+ * still the last artifact that actually exists.
  */
 import { useRef, useState } from 'react'
 import type { BoardCard, CardSummary, Point } from '../types.ts'
@@ -34,10 +41,10 @@ export interface CardTileProps {
   /** Called while a drag is in flight so the source edges can follow the card; `undefined` ends it. */
   onDragMove: (cardId: string, position: Point | undefined) => void
   /** Start dragging a source edge from one of this card's ports. */
-  onConnectStart: (cardId: string, side: 'in' | 'out') => void
+  onConnectStart: (cardId: string, side: 'in' | 'out', at: { clientX: number; clientY: number }) => void
   /** Finish a source edge on one of this card's ports. */
   onConnectDrop: (cardId: string, side: 'in' | 'out') => void
-  /** Double-click: select the card and open its conversation. */
+  /** Double-click: select the card and open its artifact fullscreen (F3.8). */
   onActivate: (cardId: string) => void
 }
 
@@ -104,11 +111,15 @@ export function CardTile(props: CardTileProps) {
   const className = ['dsh-canvas-card']
   if (selected) className.push('is-selected')
   if (state === 'missing') className.push('is-absent')
+  // 会话 running = 这张卡片正在产出内容，卡面亮起流光（见 styles.ts 的 is-working）。
+  // 不另设本地的「已发送」标志：会话状态就是唯一真源，光在扫与模型在跑始终同义。
+  if (state === 'running') className.push('is-working')
 
   return (
     <div
       className={className.join(' ')}
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
+      aria-busy={state === 'running'}
       onPointerDown={pointerDown}
       onPointerMove={pointerMove}
       onPointerUp={pointerUp}
@@ -118,21 +129,21 @@ export function CardTile(props: CardTileProps) {
       tabIndex={0}
       title={card.id}
     >
+      {/* 流光层画在内容之前：它是绝对定位的，因此盖在名字与预览之上（那道光是「正在
+          跑」的整句话），而同样绝对定位、排在他后面的两个端口仍压在最上面。 */}
+      {state === 'running' ? <span className="dsh-canvas-shimmer" aria-hidden="true" /> : null}
+
+      <div className="dsh-canvas-card-head">
+        <div className="dsh-canvas-card-name">{card.id.split('/').pop() ?? card.id}</div>
+        <span className="dsh-canvas-dot" data-state={state} title={t(STATE_KEY[state])} />
+      </div>
+
       <div className="dsh-canvas-card-preview">
         {lines.map((line, index) => (
           <div className="dsh-canvas-card-preview-line" key={`${index}:${line}`}>
             {line}
           </div>
         ))}
-      </div>
-
-      <div className="dsh-canvas-card-foot">
-        <div className="dsh-canvas-card-name">{card.id.split('/').pop() ?? card.id}</div>
-        <div className="dsh-canvas-card-meta">{card.kindLabel}</div>
-        <div className="dsh-canvas-card-meta dsh-canvas-status">
-          <span className="dsh-canvas-dot" data-state={state} />
-          {t(STATE_KEY[state])}
-        </div>
       </div>
 
       {/* Ports: `out` declares this card as material, `in` declares it as the consumer. */}
@@ -143,7 +154,7 @@ export function CardTile(props: CardTileProps) {
         title={t('canvas.action.link')}
         onPointerDown={(event) => {
           event.stopPropagation()
-          onConnectStart(card.id, 'out')
+          onConnectStart(card.id, 'out', event)
         }}
         onPointerUp={(event) => {
           event.stopPropagation()
@@ -163,7 +174,7 @@ export function CardTile(props: CardTileProps) {
         }}
         onPointerDown={(event) => {
           event.stopPropagation()
-          onConnectStart(card.id, 'in')
+          onConnectStart(card.id, 'in', event)
         }}
       >
         {connecting === undefined ? '+' : '→'}

@@ -12,13 +12,15 @@
  * vanishes with the plugin fiber.
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {
+  ArtifactView,
   BoardCard,
   CardId,
   CardSummary,
   ExportFormat,
+  LastPrompt,
   PendingIntent,
   Point,
   Project,
@@ -30,10 +32,15 @@ import type {
 import type { CanvasDomain } from './domain.ts'
 import type { CanvasCapabilities } from './capabilities.ts'
 import type { ArtifactIo } from './core/artifact-io.ts'
-import { cardKeyOf, SessionManager } from './core/session-manager.ts'
+import { cardKeyOf, SessionManager, type CardSession } from './core/session-manager.ts'
+import { cardPreset, composeCardAgent } from './core/agent-preset.ts'
+import { lastUserPromptOfEvents, sessionQueryFace } from './core/session-log.ts'
+import type { ModelRouting } from './core/model-routing.ts'
 import { kindById, kindLabel, kindSupportsExport } from './core/kind-registry.ts'
-import { injectionMessage, installCardScope, PLUGIN_ID, renderMaterial, upstreamChangedMessage } from './prompt.ts'
+import { injectionMessage, installCardScope, PLUGIN_ID, renderMaterial, upstreamChangedMessage, userPromptMessage } from './prompt.ts'
+import { attachCanvasSession } from './core/workspace.ts'
 import { transitiveUpstreams } from './core/source-store.ts'
+import { TOOL_NAMES } from './contract.ts'
 
 /** What {@link CardRuntime} needs from the plugin's composition root. */
 export interface CardRuntimeDeps {
@@ -46,6 +53,12 @@ export interface CardRuntimeDeps {
   sourceDepth: number
   /** What happens to a downstream card's session when this card's artifact changes (F5.7). */
   upstreamPolicy: UpstreamPolicy
+  /**
+   * The deployment's model policy, borrowed by every card conversation this
+   * runtime opens. See `core/model-routing.ts` for why a card session needs it
+   * supplied rather than inherited.
+   */
+  routing: ModelRouting
   /** Deployment-provided export / publish / image generation, when present. */
   capabilities?: CanvasCapabilities | undefined
 }
@@ -152,6 +165,22 @@ export class CardRuntime extends TypertRemoteService {
   }
 
   /**
+   * The fullscreen view payload of one artifact (F3.8).
+   *
+   * Where {@link readSummary} bounds its read for a prompt, this one reads the
+   * artifact whole within the wire caps — it is what a person opens to *read*.
+   * An absent artifact is answered, not failed: a seated card whose file has
+   * not been written yet gets its viewer with an absent state.
+   */
+  @Remote
+  async readArtifact(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<ArtifactView> {
+    signal?.throwIfAborted()
+    const project = this.requireProject(projectId)
+    this.requireCard(projectId, cardId)
+    return this.deps.io.view(project.root, cardId, signal)
+  }
+
+  /**
    * Digests of every artifact this card sources from, nearest first.
    *
    * Indirect upstreams are included on purpose: a card three hops from the
@@ -230,6 +259,17 @@ export class CardRuntime extends TypertRemoteService {
    * (§4.5). When the stored binding no longer resolves, a fresh conversation is
    * created rather than the stale one being overwritten: the old log stays on
    * disk, so nothing a user said is destroyed by a read failure.
+   *
+   * The agent is composed from the deployment's agent preset before anything
+   * else happens, because that composition is where its file tools live: a card
+   * conversation writes its artifact with the ordinary `write`/`edit` tools, and
+   * on the Web surface those come from the preset rather than the host
+   * composition (`core/agent-preset.ts` carries the reasoning). Only then is it
+   * created with the deployment's default model and — still before this method
+   * returns — told the model its own session already intends, if it has one.
+   * Without the model the turn cannot even assemble its prompt; without the
+   * selection a choice made before a reload would be silently dropped
+   * ({@link align} carries that reasoning).
    */
   @Remote
   async openSession(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<SessionBinding> {
@@ -239,20 +279,42 @@ export class CardRuntime extends TypertRemoteService {
     const record = this.requireCard(projectId, cardId)
 
     const live = this.deps.sessions.live(projectId, cardId)
-    if (live !== undefined) return { cardId, sessionId: live.sessionId, created: false }
+    if (live !== undefined) {
+      await this.align(live)
+      await this.claim(project, live.sessionId)
+      return { cardId, sessionId: live.sessionId, created: false }
+    }
 
     let binding = record.sessionId
     let created = binding === ''
 
+    // The preset a card conversation composes from, resolved before anything is
+    // created — see `core/agent-preset.ts` for why it is not optional to the
+    // card's job. Neither create nor resume carries it in its options: the join
+    // is a scope parentage installed by the setup callback, and it is the same
+    // join for a resumed conversation as for a fresh one.
+    const presetId = await cardPreset(this.ctx)
+
     const attach = async (ownerCtx: Context, resumeId: SessionId | undefined, fresh: boolean) => {
-      const setup = (agentCtx: Context): void => this.scopeFor(agentCtx, project, cardId, record.kind)
+      const setup = async (agentCtx: Context): Promise<void> => {
+        await composeCardAgent(this.ctx, agentCtx, presetId)
+        this.scopeFor(agentCtx, project, cardId, record.kind)
+      }
+      const options = this.deps.routing.agentOptions()
+      const agentOptions = options === undefined ? {} : { agentOptions: options }
+      const meta = presetId === undefined ? { cwd: project.root } : { cwd: project.root, agentPreset: presetId }
       const handle = fresh
         ? await ownerCtx.agents.create({
             sessionId: resumeId ?? mintSessionId(projectId, cardId),
-            meta: { cwd: project.root },
+            meta,
+            ...agentOptions,
             setup,
           })
-        : await ownerCtx.agents.resume({ resumeSessionId: resumeId as SessionId, setup })
+        : await ownerCtx.agents.resume({
+            resumeSessionId: resumeId as SessionId,
+            ...agentOptions,
+            setup,
+          })
       return { agent: handle.agent, dispose: () => handle.dispose() }
     }
 
@@ -275,10 +337,46 @@ export class CardRuntime extends TypertRemoteService {
       }
     }
 
+    await this.align(opened.session)
+    await this.claim(project, opened.session.sessionId)
     if (created || binding !== opened.session.sessionId) {
       await this.cards.put(key, { ...record, sessionId: opened.session.sessionId })
     }
     return { cardId, sessionId: opened.session.sessionId, created: opened.created }
+  }
+
+  /**
+   * Put this card's conversation under the canvas's Workspace (F1.6).
+   *
+   * The conversation's own cwd is already the canvas root, so the only thing
+   * missing for the sidebar to file it under that folder instead of 未分组 is
+   * the Workspace account — `core/workspace.ts` owns both moves. Failure is
+   * logged there and never raised: a conversation that cannot be grouped is
+   * still a usable conversation, and refusing to open one over a sidebar
+   * grouping would trade a real capability for a cosmetic one.
+   */
+  private async claim(project: { root: string; name: string }, sessionId: string): Promise<void> {
+    await attachCanvasSession(this.ctx, { root: project.root, title: project.name }, sessionId)
+  }
+
+  /**
+   * Hand one live card conversation the model its session intends.
+   *
+   * A failure here is logged, not raised: the conversation is open and usable on
+   * the deployment default, and refusing to open it would turn a model-policy
+   * problem into "this card has no conversation". A resumed conversation never
+   * needs a second attempt — the selection lives on the session, so the next
+   * open reads it back from the projection.
+   */
+  private async align(session: CardSession): Promise<void> {
+    try {
+      await this.deps.routing.align(session.agent, session.sessionId)
+    } catch (error) {
+      this.ctx.logger(PLUGIN_ID).warn(
+        `card ${session.cardId}: the session's model selection could not be installed`,
+        error,
+      )
+    }
   }
 
   /** Release the live conversation. The log and the binding both survive (F3.4). */
@@ -287,6 +385,70 @@ export class CardRuntime extends TypertRemoteService {
     signal?.throwIfAborted()
     this.requireProject(projectId)
     return this.deps.sessions.release(projectId, cardId)
+  }
+
+  /**
+   * Submit the user's own prompt to a card's conversation (F3.2 — composer).
+   *
+   * The board's composer is a full conversation entry point, not a mirror of
+   * the host's chat surface: this opens (or re-attaches) the session like
+   * {@link openSession} does, then hands the text to `agent.followup` — the
+   * same admission path the harness's own composer uses. `followup` queues the
+   * prompt as the next turn's sole ordinary message, so a prompt typed while
+   * the agent is running waits its turn instead of steering or erroring.
+   */
+  @Remote
+  async sendMessage(projectId: ProjectId, cardId: CardId, prompt: string, signal?: AbortSignal): Promise<SessionBinding> {
+    signal?.throwIfAborted()
+    this.requireProject(projectId)
+    this.requireCard(projectId, cardId)
+    const binding = await this.openSession(projectId, cardId, signal)
+    const session = this.deps.sessions.live(projectId, cardId)
+    if (session === undefined) {
+      throw new RemoteError('card/session-missing', `card ${cardId} has no conversation to receive the prompt`, {
+        projectId,
+        cardId,
+      })
+    }
+    session.agent.followup(userPromptMessage(prompt))
+    return binding
+  }
+
+  /**
+   * The user's own latest message to this card's session, verbatim (F3.9).
+   *
+   * This is what an untouched composer shows. Reading it from the *session log*
+   * rather than from the browser's live projection is the whole point: the
+   * projection only exists for sessions this page has opened, and the composer
+   * must answer for a card the user has not opened yet — the common case.
+   * Plugin-pushed context (`agent.inject`) rides the same log; the reader
+   * distinguishes by message source, so it is never offered back as the user's
+   * words.
+   */
+  @Remote
+  async readLastPrompt(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<LastPrompt> {
+    signal?.throwIfAborted()
+    this.requireProject(projectId)
+    const record = this.requireCard(projectId, cardId)
+    if (record.sessionId === '') return { text: '', time: 0 }
+    // A failure here means the conversation's log is not readable right now
+    // (never flushed, storage absent). The composer still works — it just has
+    // nothing to seed from — so this read answers "nobody has spoken" instead
+    // of failing the selection.
+    try {
+      const query = sessionQueryFace(this.ctx)
+      if (query !== undefined) {
+        const read = await query.readSession(record.sessionId)
+        return lastUserPromptOfEvents(read.events)
+      }
+    } catch {
+      if (signal?.aborted) throw signal.reason
+      return { text: '', time: 0 }
+    }
+    // No session-query service in this deployment (bare harness): a live
+    // session is still readable, and a cold one has nothing to say.
+    const live = liveSessionEvents(this.ctx, record.sessionId)
+    return live === undefined ? { text: '', time: 0 } : lastUserPromptOfEvents(live)
   }
 
   // ── writes ──────────────────────────────────────────────────────────────
@@ -488,7 +650,7 @@ export class CardRuntime extends TypertRemoteService {
   }
 
   /**
-   * Generate an image artifact for one card (F7.2 / `canvas.generate_image`).
+   * Generate an image artifact for one card (F7.2 / `canvas_generate_image`).
    *
    * Writes into an existing card when the caller names one, so the image lands
    * as material on the board rather than as an orphan file.
@@ -574,7 +736,7 @@ export class CardRuntime extends TypertRemoteService {
     })
     if (lines.length === 0) return ''
     return [
-      'Sourced material — call `canvas.read_sources` for the digests, `canvas.read_card` for one artifact:',
+      `Sourced material — call \`${TOOL_NAMES.readSources}\` for the digests, \`${TOOL_NAMES.readCard}\` for one artifact:`,
       ...lines,
     ].join('\n')
   }
@@ -609,6 +771,19 @@ export class CardRuntime extends TypertRemoteService {
     }
     return record
   }
+}
+
+/**
+ * A live session's full event log, read structurally.
+ *
+ * The fallback for deployments without the session-query service: only sessions
+ * currently in the store can be read there, which is honest degradation — a
+ * deployment that composition cannot query is also one whose card sessions are
+ * short-lived.
+ */
+function liveSessionEvents(ctx: Context, sessionId: string): readonly SessionEvent[] | undefined {
+  const store = ctx.get('sessions') as { get(id: string): { snapshotEvents(): readonly SessionEvent[] } | undefined } | undefined
+  return store?.get(sessionId)?.snapshotEvents()
 }
 
 /** One line of human-readable cause, for the structured export/publish result. */

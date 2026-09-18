@@ -8,19 +8,19 @@
   },
   "contributes": {
     "tools": [
-      "canvas.read_card",
-      "canvas.read_sources",
-      "canvas.link_source",
-      "canvas.get_sources",
-      "canvas.inject_card",
-      "canvas.read_board",
-      "canvas.arrange_on_board",
-      "canvas.create_on_board",
-      "canvas.organize_board",
-      "canvas.link_source_on_board",
-      "canvas.generate_image",
-      "canvas.export",
-      "canvas.publish"
+      "canvas_read_card",
+      "canvas_read_sources",
+      "canvas_link_source",
+      "canvas_get_sources",
+      "canvas_inject_card",
+      "canvas_read_board",
+      "canvas_arrange_on_board",
+      "canvas_create_on_board",
+      "canvas_organize_board",
+      "canvas_link_source_on_board",
+      "canvas_generate_image",
+      "canvas_export",
+      "canvas_publish"
     ],
     "skills": [
       "canvas-operations"

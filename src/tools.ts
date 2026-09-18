@@ -73,7 +73,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     const active = deps.domain.global.get().activeProjectId
     if (active === '') {
       throw new Error(
-        'no canvas project is open in this session. Open a canvas project first, then retry — or use canvas.read_board from inside a card conversation.',
+        `no canvas project is open in this session. Open a canvas project first, then retry — or use ${TOOL_NAMES.readBoard} from inside a card conversation.`,
       )
     }
     return active
@@ -93,7 +93,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
       },
       async execute(args, exec) {
         const caller = callingCard(exec.agent?.id)
-        if (caller === undefined) throw new Error('canvas.read_card 只能在卡片会话内调用：请先打开这张卡片的对话。')
+        if (caller === undefined) throw new Error(`${TOOL_NAMES.readCard} 只能在卡片会话内调用：请先打开这张卡片的对话。`)
         return deps.card.readSummary(caller.project, String(args.cardId), exec.signal)
       },
     }),
@@ -117,7 +117,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
       },
       async execute(_args, exec) {
         const caller = callingCard(exec.agent?.id)
-        if (caller === undefined) throw new Error('canvas.read_sources 只能在卡片会话内调用。')
+        if (caller === undefined) throw new Error(`${TOOL_NAMES.readSources} 只能在卡片会话内调用。`)
         return deps.card.readSources(caller.project, caller.cardId, exec.signal)
       },
     }),
@@ -144,7 +144,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
       },
       async execute(args, exec) {
         const caller = callingCard(exec.agent?.id)
-        if (caller === undefined) throw new Error('canvas.link_source 只能在卡片会话内调用。')
+        if (caller === undefined) throw new Error(`${TOOL_NAMES.linkSource} 只能在卡片会话内调用。`)
         const edge = await deps.canvas.linkSource(caller.project, String(args.sourceCardId), caller.cardId, exec.signal)
         return { id: edge.id, upstream: edge.upstream, downstream: edge.downstream }
       },
@@ -179,7 +179,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
       },
       async execute(_args, exec) {
         const caller = callingCard(exec.agent?.id)
-        if (caller === undefined) throw new Error('canvas.get_sources 只能在卡片会话内调用。')
+        if (caller === undefined) throw new Error(`${TOOL_NAMES.getSources} 只能在卡片会话内调用。`)
         return deps.canvas.getSources(caller.project, caller.cardId, exec.signal)
       },
     }),
@@ -200,7 +200,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
       },
       async execute(args, exec) {
         const caller = callingCard(exec.agent?.id)
-        if (caller === undefined) throw new Error('canvas.inject_card 只能在卡片会话内调用。')
+        if (caller === undefined) throw new Error(`${TOOL_NAMES.injectCard} 只能在卡片会话内调用。`)
         const mode = args.mode === 'full' ? 'full' : 'summary'
         return deps.card.injectCard(caller.project, caller.cardId, String(args.cardId), mode, exec.signal)
       },

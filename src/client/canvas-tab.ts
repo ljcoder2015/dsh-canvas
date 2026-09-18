@@ -21,7 +21,7 @@
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { BUILTIN_KINDS } from '../core/kind-registry.ts'
-import type { KindDefinition } from '../types.ts'
+import type { KindDefinition, Project } from '../types.ts'
 import type { CanvasBridge } from './bridge.ts'
 import { NS } from './locales.ts'
 import { basenameOf, isInside, parseFileAddress } from './address.ts'
@@ -85,13 +85,26 @@ class ProjectRoots {
     return this.bridge
       .listProjects()
       .then((projects) => {
-        this.roots = projects.map((project) => project.root)
-        this.fetchedAt = Date.now()
+        this.ingest(projects)
       })
       .catch(() => undefined)
       .finally(() => {
         this.inflight = false
       })
+  }
+
+  /**
+   * Adopt a project list that was just read elsewhere.
+   *
+   * The veto must know a canvas the moment it exists: a snapshot taken before
+   * the user created it would otherwise keep refusing that canvas's files for
+   * the rest of its TTL.
+   *
+   * @param projects - the list to take the roots from.
+   */
+  ingest(projects: readonly Project[]): void {
+    this.roots = projects.map((project) => project.root)
+    this.fetchedAt = Date.now()
   }
 }
 
@@ -100,8 +113,6 @@ export interface CanvasTabDeps {
   bridge: CanvasBridge
   /** Make one session current, so the host's conversation surface shows it. */
   activateSession: (sessionId: string) => void
-  /** The card-session feed the board's overlay subscribes to. */
-  cardSession: CanvasInject['keyedHooks']['cardSession']
 }
 
 /**
@@ -117,7 +128,7 @@ export interface CanvasTabDeps {
  * @returns the project-root cache, so the entry point can warm it at startup.
  */
 export function registerCanvasTabs(ctx: ClientContext, deps: CanvasTabDeps): ProjectRoots {
-  const { bridge, activateSession, cardSession } = deps
+  const { bridge, activateSession } = deps
   const roots = new ProjectRoots(bridge)
 
   ctx.effect(
@@ -166,7 +177,7 @@ export function registerCanvasTabs(ctx: ClientContext, deps: CanvasTabDeps): Pro
         name: 'sidebar.right.pane.tab',
         key: WORKBENCH_ID,
         locale: NS,
-        inject: (): CanvasInject => ({ bridge, activateSession, keyedHooks: { cardSession } }),
+        inject: (): CanvasInject => ({ bridge, activateSession }),
       },
       CanvasView,
     ),

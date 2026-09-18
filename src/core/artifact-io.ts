@@ -13,7 +13,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsTarget, FsVersion, FsWriteIntent } from '@deepseek-ai/dsh-fs'
-import type { CardId, CardSummary, FolderEntry } from '../types.ts'
+import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { ArtifactView, CardId, CardSummary, FolderEntry } from '../types.ts'
 import { PROBE_HEAD_LIMIT, digestOf, detectKind, kindLabel, outlineOf, type KindProbe } from './kind-registry.ts'
 
 /** A classified artifact: the kind plus the facts the board and the digest need. */
@@ -34,6 +35,69 @@ export interface ArtifactFacts {
 export interface ProjectCandidate {
   name: string
   root: string
+}
+
+/**
+ * Whether a caught value is the seam's own typed error, checked structurally.
+ *
+ * The host runtime and this bundle may hold different `FsError` classes for
+ * the same vocabulary, so `instanceof` cannot be trusted across that
+ * boundary; the `FS_` code prefix is the identity `dsh-fs` actually owns.
+ */
+function isSeamError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' && code.startsWith('FS_')
+}
+
+/**
+ * Cards a single project scan may seat. Each one costs the caller a facts
+ * read, so binding a broad root must stay a bounded crawl (F1.3).
+ */
+const MAX_SCAN_CARDS = 60
+
+/** Character cap on the text an artifact view carries across the wire (F3.8). */
+export const VIEW_TEXT_CAP = 2_000_000
+/** Byte cap on the binary media an artifact view carries across the wire (F3.8). */
+export const VIEW_BYTES_CAP = 16_000_000
+
+/** Media types the fullscreen view may inline as a data URL, by extension. */
+const MEDIA_MIME: Readonly<Record<string, string>> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  avif: 'image/avif',
+  svg: 'image/svg+xml',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+}
+
+/**
+ * The MIME type a binary artifact is served to the browser as, or `undefined`
+ * when the extension names nothing the view can inline.
+ *
+ * @param extension - lower-cased extension without the dot.
+ */
+export function mediaMimeOf(extension: string): string | undefined {
+  return MEDIA_MIME[extension]
+}
+
+/**
+ * The slice of `ctx.sandboxPolicy` (`@deepseek-ai/dsh-sandbox-policy`) this
+ * module needs.
+ *
+ * Structural, and resolved by name, because that package is a harness
+ * companion rather than a dependency of this plugin: the same bundle runs in a
+ * composition that confines and in one that never does, and only the former
+ * provides the service.
+ */
+interface SandboxPolicyService {
+  /** The standing policy: deployment default mode, session cwd as the root. */
+  resolve(): SandboxExecutionPolicy
 }
 
 /** Filesystem-facing helpers shared by both runtimes and the tool layer. */
@@ -92,7 +156,7 @@ export class ArtifactIo {
     } catch (error) {
       // Binary or over-budget content still has a decidable kind from its
       // extension; only the deck-vs-page refinement is lost.
-      if (!(error instanceof FsError)) throw error
+      if (!isSeamError(error)) throw error
     }
 
     return {
@@ -161,7 +225,7 @@ export class ArtifactIo {
       try {
         text = (await this.readText(root, cardId, signal)).text
       } catch (error) {
-        if (!(error instanceof FsError)) throw error
+        if (!isSeamError(error)) throw error
       }
     }
 
@@ -177,6 +241,92 @@ export class ArtifactIo {
       bytes: facts.bytes,
       updatedAt: Date.now(),
     }
+  }
+
+  /**
+   * Build the fullscreen view payload of one artifact (F3.8).
+   *
+   * Where {@link summarize} deliberately bounds what it reads, this method
+   * reads *whole* — the view is what a person opens to read the artifact — and
+   * the caps here are wire caps, not digestion: text kinds are truncated at
+   * {@link VIEW_TEXT_CAP} characters and binary media refused above
+   * {@link VIEW_BYTES_CAP} bytes, both reported through `truncated` so the
+   * browser can say so honestly instead of rendering a silent excerpt.
+   *
+   * A missing target is a state, not a failure — a seated card whose file has
+   * not been written yet still gets its viewer, showing an absent state.
+   */
+  async view(root: string, cardId: CardId, signal?: AbortSignal): Promise<ArtifactView> {
+    const facts = await this.facts(root, cardId, signal)
+    const base = {
+      cardId,
+      kind: facts.kind,
+      present: facts.present,
+      text: '',
+      dataUrl: '',
+      truncated: false,
+      bytes: facts.bytes,
+      updatedAt: Date.now(),
+    }
+    if (!facts.present) return base
+
+    const extension = (cardId.split('.').pop() ?? '').toLowerCase()
+
+    // Binary media first: the classifier calls every image `image`, and an
+    // `image` whose readText would fail is the normal case, not an error path.
+    const mime = mediaMimeOf(extension)
+    if (mime !== undefined) {
+      if (facts.bytes > VIEW_BYTES_CAP) return { ...base, truncated: true }
+      const bytes = await this.readBytesOf(root, cardId, signal)
+      return { ...base, dataUrl: `data:${mime};base64,${Buffer.from(bytes).toString('base64')}` }
+    }
+
+    try {
+      const { text } = await this.readText(root, cardId, signal)
+      return { ...base, text: text.slice(0, VIEW_TEXT_CAP), truncated: text.length > VIEW_TEXT_CAP }
+    } catch (error) {
+      // An untextual file of an unknown kind (a PDF, a binary) still gets a
+      // view: inlined as a data URL when small, refused honestly when large.
+      if (!isSeamError(error)) throw error
+      if (facts.bytes > VIEW_BYTES_CAP) return { ...base, truncated: true }
+      const bytes = await this.readBytesOf(root, cardId, signal)
+      return { ...base, dataUrl: `data:${mime ?? 'application/octet-stream'};base64,${Buffer.from(bytes).toString('base64')}` }
+    }
+  }
+
+  /** Read a card's whole content as bytes, through the seam's own cap. */
+  private async readBytesOf(root: string, cardId: CardId, signal?: AbortSignal): Promise<Uint8Array> {
+    const target = await this.targetOf(root, cardId, signal)
+    return this.ctx.fs.readBytes(target, signal, VIEW_BYTES_CAP)
+  }
+
+  /**
+   * The per-call sandbox policy a mutation under `root` runs under.
+   *
+   * A project root is picked by the user in the folder picker, and it *is* this
+   * plugin's workspace: every artifact we write lands inside it. The standing
+   * policy carries a different boundary — the deployment fallback root, or the
+   * calling session's cwd — so a canvas opened outside the agent's own
+   * workspace is refused outright (`FS_SANDBOX_DENIED`, "file access denied
+   * under workspace-write mode"). That is the one that fires here, because a
+   * dock click is an agentless write with no session cwd to inherit.
+   *
+   * So we stamp the boundary ourselves, the way `dsh-tool-fs` stamps its
+   * session cwd, with the project root standing in for it. The MODE is never
+   * touched: a `read-only` composition keeps refusing every write, and
+   * `danger-full-access` keeps delegating unfenced. `undefined` leaves the call
+   * on the backend's own default, which is all a backend that does not confine
+   * has.
+   */
+  private policyFor(root: string): SandboxExecutionPolicy | undefined {
+    const policy = this.ctx.get('sandboxPolicy') as SandboxPolicyService | undefined
+    if (policy === undefined) return undefined
+    const standing = policy.resolve()
+    // Only `workspace-write` reads a boundary out of the policy; the other two
+    // are mode-level facts, and widening one of them would be an escalation
+    // this layer has no mandate to make.
+    if (standing.mode !== 'workspace-write') return standing
+    return { ...standing, workspaceRoot: root }
   }
 
   /**
@@ -201,7 +351,7 @@ export class ArtifactIo {
     // detects a lost race (FS_STALE_VERSION).
     const intent: FsWriteIntent | undefined =
       expected === undefined ? undefined : { kind: 'replaceIfVersion', version: expected.version }
-    const outcome = await this.ctx.fs.writeText(target, content, intent, signal)
+    const outcome = await this.ctx.fs.writeText(target, content, intent, signal, this.policyFor(root))
     return {
       operation: outcome.operation,
       version: String(outcome.version),
@@ -246,7 +396,10 @@ export class ArtifactIo {
    *
    * One level deep, skipping dotfiles and dependency directories. Deeper trees
    * stay reachable through the tool layer; the board's first paint only needs a
-   * representative set rather than every file under `node_modules`.
+   * representative set rather than every file under `node_modules` — so the
+   * result is also capped: each discovered card costs the caller one facts read
+   * per seating, and binding a broad root (a home directory) must not turn into
+   * an unbounded crawl.
    */
   async scanProject(root: string, signal?: AbortSignal): Promise<CardId[]> {
     const ignored = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'target', '.cache'])
@@ -280,7 +433,7 @@ export class ArtifactIo {
         found.push(`${child.name}/${grandchild.name}`)
       }
     }
-    return found.sort()
+    return found.sort().slice(0, MAX_SCAN_CARDS)
   }
 
   /** Candidate project roots under the configured picker root. */

@@ -1,11 +1,12 @@
 /**
  * dsh-canvas — contributing to seats this package does not own.
  *
- * Two of the surfaces the product doc places the canvas on belong to other
- * packages: the conversation view ring (`conversation.view`) and the tool-call
- * card (`tool.call.toolview`). Neither package is a dependency of this one, so
- * their entries in `SlotMap` cannot be read — and declaring them here would be
- * this package claiming to own a contract it does not.
+ * Three of the surfaces the product doc places the canvas on belong to other
+ * packages: the main column (`main`), the sidebar's panel list
+ * (`sidebar.panellist`) and the tool-call card (`tool.call.toolview`). None of
+ * those packages is a dependency of this one, so their entries in `SlotMap`
+ * cannot be read — and declaring them here would be this package claiming to
+ * own a contract it does not.
  *
  * What the runtime actually requires is a string key. This module is the single
  * place that says so out loud, and it is what lets every one of these
@@ -27,6 +28,8 @@ export interface ForeignRegistration {
   order?: number
   /** `list` seats read a thunked label so a language change needs no re-registration. */
   label?: () => string
+  /** Dictionary namespace the seat binds as the component's `t`. */
+  locale?: string
   /** The registrant's injected business face. */
   inject?: () => object
 }

@@ -3,7 +3,7 @@
  *
  * Arrangement is geometry over the graph and nothing else: it takes the cards,
  * the source edges and a strategy, and returns the positions the cards should
- * move to. It touches no storage, so `canvas.arrange_on_board` can be reasoned
+ * move to. It touches no storage, so `canvas_arrange_on_board` can be reasoned
  * about (and tested) as one pure function, and a drag that the user has already
  * done by hand is never silently undone unless the caller asks for `organize`.
  */

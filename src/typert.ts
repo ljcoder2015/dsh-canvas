@@ -45,6 +45,7 @@ const CARD_MEMBERS: readonly TypertMemberModel[] = [
   member('createCard', 'createCard(projectId, cardId, kind, position, signal?): Promise<BoardCard>', '在画布上新建一张卡片。'),
   member('removeCard', 'removeCard(projectId, cardId, signal?): Promise<boolean>', '从画布移除卡片（不删除磁盘文件）。'),
   member('readSummary', 'readSummary(projectId, cardId, signal?): Promise<CardSummary>', '读取一张卡片产物的摘要。'),
+  member('readArtifact', 'readArtifact(projectId, cardId, signal?): Promise<ArtifactView>', '读取一张卡片产物的全屏视图载荷（全文或媒体 data URL）。'),
   member('readSources', 'readSources(projectId, cardId, signal?): Promise<CardSummary[]>', '读取一张卡片的全部取材来源摘要。'),
   member('injectCard', 'injectCard(projectId, cardId, sourceCardId, mode, signal?): Promise<CardSummary>', '把上游产物注入卡片会话。'),
   member('openSession', 'openSession(projectId, cardId, signal?): Promise<SessionBinding>', '打开（或复用）卡片绑定的 Agent 会话。'),
@@ -55,6 +56,8 @@ const CARD_MEMBERS: readonly TypertMemberModel[] = [
   member('readPending', 'readPending(projectId, cardId, signal?): Promise<PendingIntent[]>', '读取排队中的结构化意图。'),
   member('exportCard', 'exportCard(projectId, cardId, format, signal?): Promise<ExportResult>', '导出产物为指定格式。'),
   member('publishCard', 'publishCard(projectId, cardId, signal?): Promise<ExportResult>', '把产物发布到子域名。'),
+  member('sendMessage', 'sendMessage(projectId, cardId, prompt, signal?): Promise<SessionBinding>', '把用户在卡片输入框里写的提示词提交给卡片会话，作为下一轮对话。'),
+  member('readLastPrompt', 'readLastPrompt(projectId, cardId, signal?): Promise<LastPrompt>', '读取用户对该卡片会话最近一条自己发出的消息（F3.9，供输入框回填）。'),
 ]
 
 /** The one contribution this package makes to the Host registry. */

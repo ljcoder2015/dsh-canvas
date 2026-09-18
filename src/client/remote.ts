@@ -14,12 +14,14 @@
  */
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import type {
+  ArtifactView,
   BoardCard,
   BoardSnapshot,
   BoardSource,
   CardSummary,
   ExportResult,
   FolderEntry,
+  LastPrompt,
   Note,
   PendingIntent,
   Point,
@@ -71,6 +73,7 @@ export interface CardFace {
   createCard(projectId: string, cardId: string, kind: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
   removeCard(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<boolean>>
   readSummary(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary>>
+  readArtifact(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<ArtifactView>>
   readSources(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary[]>>
   injectCard(
     projectId: string,
@@ -100,6 +103,8 @@ export interface CardFace {
   readPending(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<PendingIntent[]>>
   exportCard(projectId: string, cardId: string, format: string, signal?: AbortSignal): Promise<RemoteResult<ExportResult>>
   publishCard(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<ExportResult>>
+  sendMessage(projectId: string, cardId: string, prompt: string, signal?: AbortSignal): Promise<RemoteResult<SessionBinding>>
+  readLastPrompt(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<LastPrompt>>
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -128,6 +133,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'card/createCard': CardFace['createCard']
     'card/removeCard': CardFace['removeCard']
     'card/readSummary': CardFace['readSummary']
+    'card/readArtifact': CardFace['readArtifact']
     'card/readSources': CardFace['readSources']
     'card/injectCard': CardFace['injectCard']
     'card/openSession': CardFace['openSession']
@@ -138,6 +144,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'card/readPending': CardFace['readPending']
     'card/exportCard': CardFace['exportCard']
     'card/publishCard': CardFace['publishCard']
+    'card/sendMessage': CardFace['sendMessage']
+    'card/readLastPrompt': CardFace['readLastPrompt']
   }
 
   interface TypertRemoteNamespaceMap {

@@ -15,6 +15,7 @@ import type {} from '@deepseek-ai/dsh-typert-registry'
 import { CANVAS_DOMAIN } from './domain.ts'
 import { ArtifactIo } from './core/artifact-io.ts'
 import { SessionManager } from './core/session-manager.ts'
+import { ModelRouting, modelFaces } from './core/model-routing.ts'
 import { CanvasRuntime } from './runtime.ts'
 import { CardRuntime } from './card-runtime.ts'
 import { registerTools } from './tools.ts'
@@ -79,6 +80,10 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
 
   const io = new ArtifactIo(ctx)
   const sessions = new SessionManager(ctx)
+  // Card conversations are created by this plugin rather than by the session
+  // controller, so the model policy they normally inherit is read once here and
+  // applied to every agent this plugin opens (`core/model-routing.ts`).
+  const routing = new ModelRouting(modelFaces(ctx))
 
   const canvas = new CanvasRuntime(ctx, {
     domain,
@@ -95,6 +100,7 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
     summaryBudget: resolved.summaryBudget,
     sourceDepth: resolved.sourceDepth,
     upstreamPolicy: resolved.upstreamPolicy,
+    routing,
     capabilities: resolveCapabilities(ctx),
   })
 
