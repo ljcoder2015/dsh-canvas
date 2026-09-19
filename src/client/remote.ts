@@ -71,6 +71,7 @@ export interface CanvasFace {
 /** The `card` namespace — artifact digests, session binding, writes, export. */
 export interface CardFace {
   createCard(projectId: string, cardId: string, kind: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
+  scaffoldWebapp(projectId: string, name: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
   removeCard(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<boolean>>
   readSummary(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary>>
   readArtifact(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<ArtifactView>>
@@ -131,6 +132,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'canvas/removeNote': CanvasFace['removeNote']
 
     'card/createCard': CardFace['createCard']
+    'card/scaffoldWebapp': CardFace['scaffoldWebapp']
     'card/removeCard': CardFace['removeCard']
     'card/readSummary': CardFace['readSummary']
     'card/readArtifact': CardFace['readArtifact']

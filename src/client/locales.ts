@@ -37,6 +37,7 @@ export const zh = {
   'canvas.dock.add': '新增卡片',
   'canvas.dock.keys': '快捷键',
   'canvas.dock.text': '文本',
+  'canvas.dock.webapp': '应用',
   'canvas.dock.image': '图片',
   'canvas.dock.vector': '矢量图片',
 
@@ -180,6 +181,7 @@ export const en = {
   'canvas.dock.add': 'New card',
   'canvas.dock.keys': 'Shortcuts',
   'canvas.dock.text': 'Text',
+  'canvas.dock.webapp': 'Web app',
   'canvas.dock.image': 'Image',
   'canvas.dock.vector': 'Vector image',
 

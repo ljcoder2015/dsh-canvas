@@ -65,7 +65,8 @@
 |------|------|------|
 | F2.1 | 形态注册机制 | 一种形态一个条目，含 detect / preview / export / publish |
 | F2.2 | 文件证据认定 | 由扩展名与内容判定，**不由用户声明** |
-| F2.3 | 内置形态 | HTML Deck、站点、Markdown、图片、视频、数据图表 |
+| F2.3 | 内置形态 | **应用（webapp）**、HTML Deck、站点、Markdown、图片、视频、数据图表 |
+| F2.4 | 应用节点 | 新建「应用」即建一个**文件夹**并写入 web 应用脚手架：`dsh.webapp.json` 清单 + 入口 `index.html` + shadcn 设计令牌 `styles.css` + **Web Components** `app.js`（wc-button / wc-input / wc-card / wc-badge）。文件夹带清单即认定为 webapp（先于站点判定）；全屏预览把入口引用的**本地样式与脚本内联**进沙箱 iframe——多文件在磁盘上保持原样，预览照样跑起来 |
 | F3.8 | 双击全屏预览 | 弹窗**铺满整块画布**（同宽同高、不留边距），头部只有产物名 + 形态 + 关闭；按形态分派查看器：Markdown 渲染 / 图片视频 / **沙箱 iframe**（`allow-scripts` 无同源）/ CSV·JSON 表格 / 纯文本兜底 |
 | F3.10 | 操作胶囊收敛 | 只留**没有其它入口**的动作：对话、导出、从画布移除 |
 
@@ -314,7 +315,7 @@ dsh-canvas/
 │       ├── tool-view.tsx       # canvas_* 的实时工具卡片
 │       ├── shortcuts.ts        # 键位真源 + 说明表
 │       └── locales.ts · styles.ts
-└── tests/                  # 14 个 spec
+└── tests/                  # 15 个 spec
 ```
 
 ---

@@ -16,6 +16,7 @@ import type { FsTarget, FsVersion, FsWriteIntent } from '@deepseek-ai/dsh-fs'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { ArtifactView, CardId, CardSummary, FolderEntry } from '../types.ts'
 import { PROBE_HEAD_LIMIT, digestOf, detectKind, kindLabel, outlineOf, type KindProbe } from './kind-registry.ts'
+import { inlineWebAppAssets, webAppAssetRefs, webappFiles } from './webapp.ts'
 
 /** A classified artifact: the kind plus the facts the board and the digest need. */
 export interface ArtifactFacts {
@@ -229,7 +230,7 @@ export class ArtifactIo {
       }
     }
 
-    const isDirectory = facts.kind === 'site' || facts.kind === 'folder'
+    const isDirectory = facts.kind === 'site' || facts.kind === 'webapp' || facts.kind === 'folder'
     return {
       cardId,
       kind: facts.kind,
@@ -241,6 +242,59 @@ export class ArtifactIo {
       bytes: facts.bytes,
       updatedAt: Date.now(),
     }
+  }
+
+  /**
+   * Write a webapp scaffold into a fresh folder under the project root (应用节点).
+   *
+   * Four small files — manifest, entry page, token stylesheet, components —
+   * through the same seam and the same per-call policy as {@link write}. The
+   * manifest goes first so a scaffold interrupted partway still leaves kind
+   * evidence behind: the folder reads as a webapp, not as a half-built site.
+   * The caller owns collision handling; this method overwrites nothing it did
+   * not just decide to create.
+   */
+  async writeScaffold(root: string, folder: string, title: string, signal?: AbortSignal): Promise<void> {
+    for (const file of webappFiles(title)) {
+      const target = await this.ctx.fs.resolve(`${folder}/${file.path}`, { cwd: root, signal })
+      await this.ctx.fs.writeText(target, file.content, undefined, signal, this.policyFor(root))
+    }
+  }
+
+  /** Cap on the local assets one webapp preview inlines. */
+  private static readonly WEBAPP_ASSET_BUDGET = 12
+  /** Character cap on one inlined asset; bigger files are left as references. */
+  private static readonly WEBAPP_ASSET_CAP = 1_000_000
+
+  /**
+   * Read a webapp entry's local assets and inline them into the page text.
+   *
+   * The fullscreen viewer renders one `srcDoc`, and a `srcdoc` document has no
+   * base URL to resolve `styles.css` or `app.js` against — so the preview of a
+   * multi-file app would run unstyled and dead without this. Referenced assets
+   * that are missing or unreadable are left as references, which is the honest
+   * rendering of a broken page rather than a silent one.
+   */
+  private async inlineWebAppEntry(
+    root: string,
+    cardId: CardId,
+    html: string,
+    signal?: AbortSignal | undefined,
+  ): Promise<string> {
+    const refs = webAppAssetRefs(html).slice(0, ArtifactIo.WEBAPP_ASSET_BUDGET)
+    if (refs.length === 0) return html
+    const dir = cardId.includes('/') ? cardId.slice(0, cardId.lastIndexOf('/') + 1) : ''
+    const assets = new Map<string, string>()
+    for (const ref of refs) {
+      try {
+        const { text } = await this.readText(root, `${dir}${ref}`, signal)
+        if (text.length <= ArtifactIo.WEBAPP_ASSET_CAP) assets.set(ref, text)
+      } catch (error) {
+        if (!isSeamError(error)) throw error
+      }
+    }
+    if (assets.size === 0) return html
+    return inlineWebAppAssets(html, (ref) => assets.get(ref))
   }
 
   /**
@@ -283,7 +337,8 @@ export class ArtifactIo {
 
     try {
       const { text } = await this.readText(root, cardId, signal)
-      return { ...base, text: text.slice(0, VIEW_TEXT_CAP), truncated: text.length > VIEW_TEXT_CAP }
+      const body = facts.kind === 'webapp' ? await this.inlineWebAppEntry(root, cardId, text, signal) : text
+      return { ...base, text: body.slice(0, VIEW_TEXT_CAP), truncated: body.length > VIEW_TEXT_CAP }
     } catch (error) {
       // An untextual file of an unknown kind (a PDF, a binary) still gets a
       // view: inlined as a data URL when small, refused honestly when large.

@@ -377,6 +377,10 @@ export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.kind, P.position], cancellation: signal, result: R.card,
   },
   {
+    id: 'dsh-canvas#card/scaffold_webapp', service: 'card', namespace: 'card', method: 'scaffoldWebapp',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.name, P.position], cancellation: signal, result: R.card,
+  },
+  {
     id: 'dsh-canvas#card/remove_card', service: 'card', namespace: 'card', method: 'removeCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.boolean,
   },

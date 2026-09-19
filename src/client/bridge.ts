@@ -258,6 +258,17 @@ export class CanvasBridge {
     return unwrap(this.card.createCard(projectId, cardId, kind, position, this.signal))
   }
 
+  /**
+   * Scaffold a webapp into a fresh folder and seat its entry (应用节点).
+   *
+   * The host settles the folder name — the answer's card id carries the
+   * folder actually written, which only differs from the request when a
+   * folder of that name was already on disk.
+   */
+  scaffoldWebapp(projectId: string, name: string, position: Point): Promise<BoardCard> {
+    return unwrap(this.card.scaffoldWebapp(projectId, name, position, this.signal))
+  }
+
   /** Take a card off the board. The file stays. */
   removeCard(projectId: string, cardId: string): Promise<boolean> {
     return unwrap(this.card.removeCard(projectId, cardId, this.signal))

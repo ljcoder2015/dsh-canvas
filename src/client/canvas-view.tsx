@@ -102,11 +102,18 @@ interface DockSpec {
   readonly kind: string
   /** Seed content for the artifact; absent means the card is seated without one. */
   readonly seed?: string
+  /**
+   * 应用节点：不是种一个文件，而是建一个文件夹、写入 web 应用脚手架
+   * （web components + shadcn 风格），入口 `index.html` 落成卡片。创建走
+   * `card.scaffoldWebapp`，文件夹名由 host 按磁盘撞名情况落定。
+   */
+  readonly webapp?: boolean
 }
 
-/** The dock's three options, in menu order. */
+/** The dock's creation options, in menu order. */
 const DOCK_SPECS: readonly DockSpec[] = [
   { label: 'canvas.dock.text', extension: 'md', kind: 'markdown', seed: '# 未命名\n' },
+  { label: 'canvas.dock.webapp', extension: 'webapp', kind: 'webapp', webapp: true },
   { label: 'canvas.dock.image', extension: 'png', kind: 'image' },
   {
     label: 'canvas.dock.vector',
@@ -121,6 +128,20 @@ function freeCardId(cards: readonly BoardCard[], extension: string): string {
   let cardId = `untitled.${extension}`
   for (let n = 2; cards.some((card) => card.id === cardId); n += 1) cardId = `untitled-${n}.${extension}`
   return cardId
+}
+
+/**
+ * 一个还没被占用的应用文件夹名。
+ *
+ * 预判只对**画布上已坐的卡**负责——磁盘上真正的撞名由 host 在落盘时再兜一遍
+ * （撞了会自动加序号并回报实际 id），这里先挑一个大概率干净的名字，让连线
+ * 能在发起前就指向正确的一端。
+ */
+function freeAppFolder(cards: readonly BoardCard[]): string {
+  const taken = (folder: string) => cards.some((card) => card.id.startsWith(`${folder}/`))
+  let folder = 'app'
+  for (let n = 2; taken(folder); n += 1) folder = `app-${n}`
+  return folder
 }
 
 /**
@@ -574,11 +595,27 @@ export function CanvasBoard(props: CanvasBoardProps) {
   )
 
   /**
+   * 按一种形态把产物落到画布上：普通形态是「席位 + 种子文件」两步；应用节点是
+   * 一次脚手架调用——文件夹名先在本地预判，实际落定的名字以 host 回报的卡片 id
+   * 为准（磁盘撞名时它会带序号），所以后续连线一律用返回的 id。
+   */
+  const spawnFromSpec = useCallback(
+    async (spec: DockSpec, position: Point): Promise<BoardCard> => {
+      if (spec.webapp === true) return bridge.scaffoldWebapp(projectId, freeAppFolder(cards), position)
+      const cardId = freeCardId(cards, spec.extension)
+      const card = await bridge.createCard(projectId, cardId, spec.kind, position)
+      if (spec.seed !== undefined) await bridge.writeText(projectId, cardId, spec.seed)
+      return card
+    },
+    [bridge, cards, projectId],
+  )
+
+  /**
    * 在放手点上建一张新卡片，并把这一笔画成取材线。
    *
-   * 建卡与连线是同一个动作的两半，所以放在同一次 `run` 里：id 在本地就算好
-   * （路径即 id，撞名加序号），新卡片按放手点落位，于是它的端口正好接住刚才的线头
-   * ——线因此不是「跳」到卡片上，而是就地由细线变成一条正常的取材边。
+   * 建卡与连线是同一个动作的两半，所以放在同一次 `run` 里：新卡片按放手点落位，
+   * 于是它的端口正好接住刚才的线头——线因此不是「跳」到卡片上，而是就地由细线
+   * 变成一条正常的取材边。
    */
   const createLinkedNode = useCallback(
     (spec: DockSpec) => {
@@ -586,17 +623,15 @@ export function CanvasBoard(props: CanvasBoardProps) {
       setDropNode(undefined)
       if (drop === undefined || projectId === '') return
       const position = seatAtAnchor(drop.at, drop.side)
-      const cardId = freeCardId(cards, spec.extension)
-      const upstream = drop.side === 'out' ? drop.cardId : cardId
-      const downstream = drop.side === 'out' ? cardId : drop.cardId
       void run(async () => {
-        await bridge.createCard(projectId, cardId, spec.kind, position)
-        if (spec.seed !== undefined) await bridge.writeText(projectId, cardId, spec.seed)
+        const card = await spawnFromSpec(spec, position)
+        const upstream = drop.side === 'out' ? drop.cardId : card.id
+        const downstream = drop.side === 'out' ? card.id : drop.cardId
         await bridge.linkSource(projectId, upstream, downstream)
-        setSelected(cardId)
+        setSelected(card.id)
       })
     },
-    [bridge, cards, dropNode, projectId, run],
+    [bridge, dropNode, projectId, run, spawnFromSpec],
   )
 
   const removeCard = useCallback(
@@ -1029,7 +1064,9 @@ export function CanvasBoard(props: CanvasBoardProps) {
    *
    * The id is the file's path relative to the project root, so uniqueness is
    * resolved against the seated cards with a numeric suffix — never by
-   * overwriting an existing artifact's seat.
+   * overwriting an existing artifact's seat. A webapp spec goes through the
+   * scaffold call instead, and the seated id is whatever folder the host
+   * actually wrote.
    */
   const createDockCard = useCallback(
     (spec: DockSpec) => {
@@ -1039,16 +1076,14 @@ export function CanvasBoard(props: CanvasBoardProps) {
         x: ((rect?.width ?? 400) / 2 - view.x) / view.zoom - CARD_W / 2,
         y: ((rect?.height ?? 300) / 2 - view.y) / view.zoom - CARD_H / 2,
       }
-      const cardId = freeCardId(cards, spec.extension)
       setDockMenu(undefined)
       void run(async () => {
-        const card = await bridge.createCard(projectId, cardId, spec.kind, position)
-        if (spec.seed !== undefined) await bridge.writeText(projectId, cardId, spec.seed)
+        const card = await spawnFromSpec(spec, position)
         setSelected(card.id)
         return card
       })
     },
-    [bridge, cards, projectId, run, view],
+    [projectId, run, spawnFromSpec, view],
   )
 
   /** 顶栏那条确认移除：目标只可能是卡片——线不再可点，画布上也没有摘线的入口。 */
@@ -1409,6 +1444,17 @@ function DockIcon({ extension }: { extension: string }) {
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     'aria-hidden': true,
+  }
+  if (extension === 'webapp') {
+    // 应用：一个窗口里拼着组件方块——web 组件拼装成的应用，不是单页文档。
+    return (
+      <svg {...shared}>
+        <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+        <path d="M2 5.2h12" />
+        <rect x="4.4" y="7.2" width="3.2" height="3.2" rx="0.6" />
+        <path d="M9.4 7.6h2.6M9.4 9h2.6M4.4 12h7.6" />
+      </svg>
+    )
   }
   if (extension === 'png') {
     return (

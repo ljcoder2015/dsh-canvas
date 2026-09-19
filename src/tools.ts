@@ -286,10 +286,14 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.createOnBoard,
       description:
-        '在画布上创建内容：type=note 创建共享便利贴（决策记录），type=card 把项目内的一个产物落成卡片。',
+        '在画布上创建内容：type=note 创建共享便利贴（决策记录），type=card 把项目内的一个产物落成卡片，type=webapp 新建一个应用节点——建文件夹并写入 web components + shadcn 风格的 web 应用脚手架。',
       parameters: {
-        type: { type: 'string', enum: ['note', 'card'], description: '创建类型', required: true },
-        content: { type: 'string', description: 'note 为便利贴文字；card 为项目内相对路径', required: true },
+        type: { type: 'string', enum: ['note', 'card', 'webapp'], description: '创建类型', required: true },
+        content: {
+          type: 'string',
+          description: 'note 为便利贴文字；card 为项目内相对路径；webapp 为应用显示名（文件夹名由它生成）',
+          required: true,
+        },
         kind: { type: 'string', description: 'type=card 时的形态 id；省略则按文件证据认定' },
         x: { type: 'number', description: '画布 x 坐标；省略则自动找空位' },
         y: { type: 'number', description: '画布 y 坐标；省略则自动找空位' },
@@ -302,7 +306,9 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         },
         render: (_args, value) => {
           const created = value as { type: string; id: string }
-          return text(created.type === 'note' ? `已创建便利贴 ${created.id}。` : `已在画布上创建卡片 ${created.id}。`)
+          if (created.type === 'note') return text(`已创建便利贴 ${created.id}。`)
+          if (created.type === 'webapp') return text(`已创建应用 ${created.id}（入口 index.html，文件夹内含脚手架）。`)
+          return text(`已在画布上创建卡片 ${created.id}。`)
         },
       },
       async execute(args, exec) {
@@ -317,6 +323,15 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
             exec.signal,
           )
           return { type: 'note', id: note.id }
+        }
+        if (args.type === 'webapp') {
+          const card = await deps.card.scaffoldWebapp(
+            projectId,
+            String(args.content),
+            { x: x ?? 48, y: y ?? 170 },
+            exec.signal,
+          )
+          return { type: 'webapp', id: card.id }
         }
         const cardId = String(args.content)
         const kind = typeof args.kind === 'string' ? args.kind : 'file'

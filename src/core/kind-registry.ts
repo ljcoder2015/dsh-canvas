@@ -7,6 +7,7 @@
  * naming tests can call it without a Cordis container.
  */
 import type { ExportFormat, KindDefinition } from '../types.ts'
+import { WEBAPP_MANIFEST } from './webapp.ts'
 
 /** Text and byte evidence gathered from the target before classification. */
 export interface KindProbe {
@@ -40,6 +41,14 @@ export const BUILTIN_KINDS: readonly KindDefinition[] = [
     addressPatterns: ['dsh-resource://file/**/*.html'],
     directory: false,
     exportFormats: ['html', 'pdf', 'png'],
+    publishable: true,
+  },
+  {
+    id: 'webapp',
+    label: '应用',
+    addressPatterns: ['dsh-resource://file/**/index.html'],
+    directory: true,
+    exportFormats: ['zip', 'html'],
     publishable: true,
   },
   {
@@ -124,6 +133,19 @@ function isSiteDirectory(probe: KindProbe): boolean {
   return probe.directory && probe.children.some((name) => name.toLowerCase() === 'index.html')
 }
 
+/**
+ * True for a directory that carries the webapp manifest.
+ *
+ * A webapp is a site plus structure — the manifest is what separates an
+ * *application* folder (web components, shadcn tokens, an agent-editable
+ * scaffold) from any other directory with an `index.html`. The check runs
+ * before the site check: with the manifest present the folder is a webapp
+ * even though it also has an entry point.
+ */
+function isWebAppDirectory(probe: KindProbe): boolean {
+  return probe.directory && probe.children.includes(WEBAPP_MANIFEST)
+}
+
 /** True when a `.html` file is a slide deck rather than a plain page. */
 function looksLikeDeck(head: string): boolean {
   return /\bdata-slide\b|\bclass="[^"]*\bslide\b|reveal\.js|impress\.js|section\s+data-/.test(head)
@@ -138,7 +160,10 @@ function looksLikeDeck(head: string): boolean {
  * `undefined` for a path that exists.
  */
 export function detectKind(probe: KindProbe, definitions: readonly KindDefinition[] = BUILTIN_KINDS): string {
-  if (probe.directory) return isSiteDirectory(probe) ? 'site' : 'folder'
+  if (probe.directory) {
+    if (isWebAppDirectory(probe)) return 'webapp'
+    return isSiteDirectory(probe) ? 'site' : 'folder'
+  }
 
   const { extension, basename, head } = probe
 
@@ -181,6 +206,7 @@ export function outlineOf(kind: string, text: string, limit = 24): string[] {
     case 'html-deck':
       return take(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/gi).map((line) => line.replace(/<[^>]+>/g, '').trim())
     case 'site':
+    case 'webapp':
       return take(/<title[^>]*>([\s\S]*?)<\/title>/gi)
     case 'data': {
       const [header = ''] = text.split(/\r?\n/)

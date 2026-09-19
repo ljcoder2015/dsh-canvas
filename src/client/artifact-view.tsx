@@ -43,6 +43,8 @@ export function viewerIdFor(kind: string): ViewerId {
       return 'image'
     case 'html-deck':
     case 'site':
+    case 'webapp':
+      // 应用是入口页 + 本地资源：host 已把资源内联进文本，沙箱 iframe 里直接就是跑起来的应用。
       return 'deck'
     case 'data':
       return 'data'

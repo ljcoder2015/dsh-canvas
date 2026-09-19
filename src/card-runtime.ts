@@ -33,6 +33,7 @@ import type { CanvasDomain } from './domain.ts'
 import type { CanvasCapabilities } from './capabilities.ts'
 import type { ArtifactIo } from './core/artifact-io.ts'
 import { cardKeyOf, SessionManager, type CardSession } from './core/session-manager.ts'
+import { slugify } from './core/ids.ts'
 import { cardPreset, composeCardAgent } from './core/agent-preset.ts'
 import { lastUserPromptOfEvents, sessionQueryFace } from './core/session-log.ts'
 import type { ModelRouting } from './core/model-routing.ts'
@@ -151,6 +152,30 @@ export class CardRuntime extends TypertRemoteService {
     }
     await this.cards.delete(key)
     return true
+  }
+
+  /**
+   * Scaffold a webapp into a fresh folder and seat its entry as a card (应用节点).
+   *
+   * One call, one folder: `name` is slugged into a directory under the project
+   * root, the scaffold (manifest, entry page, shadcn token stylesheet, web
+   * components) is written into it, and the entry `index.html` is seated with
+   * the kind the manifest's evidence resolves to — `webapp`. Naming collisions
+   * are settled here, against the disk rather than the board: a folder that
+   * already exists (even one whose card was removed) gets a numeric suffix, so
+   * a scaffold never overwrites a file it did not just create.
+   */
+  @Remote
+  async scaffoldWebapp(projectId: ProjectId, name: string, position: Point, signal?: AbortSignal): Promise<BoardCard> {
+    signal?.throwIfAborted()
+    const project = this.requireProject(projectId)
+    const base = slugify(name)
+    let folder = base
+    for (let n = 2; await this.deps.io.probe(project.root, folder, signal).then((probe) => probe.present); n += 1) {
+      folder = `${base}-${n}`
+    }
+    await this.deps.io.writeScaffold(project.root, folder, name, signal)
+    return this.createCard(projectId, `${folder}/index.html`, 'webapp', position, signal)
   }
 
   // ── digests ─────────────────────────────────────────────────────────────
