@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { VIEW_TEXT_CAP, mediaMimeOf } from '../src/core/artifact-io.ts'
 import { artifactViewSchema } from '../src/contract.ts'
-import { parseDelimited, renderMarkdown, viewerIdFor } from '../src/client/artifact-view.tsx'
+import { isEditableText, parseDelimited, renderMarkdown, viewerIdFor } from '../src/client/artifact-view.tsx'
 
 describe('kind → viewer mapping', () => {
   it('sends each content kind to its own viewer', () => {
@@ -23,6 +23,27 @@ describe('kind → viewer mapping', () => {
     expect(viewerIdFor('file')).toBe('text')
     expect(viewerIdFor('folder')).toBe('text')
     expect(viewerIdFor('something-new')).toBe('text')
+  })
+})
+
+describe('in-place text editing', () => {
+  it('offers the editor exactly where the artifact is its own text', () => {
+    expect(isEditableText('markdown')).toBe(true)
+    expect(isEditableText('text')).toBe(true)
+  })
+
+  it('keeps the editor away from kinds that would be overwritten whole', () => {
+    // 数据看的是表格、Deck 看的是渲染结果、图片与视频根本不是文字：
+    // 编辑器整篇写回，这些形态给一枚编辑钮就是把文件改成文本。
+    expect(isEditableText('data')).toBe(false)
+    expect(isEditableText('html-deck')).toBe(false)
+    expect(isEditableText('site')).toBe(false)
+    expect(isEditableText('webapp')).toBe(false)
+    expect(isEditableText('image')).toBe(false)
+    expect(isEditableText('video')).toBe(false)
+    expect(isEditableText('folder')).toBe(false)
+    expect(isEditableText('file')).toBe(false)
+    expect(isEditableText('')).toBe(false)
   })
 })
 

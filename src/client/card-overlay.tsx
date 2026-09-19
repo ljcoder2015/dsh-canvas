@@ -22,6 +22,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { BoardCard, CardSummary } from '../types.ts'
+import { isEditableText } from './artifact-view.tsx'
 import type { CanvasBridge, CatalogModel, ModelCatalog } from './bridge.ts'
 import {
   nodeTypeOf,
@@ -65,6 +66,8 @@ export interface CardSelectionProps {
   draft: string
   /** Make the card's session current so its conversation becomes the main surface. */
   onChat: () => void
+  /** Open a text node's artifact in the viewer's editor — 手动输入. */
+  onManualEdit: () => void
   /** Export in the kind's first supported format. */
   onExport: () => void
   /** Take the card off the board; the file stays. */
@@ -88,10 +91,14 @@ export interface CardSelectionProps {
  * the card itself (double-click → fullscreen viewer, which carries its own way
  * into the sidebar), and declaring a material edge belongs to the card's ports
  * and the composer's ⊕ menu — repeating either as a pill button just put a
- * second, weaker door next to the real one.
+ * second, weaker door next to the real one. 手动输入 is the exception that
+ * proves the rule: editing a text node by hand is not the same act as opening
+ * it, and nothing else on the board offers it — the pill is its only entry, and
+ * it opens the viewer *in its editor* rather than at the top of the file.
  */
 const PILL = [
   ['canvas.action.chat', 'onChat'],
+  ['canvas.action.manual', 'onManualEdit'],
   ['canvas.action.export', 'onExport'],
   ['canvas.action.remove', 'onRemove'],
 ] as const
@@ -335,6 +342,10 @@ export function CardSelection(props: CardSelectionProps) {
   } = props
   const [menu, setMenu] = useState(false)
   const hasExport = (summary?.kind ?? '') !== 'folder'
+  // 手动输入 是文本节点的门：编辑器整篇写回文件，所以只在「产物就是它自己的文字」
+  // 的形态上出现——文件夹、图片、Deck 都没有可打字的地方，给它们一枚按钮只是
+  // 一枚点了没反应（或更糟：把别的形态覆盖成文本）的按钮。
+  const canEditText = isEditableText(summary?.kind ?? '')
   const canSend = draft.trim() !== ''
   // The memory is keyed by what the card *is*, not by which card it is: that is
   // what lets the next node of the same type start from the last choice.
@@ -345,6 +356,7 @@ export function CardSelection(props: CardSelectionProps) {
       <div className="dsh-canvas-toolbar is-horizontal" style={{ left: `${card.position.x + 100}px`, top: `${card.position.y - 44}px`, transform: 'translateX(-50%)' }}>
         {PILL.map(([key, handler]) => {
           if (key === 'canvas.action.export' && !hasExport) return null
+          if (key === 'canvas.action.manual' && !canEditText) return null
           return (
             <button className="dsh-canvas-chipbtn" key={key} onClick={props[handler]}>
               {t(key)}

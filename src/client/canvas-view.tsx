@@ -295,8 +295,12 @@ export function CanvasBoard(props: CanvasBoardProps) {
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft | undefined>>({})
   /** Whether the fullscreen prompt modal is open (for the selected card). */
   const [expanded, setExpanded] = useState(false)
-  /** The card whose artifact is open in the fullscreen viewer (F3.8). */
-  const [viewing, setViewing] = useState<string | undefined>(undefined)
+  /**
+   * The card whose artifact is open in the fullscreen viewer (F3.8), and which
+   * face of it to open: `edit` is 手动输入（文本节点操作栏那枚按钮）——
+   * 同一个弹窗，直接落在编辑面上。
+   */
+  const [viewing, setViewing] = useState<{ cardId: string; edit: boolean } | undefined>(undefined)
   /** Digests of each card's declared material chain, keyed by card id. */
   const [materials, setMaterials] = useState<Record<string, CardSummary[]>>({})
 
@@ -638,7 +642,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
     (cardId: string) => {
       if (projectId === '') return
       setSelected(undefined)
-      setViewing((current) => (current === cardId ? undefined : current))
+      setViewing((current) => (current?.cardId === cardId ? undefined : current))
       void run(() => bridge.removeCard(projectId, cardId))
     },
     [bridge, projectId, run],
@@ -1157,7 +1161,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 onConnectDrop={finishLink}
                 onActivate={() => {
                   setSelected(card.id)
-                  setViewing(card.id)
+                  setViewing({ cardId: card.id, edit: false })
                 }}
               />
             ))}
@@ -1202,6 +1206,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 t={t}
                 draft={promptDraft}
                 onChat={() => openCardSession(selectionCard)}
+                onManualEdit={() => setViewing({ cardId: selectionCard.id, edit: true })}
                 onExport={() => exportCard(selectionCard)}
                 onRemove={() => setRemoval(selectionCard.id)}
                 onAddMaterial={(sourceId) => addMaterial(selectionCard, sourceId)}
@@ -1350,9 +1355,11 @@ export function CanvasBoard(props: CanvasBoardProps) {
         {viewing !== undefined && projectId !== '' ? (
           <ArtifactModal
             projectId={projectId}
-            cardId={viewing}
+            cardId={viewing.cardId}
             bridge={bridge}
             t={t}
+            initialMode={viewing.edit ? 'edit' : 'preview'}
+            onSaved={() => setStamp((value) => value + 1)}
             onClose={() => setViewing(undefined)}
           />
         ) : null}

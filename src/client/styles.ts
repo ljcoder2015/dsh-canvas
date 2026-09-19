@@ -190,6 +190,14 @@ const css = `
   font:11px/16px var(--dsh-mono);color:var(--dsh-sunset)}
 .dsh-canvas-viewer-note{flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:24px;
   color:var(--dsh-fg-3);font:13px/20px var(--dsh-font);text-align:center}
+/* 文本节点的编辑面：编辑区就是整块画布面积——预览与编辑是同一弹窗的两种尺寸。 */
+.dsh-canvas-viewer-editor{flex:1 1 auto;min-height:0;box-sizing:border-box;width:100%;padding:18px 24px;resize:none;
+  border:none;outline:none;background:transparent;color:var(--dsh-fg);
+  font:13px/22px var(--dsh-mono);tab-size:2}
+.dsh-canvas-viewer-status{font:500 11px/16px var(--dsh-font);color:var(--dsh-fg-3);letter-spacing:.4px}
+.dsh-canvas-viewer-confirm,.dsh-canvas-viewer-error{flex:none;display:flex;align-items:center;gap:8px;
+  padding:8px 16px;border-bottom:1px solid var(--dsh-hairline);font:12px/18px var(--dsh-font);color:var(--dsh-fg-2)}
+.dsh-canvas-viewer-error{color:var(--dsh-sunset)}
 .dsh-canvas-media{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto}
 .dsh-canvas-media img,.dsh-canvas-media video{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px}
 .dsh-canvas-frame{flex:1 1 auto;width:100%;height:100%;border:none;background:#fff}

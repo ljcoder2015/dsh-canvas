@@ -13,7 +13,7 @@
  * and the markdown renderer escapes first and builds tags after, so artifact
  * content can never inject markup into the host page.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ComponentType, ReactElement } from 'react'
 import type { ArtifactView } from '../types.ts'
 import type { Translate } from './locales.ts'
@@ -329,6 +329,23 @@ function TextViewer({ view }: ViewerProps) {
   return <pre className="dsh-canvas-pre">{view.text}</pre>
 }
 
+/**
+ * Whether a kind's artifact is editable as text in place.
+ *
+ * Only the kinds whose whole payload *is* the file's own text: the editor hands
+ * the artifact back in one piece, so the two that qualify are the two the
+ * reader returns verbatim. `data` is deliberately out — its viewer renders a
+ * table, and editing the raw body behind it is a different feature from editing
+ * prose. The `truncated` gate lives at the call site (see {@link ArtifactModal}):
+ * a part-read file must not be writable, or one save would replace everything
+ * this page never saw.
+ *
+ * @param kind - the kind id from the artifact's read-time classification.
+ */
+export function isEditableText(kind: string): boolean {
+  return kind === 'markdown' || kind === 'text'
+}
+
 /** Kind id → viewer. The whole branching of this feature is this table. */
 const VIEWERS: Readonly<Record<ViewerId, ComponentType<ViewerProps>>> = {
   markdown: MarkdownViewer,
@@ -347,27 +364,60 @@ const VIEWERS: Readonly<Record<ViewerId, ComponentType<ViewerProps>>> = {
  * not piggyback on state the board keeps for every card), renders the state
  * machine around the content — absent, over-cap, load error — and hands the
  * kind to the registry for the view itself. Its head carries the artifact's
- * name, its kind, and the way out; the modal has no other action.
+ * name, its kind, the way out, and — for a text node — the preview/edit toggle.
+ *
+ * Editing is a mode of this same modal rather than a second dialog, because
+ * what the user edits and what they just read are the same artefact: `draft`
+ * survives a hop back to the preview, so checking the rendered result never
+ * costs the work, and a close with unsaved changes asks first instead of
+ * dropping them silently.
  */
 export function ArtifactModal(props: {
   projectId: string
   cardId: string
-  bridge: { readArtifact(projectId: string, cardId: string): Promise<ArtifactView> }
+  bridge: {
+    readArtifact(projectId: string, cardId: string): Promise<ArtifactView>
+    writeText(projectId: string, cardId: string, content: string): Promise<unknown>
+  }
   t: Translate
+  /** Open straight into the editor — the control strip's 手动输入 button. */
+  initialMode?: 'preview' | 'edit'
+  /** A save landed; the board re-reads what it draws from this. */
+  onSaved?: () => void
   onClose: () => void
 }) {
-  const { projectId, cardId, bridge, t, onClose } = props
+  const { projectId, cardId, bridge, t, initialMode, onSaved, onClose } = props
   const [view, setView] = useState<ArtifactView | undefined>(undefined)
   const [error, setError] = useState('')
+  /** `edit` while the textarea is up; the toggle moves between the two. */
+  const [mode, setMode] = useState<'preview' | 'edit'>(initialMode ?? 'preview')
+  /** The editor's text. Survives a hop back to the preview, by design. */
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [saved, setSaved] = useState(false)
+  /** The close was asked for with unsaved changes: asking, not closing. */
+  const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setView(undefined)
     setError('')
+    setMode(initialMode ?? 'preview')
+    setDraft('')
+    setSaved(false)
+    setSaveError('')
+    setConfirming(false)
     bridge
       .readArtifact(projectId, cardId)
       .then((payload) => {
-        if (!cancelled) setView(payload)
+        if (cancelled) return
+        setView(payload)
+        setDraft(payload.text)
+        // An absent file has no kind evidence worth trusting, and a part-read
+        // one must not be written: both land in the preview, where the note
+        // says why, rather than in an editor that would overwrite blind.
+        if (payload.present && payload.truncated) setMode('preview')
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : t('canvas.error.unknown'))
@@ -375,21 +425,78 @@ export function ArtifactModal(props: {
     return () => {
       cancelled = true
     }
-  }, [bridge, cardId, projectId, t])
+  }, [bridge, cardId, projectId, t, initialMode])
 
+  const editKind = view !== undefined && isEditableText(view.kind)
+  const canEdit = editKind && view.truncated === false
+  const editing = mode === 'edit' && canEdit
+  // Compared against the payload rather than kept as a flag: after a save the
+  // payload *is* the draft, so "dirty" falls back to false on its own.
+  const dirty = view !== undefined && canEdit && draft !== view.text
+
+  const save = useCallback(async (): Promise<void> => {
+    if (!dirty || saving) return
+    setSaving(true)
+    setSaveError('')
+    try {
+      await bridge.writeText(projectId, cardId, draft)
+      const payload = await bridge.readArtifact(projectId, cardId)
+      setView(payload)
+      setDraft(payload.text)
+      setSaved(true)
+      setMode('preview')
+      onSaved?.()
+    } catch (reason: unknown) {
+      setSaveError(reason instanceof Error ? reason.message : t('canvas.error.unknown'))
+    } finally {
+      setSaving(false)
+    }
+  }, [bridge, cardId, dirty, draft, onSaved, projectId, saving, t])
+
+  /** Leave — unless there is unsaved text, in which case ask first. */
+  const requestClose = useCallback((): void => {
+    if (dirty) setConfirming(true)
+    else onClose()
+  }, [dirty, onClose])
+
+  // Escape asks the same question as ×; ⌘/Ctrl+S is the editor's save, the
+  // chord users already have in their fingers.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        if (confirming) setConfirming(false)
+        else requestClose()
+        return
+      }
+      if (editing && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        void save()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [confirming, editing, requestClose, save])
 
   let body: ReactElement
   if (error !== '') {
     body = <div className="dsh-canvas-viewer-note">{t('canvas.error', { message: error })}</div>
   } else if (view === undefined) {
     body = <div className="dsh-canvas-viewer-note">{t('canvas.viewer.loading')}</div>
+  } else if (editing) {
+    body = (
+      <div className="dsh-canvas-viewer-body">
+        <textarea
+          className="dsh-canvas-viewer-editor"
+          value={draft}
+          autoFocus
+          spellCheck={false}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            setSaved(false)
+          }}
+        />
+      </div>
+    )
   } else if (!view.present) {
     body = <div className="dsh-canvas-viewer-note">{t('canvas.viewer.absent')}</div>
   } else if (view.truncated && view.dataUrl === '' && view.text === '') {
@@ -412,7 +519,7 @@ export function ArtifactModal(props: {
     <div
       className="dsh-canvas-scrim is-viewer"
       onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (event.target === event.currentTarget) requestClose()
       }}
     >
       <div className="dsh-canvas-dialog dsh-canvas-viewer">
@@ -420,10 +527,40 @@ export function ArtifactModal(props: {
           {cardId.split('/').pop() ?? cardId}
           <span className="dsh-canvas-card-meta">{view?.kind ?? ''}</span>
           <span className="dsh-canvas-spacer" />
-          <button className="dsh-canvas-chipbtn" onClick={onClose} aria-label={t('canvas.action.collapse')}>
+          {dirty ? <span className="dsh-canvas-viewer-status">{t('canvas.viewer.dirty')}</span> : null}
+          {!dirty && saved ? <span className="dsh-canvas-viewer-status">{t('canvas.viewer.saved')}</span> : null}
+          {canEdit ? (
+            <button className="dsh-canvas-chipbtn" onClick={() => setMode(editing ? 'preview' : 'edit')}>
+              {editing ? t('canvas.viewer.preview') : t('canvas.viewer.edit')}
+            </button>
+          ) : null}
+          {dirty ? (
+            <button
+              className="dsh-canvas-chipbtn"
+              data-primary="true"
+              disabled={saving}
+              onClick={() => void save()}
+            >
+              {t('canvas.viewer.save')}
+            </button>
+          ) : null}
+          <button className="dsh-canvas-chipbtn" onClick={requestClose} aria-label={t('canvas.action.collapse')}>
             ×
           </button>
         </div>
+        {confirming ? (
+          <div className="dsh-canvas-viewer-confirm">
+            {t('canvas.viewer.discard.title')}
+            <span className="dsh-canvas-spacer" />
+            <button className="dsh-canvas-chipbtn" onClick={() => setConfirming(false)}>
+              {t('canvas.viewer.discard.cancel')}
+            </button>
+            <button className="dsh-canvas-chipbtn" onClick={onClose}>
+              {t('canvas.viewer.discard.confirm')}
+            </button>
+          </div>
+        ) : null}
+        {saveError !== '' ? <div className="dsh-canvas-viewer-error">{t('canvas.error', { message: saveError })}</div> : null}
         {body}
       </div>
     </div>

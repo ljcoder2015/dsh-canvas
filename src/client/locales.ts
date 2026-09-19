@@ -66,6 +66,7 @@ export const zh = {
   'canvas.action.newProject': '新增画布项目',
   'canvas.action.pickProject': '选择文件夹',
   'canvas.action.chat': '对话',
+  'canvas.action.manual': '手动输入',
   'canvas.action.link': '建立取材',
   'canvas.action.export': '导出',
   'canvas.action.publish': '发布',
@@ -112,6 +113,15 @@ export const zh = {
   'canvas.viewer.absent': '产物文件还没生成。',
   'canvas.viewer.tooLarge': '文件过大，无法在此预览。',
   'canvas.viewer.truncated': '内容过大，这里只显示了前一部分。',
+  // 文本节点的编辑面（同一弹窗的第二种尺寸，不是第二个弹窗）
+  'canvas.viewer.edit': '编辑',
+  'canvas.viewer.preview': '预览',
+  'canvas.viewer.save': '保存',
+  'canvas.viewer.saved': '已保存',
+  'canvas.viewer.dirty': '未保存',
+  'canvas.viewer.discard.title': '有未保存的修改，仍要关闭吗？',
+  'canvas.viewer.discard.confirm': '放弃修改',
+  'canvas.viewer.discard.cancel': '继续编辑',
 
   // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': '这份产物不在任何画布项目中。',
@@ -210,6 +220,7 @@ export const en = {
   'canvas.action.newProject': 'New canvas project',
   'canvas.action.pickProject': 'Choose a folder',
   'canvas.action.chat': 'Chat',
+  'canvas.action.manual': 'Type it myself',
   'canvas.action.link': 'Link source',
   'canvas.action.export': 'Export',
   'canvas.action.publish': 'Publish',
@@ -256,6 +267,15 @@ export const en = {
   'canvas.viewer.absent': 'The artifact has not been written yet.',
   'canvas.viewer.tooLarge': 'The file is too large to preview here.',
   'canvas.viewer.truncated': 'The content is large; only its first part is shown.',
+  // The text node's editor face — one dialog at two sizes, not two dialogs
+  'canvas.viewer.edit': 'Edit',
+  'canvas.viewer.preview': 'Preview',
+  'canvas.viewer.save': 'Save',
+  'canvas.viewer.saved': 'Saved',
+  'canvas.viewer.dirty': 'Unsaved',
+  'canvas.viewer.discard.title': 'You have unsaved changes. Close anyway?',
+  'canvas.viewer.discard.confirm': 'Discard',
+  'canvas.viewer.discard.cancel': 'Keep editing',
 
   // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': 'This file is not inside a canvas project.',
