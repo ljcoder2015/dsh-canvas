@@ -55,6 +55,7 @@ export interface CanvasFace {
   createProject(name: string, path: string, signal?: AbortSignal): Promise<RemoteResult<ProjectBinding>>
   removeProject(projectId: string, signal?: AbortSignal): Promise<RemoteResult<boolean>>
   listFolders(path: string, signal?: AbortSignal): Promise<RemoteResult<FolderEntry[]>>
+  setActiveProject(projectId: string, signal?: AbortSignal): Promise<RemoteResult<Project>>
   readBoard(projectId: string, signal?: AbortSignal): Promise<RemoteResult<BoardSnapshot>>
   setViewport(projectId: string, viewport: Viewport, signal?: AbortSignal): Promise<RemoteResult<Project>>
   setStyle(projectId: string, style: StyleProfile, signal?: AbortSignal): Promise<RemoteResult<StyleProfile>>
@@ -119,6 +120,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'canvas/createProject': CanvasFace['createProject']
     'canvas/removeProject': CanvasFace['removeProject']
     'canvas/listFolders': CanvasFace['listFolders']
+    'canvas/setActiveProject': CanvasFace['setActiveProject']
     'canvas/readBoard': CanvasFace['readBoard']
     'canvas/setViewport': CanvasFace['setViewport']
     'canvas/setStyle': CanvasFace['setStyle']

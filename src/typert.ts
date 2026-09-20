@@ -27,6 +27,7 @@ const CANVAS_MEMBERS: readonly TypertMemberModel[] = [
   member('createProject', 'createProject(name, path, signal?): Promise<ProjectBinding>', '把目录绑定为新画布项目，并扫描其中的产物。'),
   member('removeProject', 'removeProject(projectId, signal?): Promise<boolean>', '移除画布项目（不删除磁盘文件）。'),
   member('listFolders', 'listFolders(path, signal?): Promise<FolderEntry[]>', '列出目录下的可选文件夹，供选择器使用。'),
+  member('setActiveProject', 'setActiveProject(projectId, signal?): Promise<Project>', '记录用户当前打开的画布：画布级工具按它取项目。'),
   member('readBoard', 'readBoard(projectId, signal?): Promise<BoardSnapshot>', '读取画布座次、取材边与便利贴。'),
   member('setViewport', 'setViewport(projectId, viewport, signal?): Promise<Project>', '记录画布视图状态。'),
   member('setStyle', 'setStyle(projectId, style, signal?): Promise<StyleProfile>', '设置项目风格档案。'),

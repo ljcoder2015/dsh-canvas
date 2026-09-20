@@ -2,12 +2,27 @@
  * The fullscreen artifact view (F3.8): the pure decisions the viewers and the
  * host payload reader are made of. The React components themselves are view;
  * what can drift silently and break a board is the kind → viewer mapping, the
- * markdown escaping and the delimited parsing, and those are pinned here.
+ * markdown escaping and the delimited parsing, and those are pinned here — the
+ * modal's mode group is pinned by its arrow-key step function for the same
+ * reason: the keys are the part a reader cannot see in a screenshot.
  */
 import { describe, expect, it } from 'vitest'
 import { VIEW_TEXT_CAP, mediaMimeOf } from '../src/core/artifact-io.ts'
 import { artifactViewSchema } from '../src/contract.ts'
-import { isEditableText, parseDelimited, renderMarkdown, viewerIdFor } from '../src/client/artifact-view.tsx'
+import {
+  AUTOSAVE_BACKOFF_CAP_MS,
+  AUTOSAVE_BACKOFF_MS,
+  AUTOSAVE_MAX_WAIT_MS,
+  AUTOSAVE_SETTLE_MS,
+  autosaveDelay,
+  autosaveRetryDelay,
+  isEditableText,
+  modeAfterKey,
+  parseDelimited,
+  renderMarkdown,
+  viewerIdFor,
+  writeFailureShape,
+} from '../src/client/artifact-view.tsx'
 
 describe('kind → viewer mapping', () => {
   it('sends each content kind to its own viewer', () => {
@@ -44,6 +59,123 @@ describe('in-place text editing', () => {
     expect(isEditableText('folder')).toBe(false)
     expect(isEditableText('file')).toBe(false)
     expect(isEditableText('')).toBe(false)
+  })
+})
+
+describe('preview / edit mode group', () => {
+  it('selects the neighbour on an arrow, the way a radio group does', () => {
+    // 单选组的方向键是**选择**，不是移动光标：按右键就该切到右边那一项。
+    expect(modeAfterKey('preview', 'ArrowRight')).toBe('edit')
+    expect(modeAfterKey('edit', 'ArrowLeft')).toBe('preview')
+    // 竖着按也认——两项的一组没有「哪条轴才对」的问题。
+    expect(modeAfterKey('preview', 'ArrowDown')).toBe('edit')
+    expect(modeAfterKey('edit', 'ArrowUp')).toBe('preview')
+  })
+
+  it('declines, rather than wraps, when the arrow points off the end', () => {
+    // 到头了要交回事件（null），不能吞掉也不能绕回另一头：绕回去等于
+    // 按左键又切到编辑面，用户会以为键坏了。
+    expect(modeAfterKey('preview', 'ArrowLeft')).toBeNull()
+    expect(modeAfterKey('preview', 'ArrowUp')).toBeNull()
+    expect(modeAfterKey('edit', 'ArrowRight')).toBeNull()
+    expect(modeAfterKey('edit', 'ArrowDown')).toBeNull()
+  })
+
+  it('leaves every other key to the rest of the modal', () => {
+    // ⌘S、Esc、字键都不是这组的：这里返回 null，事件继续往上走。
+    for (const key of ['s', 'Escape', 'Enter', ' ', 'Tab', 'Home', 'PageDown']) {
+      expect(modeAfterKey('preview', key)).toBeNull()
+      expect(modeAfterKey('edit', key)).toBeNull()
+    }
+  })
+})
+
+describe('autosave pacing', () => {
+  it('waits the quiet period for a fresh keystroke', () => {
+    // 刚落键：等一整个停手期，一个字一个字打不会每次都往盘上写。
+    expect(autosaveDelay(0)).toBe(AUTOSAVE_SETTLE_MS)
+    expect(autosaveDelay(400)).toBe(AUTOSAVE_SETTLE_MS)
+  })
+
+  it('shortens the wait as the pending buffer ages, and writes at the ceiling', () => {
+    // 一直不停手时不能永远等下去：从「停手期」线性压到 0，到上限就立刻写。
+    expect(autosaveDelay(AUTOSAVE_MAX_WAIT_MS - AUTOSAVE_SETTLE_MS)).toBe(AUTOSAVE_SETTLE_MS)
+    expect(autosaveDelay(AUTOSAVE_MAX_WAIT_MS - 200)).toBe(200)
+    expect(autosaveDelay(AUTOSAVE_MAX_WAIT_MS)).toBe(0)
+    expect(autosaveDelay(AUTOSAVE_MAX_WAIT_MS + 5000)).toBe(0)
+  })
+
+  it('never exceeds the ceiling and never goes negative', () => {
+    for (const elapsed of [0, 1, 799, 800, 4200, 5000, 10 ** 9]) {
+      const delay = autosaveDelay(elapsed)
+      expect(delay).toBeGreaterThanOrEqual(0)
+      expect(delay).toBeLessThanOrEqual(AUTOSAVE_SETTLE_MS)
+    }
+  })
+
+  it('falls back to the settle period on a nonsense clock, rather than to no wait', () => {
+    // NaN / 负数来自时钟异常：这时要退到「等一等」，不能退到「立刻写」。
+    expect(autosaveDelay(Number.NaN)).toBe(AUTOSAVE_SETTLE_MS)
+    expect(autosaveDelay(-1)).toBe(AUTOSAVE_SETTLE_MS)
+    expect(autosaveDelay(Number.POSITIVE_INFINITY)).toBe(AUTOSAVE_SETTLE_MS)
+  })
+
+  it('keeps a settle period that fits inside the ceiling', () => {
+    // 停手期就是上限本身时，节流等于纯 debounce——写死这两个数之前先卡住关系。
+    expect(AUTOSAVE_SETTLE_MS).toBeLessThanOrEqual(AUTOSAVE_MAX_WAIT_MS)
+  })
+})
+
+describe('autosave backoff after a refused write', () => {
+  it('holds off by a doubling wait, so a refusing wire is not written every 800ms', () => {
+    expect(autosaveRetryDelay(1)).toBe(AUTOSAVE_BACKOFF_MS)
+    expect(autosaveRetryDelay(2)).toBe(AUTOSAVE_BACKOFF_MS * 2)
+    expect(autosaveRetryDelay(3)).toBe(AUTOSAVE_BACKOFF_MS * 4)
+    expect(autosaveRetryDelay(4)).toBe(AUTOSAVE_BACKOFF_MS * 8)
+  })
+
+  it('never waits past the ceiling, however long the failures run', () => {
+    for (const failures of [5, 6, 9, 40, 10 ** 6]) {
+      expect(autosaveRetryDelay(failures)).toBeLessThanOrEqual(AUTOSAVE_BACKOFF_CAP_MS)
+    }
+    expect(autosaveRetryDelay(5)).toBe(AUTOSAVE_BACKOFF_CAP_MS)
+  })
+
+  it('has nothing to wait for before the first failure', () => {
+    expect(autosaveRetryDelay(0)).toBe(0)
+    expect(autosaveRetryDelay(-1)).toBe(0)
+    expect(autosaveRetryDelay(Number.NaN)).toBe(0)
+  })
+
+  it('keeps the first backoff longer than a settle, or it is not a backoff', () => {
+    expect(AUTOSAVE_BACKOFF_MS).toBeGreaterThan(AUTOSAVE_SETTLE_MS)
+    expect(AUTOSAVE_BACKOFF_CAP_MS).toBeGreaterThanOrEqual(AUTOSAVE_BACKOFF_MS)
+  })
+})
+
+describe('telling a refused write from a blip', () => {
+  it('reads the exact refusal this feature was written for as blocked', () => {
+    // 用户报的原话：宿主经私有暂存目录原子替换，rename 被拒 → 这次写入不会因为
+    // 重试而成功，只会每次留下一份暂存文件。
+    const reported =
+      "write failed (EPERM: operation not permitted, rename '/Users/admin/Project/flow-test/.untitled-2.md.4534.ded0e5f5-ae74-4b56-8e4a-a1ebfe1101b7.tmpdir/untitled-2.md.tmp' -> '/Users/admin/Project/flow-test/untitled-2.md') and temp cleanup failed (EPERM: operation not permitted, unlink '/Users/admin/Project/flow-test/.untitled-2.md.4534.ded0e5f5-ae74-4b56-8e4a-a1ebfe1101b7.tmpdir/untitled-2.md.tmp')"
+    expect(writeFailureShape(reported)).toBe('blocked')
+  })
+
+  it('counts every way a filesystem says "not this time" as blocked', () => {
+    expect(writeFailureShape('write failed (EPERM: operation not permitted, rename a -> b)')).toBe('blocked')
+    expect(writeFailureShape('open failed (EACCES: permission denied)')).toBe('blocked')
+    expect(writeFailureShape('write failed (EROFS: read-only file system)')).toBe('blocked')
+    expect(writeFailureShape('cannot write "a.png": not a regular file')).toBe('blocked')
+  })
+
+  it('leaves a blip on the retry path', () => {
+    // 这几条值得再试：会话重启、请求超时、文件刚被改过（无守卫的整篇写回会成功）。
+    expect(writeFailureShape('gateway timeout')).toBe('transient')
+    expect(writeFailureShape('ECONNRESET')).toBe('transient')
+    expect(writeFailureShape('canvas: card/stale-version')).toBe('transient')
+    expect(writeFailureShape('未知错误')).toBe('transient')
+    expect(writeFailureShape('')).toBe('transient')
   })
 })
 

@@ -63,8 +63,8 @@ export function registerGlobalPrompt(ctx: Context): void {
       '',
       'Vocabulary: a **card** is one artifact plus its board seat; a **session** is that card\'s conversation; a **source** (取材) is the statement "this artifact builds on that artifact" — material at the upstream end, product at the downstream end. There is exactly one relationship type, and it is directed.',
       '',
-      `The \`${TOOL_NAMES.readCard}\`, \`${TOOL_NAMES.readSources}\`, \`${TOOL_NAMES.linkSource}\`, \`${TOOL_NAMES.getSources}\`, \`${TOOL_NAMES.injectCard}\` and \`${TOOL_NAMES.export}\` tools act on *the card whose conversation is calling them*. Outside a card conversation they are refused — that is the intended behavior, not a fault, and the fix is to open the card first rather than to retry.`,
-      `\`${TOOL_NAMES.readBoard}\`, \`${TOOL_NAMES.arrangeOnBoard}\`, \`${TOOL_NAMES.createOnBoard}\`, \`${TOOL_NAMES.organizeBoard}\` and \`${TOOL_NAMES.linkSourceOnBoard}\` are board-wide and work in any conversation inside a canvas project.`,
+      `The \`${TOOL_NAMES.readCard}\`, \`${TOOL_NAMES.readSources}\`, \`${TOOL_NAMES.linkSource}\`, \`${TOOL_NAMES.getSources}\` and \`${TOOL_NAMES.injectCard}\` tools act on *the card whose conversation is calling them*. Outside a card conversation they are refused — that is the intended behavior, not a fault, and the fix is to open the card first rather than to retry.`,
+      `\`${TOOL_NAMES.readBoard}\`, \`${TOOL_NAMES.arrangeOnBoard}\`, \`${TOOL_NAMES.organizeBoard}\`, \`${TOOL_NAMES.createOnBoard}\`, \`${TOOL_NAMES.linkSourceOnBoard}\`, \`${TOOL_NAMES.generateImage}\`, \`${TOOL_NAMES.export}\` and \`${TOOL_NAMES.publish}\` are board-wide: they answer for the canvas the user has open — and inside a card conversation, where the project is certain, for that card's canvas.`,
     ].join('\n'),
   })
 }

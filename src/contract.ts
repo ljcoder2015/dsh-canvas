@@ -323,6 +323,10 @@ export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
 
   // ── canvas: board ───────────────────────────────────────────────────────
   {
+    id: 'dsh-canvas#canvas/set_active_project', service: 'canvas', namespace: 'canvas', method: 'setActiveProject',
+    invocation: { kind: 'direct' }, parameters: [P.projectId], cancellation: signal, result: R.project,
+  },
+  {
     id: 'dsh-canvas#canvas/read_board', service: 'canvas', namespace: 'canvas', method: 'readBoard',
     invocation: { kind: 'direct' }, parameters: [P.projectId], cancellation: signal, result: R.board,
   },

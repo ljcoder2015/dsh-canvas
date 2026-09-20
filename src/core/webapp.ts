@@ -1,5 +1,5 @@
 /**
- * dsh-canvas — the webapp scaffold and its preview inlining (应用节点).
+ * dsh-canvas — the webapp scaffold, and the preview inlining every HTML kind shares (应用节点).
  *
  * A webapp card is a *directory*: a manifest (`dsh.webapp.json`), an entry
  * `index.html`, and the app's own source beside it — web components for the
@@ -20,6 +20,12 @@
  * the entry's local stylesheet and script references before the text crosses
  * the wire — the folder keeps its multi-file shape on disk, and the preview
  * still shows the running app.
+ *
+ * That inlining is not webapp-specific: every kind in `HTML_KINDS` — a deck, a
+ * site entry, an app entry — previews as one `srcDoc` and loses its local
+ * styles without it. This module owns the *mechanism*; the kind list lives in
+ * `kind-registry.ts`, so the preview's kind table and the host's inlining gate
+ * read the same source.
  */
 
 /** The manifest file that marks a directory as a webapp (kind evidence, F2.2). */

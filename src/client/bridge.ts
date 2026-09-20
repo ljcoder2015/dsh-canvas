@@ -192,6 +192,17 @@ export class CanvasBridge {
 
   // ── canvas: board ─────────────────────────────────────────────────────────
 
+  /**
+   * Record which canvas the user is looking at.
+   *
+   * The board-wide agent tools read this slot to answer "which canvas?", and a
+   * card conversation is the only other thing that can name a project. Every
+   * place the visible canvas changes calls it, so the two never disagree.
+   */
+  setActiveProject(projectId: string): Promise<Project> {
+    return unwrap(this.canvas.setActiveProject(projectId, this.signal))
+  }
+
   /** Everything needed to paint one board. */
   readBoard(projectId: string): Promise<BoardSnapshot> {
     return unwrap(this.canvas.readBoard(projectId, this.signal))

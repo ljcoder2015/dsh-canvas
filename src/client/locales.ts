@@ -116,9 +116,17 @@ export const zh = {
   // 文本节点的编辑面（同一弹窗的第二种尺寸，不是第二个弹窗）
   'canvas.viewer.edit': '编辑',
   'canvas.viewer.preview': '预览',
+  'canvas.viewer.mode': '预览或编辑',
   'canvas.viewer.save': '保存',
   'canvas.viewer.saved': '已保存',
   'canvas.viewer.dirty': '未保存',
+  // 停手即自动落盘（节流），这三种状态把这件事讲明白
+  'canvas.viewer.saving': '保存中…',
+  'canvas.viewer.autosave': '自动保存',
+  'canvas.viewer.draftPreview': '以下渲染的是编辑器里的草稿，尚未落盘。',
+  'canvas.viewer.writeBlocked': '写入被拒：这个位置不允许改写文件（权限或沙箱限制），自动保存已暂停——改动仍在编辑器里，没有丢。修好后点「重试」。',
+  'canvas.viewer.autosaveOff': '自动保存已暂停',
+  'canvas.viewer.retry': '重试',
   'canvas.viewer.discard.title': '有未保存的修改，仍要关闭吗？',
   'canvas.viewer.discard.confirm': '放弃修改',
   'canvas.viewer.discard.cancel': '继续编辑',
@@ -133,6 +141,15 @@ export const zh = {
   'canvas.manage.new': '画布',
   'canvas.manage.add': '新建画布',
   'canvas.manage.picking': '请在系统选择器中选定一个文件夹…',
+
+  // 画布行的右键菜单（F1.8）：行上放不下第二枚按钮，这两个动作住在菜单里。
+  // 「删除」说的是画布本身，文案必须把「磁盘上什么都没少」写在前头。
+  'canvas.menu.aria': '画布操作',
+  'canvas.menu.open': '打开画布目录',
+  'canvas.menu.openFailed': '打不开这个目录：{message}',
+  'canvas.menu.remove': '删除画布',
+  'canvas.menu.remove.title': '删除这张画布？',
+  'canvas.menu.remove.desc': '只把「{name}」从画布列表里移开：磁盘上的文件夹与文件原样保留，内容不会丢。这张画布自己的排版与取材关系会一起消失，把这个文件夹重新加成画布即可重来。',
 
   // Folder picker
   'canvas.picker.title': '选择一个文件夹作为画布项目',
@@ -270,9 +287,18 @@ export const en = {
   // The text node's editor face — one dialog at two sizes, not two dialogs
   'canvas.viewer.edit': 'Edit',
   'canvas.viewer.preview': 'Preview',
+  'canvas.viewer.mode': 'Preview or edit',
   'canvas.viewer.save': 'Save',
   'canvas.viewer.saved': 'Saved',
   'canvas.viewer.dirty': 'Unsaved',
+  // Typing settles and the text is written — these three name that behaviour
+  'canvas.viewer.saving': 'Saving…',
+  'canvas.viewer.autosave': 'Autosave',
+  'canvas.viewer.draftPreview': 'This renders the editor buffer, which is not on disk yet.',
+  'canvas.viewer.writeBlocked':
+    'The write was refused: this location does not allow the file to be replaced (permissions or a sandbox), so autosave has stopped. Your text is still in the editor — nothing is lost. Press Retry once it is fixed.',
+  'canvas.viewer.autosaveOff': 'Autosave stopped',
+  'canvas.viewer.retry': 'Retry',
   'canvas.viewer.discard.title': 'You have unsaved changes. Close anyway?',
   'canvas.viewer.discard.confirm': 'Discard',
   'canvas.viewer.discard.cancel': 'Keep editing',
@@ -284,6 +310,14 @@ export const en = {
   'canvas.manage.new': 'Canvas',
   'canvas.manage.add': 'New canvas',
   'canvas.manage.picking': 'Pick a folder in the system dialog…',
+
+  // A canvas row's context menu (F1.8)
+  'canvas.menu.aria': 'Canvas actions',
+  'canvas.menu.open': 'Open canvas folder',
+  'canvas.menu.openFailed': 'Could not open this folder: {message}',
+  'canvas.menu.remove': 'Delete canvas',
+  'canvas.menu.remove.title': 'Delete this canvas?',
+  'canvas.menu.remove.desc': 'This only takes “{name}” off the canvas list: the folder and its files stay exactly where they are, nothing on disk is lost. The canvas’s own layout and source edges go with it — add the folder as a canvas again to start over.',
 
   // Folder picker
   'canvas.picker.title': 'Choose a folder as a canvas project',

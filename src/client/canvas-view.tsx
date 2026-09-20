@@ -377,6 +377,20 @@ export function CanvasBoard(props: CanvasBoardProps) {
 
   // ── board ─────────────────────────────────────────────────────────────────
 
+  /**
+   * 记账「用户当前在看哪张画布」——画布级 agent 工具按这条全局取项目。
+   *
+   * 只在席位**不自持**画布命名时写。主面板一张画布一个，彼此同时挂着，每个面板挂
+   * 载都写一遍的话，最后落账的是挂载顺序里的最后一个，而不是用户看着的那一个——那
+   * 一块交给 `openCanvas`（用户显式切换的地方）记账；停靠的工作台标签页只有一个实
+   * 例、自己选自己，写在这里才准。自动落位（按地址选中的画布、或第一个画布）同样
+   * 是一次「当前画布」的变化，所以挂在 effect 上而不是塞进选择器。
+   */
+  useEffect(() => {
+    if (props.projectId !== undefined || projectId === '') return
+    void bridge.setActiveProject(projectId).catch(() => undefined)
+  }, [bridge, projectId, props.projectId])
+
   useEffect(() => {
     if (projectId === '') {
       setBoard(undefined)

@@ -19,7 +19,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { CardSummary, ExportFormat } from './types.ts'
+import type { CardSummary, ExportFormat, SourceChain } from './types.ts'
 import { TOOL_NAMES } from './contract.ts'
 import type { CanvasRuntime } from './runtime.ts'
 import type { CardRuntime } from './card-runtime.ts'
@@ -68,15 +68,24 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     return deps.sessions.cardOf(agentId as never)
   }
 
-  /** The project the user is looking at. */
-  const activeProject = (): string => {
+  /**
+   * The project a board-wide call answers for.
+   *
+   * Two sources, in this order. The canvas the user has open is what these
+   * tools are *for*: the client records it in the domain global whenever the
+   * visible canvas changes. When that slot is empty, a card conversation falls
+   * back to its own project — a card session is the one place the project is
+   * certain, so refusing there would tell an agent that is demonstrably inside
+   * a canvas that none is open.
+   */
+  const activeProject = (exec: { agent?: { id?: string } }): string => {
     const active = deps.domain.global.get().activeProjectId
-    if (active === '') {
-      throw new Error(
-        `no canvas project is open in this session. Open a canvas project first, then retry — or use ${TOOL_NAMES.readBoard} from inside a card conversation.`,
-      )
-    }
-    return active
+    if (active !== '') return active
+    const caller = callingCard(exec.agent?.id)
+    if (caller !== undefined) return caller.project
+    throw new Error(
+      `no canvas is open in this session and this conversation does not belong to a card. Open a canvas first, or call this from a card conversation.`,
+    )
   }
 
   ctx.tools.register(
@@ -160,6 +169,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         schema: {
           type: 'object',
           properties: {
+            cardId: { type: 'string' },
             direct: { type: 'array', items: { type: 'string' } },
             indirect: { type: 'array', items: { type: 'string' } },
             downstream: { type: 'array', items: { type: 'string' } },
@@ -167,9 +177,10 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
           additionalProperties: false,
         },
         render: (_args, value) => {
-          const chain = value as { direct: string[]; indirect: string[]; downstream: string[] }
+          const chain = value as SourceChain
           return text(
             [
+              `本卡：${chain.cardId}`,
               `取材来源（直接）：${chain.direct.join('、') || '无'}`,
               `取材来源（间接）：${chain.indirect.join('、') || '无'}`,
               `下游产物：${chain.downstream.join('、') || '无'}`,
@@ -235,7 +246,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         },
       },
       async execute(_args, exec) {
-        const board = await deps.canvas.readBoard(activeProject(), exec.signal)
+        const board = await deps.canvas.readBoard(activeProject(exec), exec.signal)
         return {
           project: board.project.name,
           root: board.project.root,
@@ -260,7 +271,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
       },
       async execute(args, exec) {
         const strategy = args.strategy === 'grid' || args.strategy === 'organize' ? args.strategy : 'source-chain'
-        const board = await deps.canvas.arrange(activeProject(), strategy, exec.signal)
+        const board = await deps.canvas.arrange(activeProject(exec), strategy, exec.signal)
         return { moved: board.cards.length }
       },
     }),
@@ -276,7 +287,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         render: (_args, value) => text(`已归纳 ${(value as { moved: number }).moved} 张卡片。`),
       },
       async execute(_args, exec) {
-        const board = await deps.canvas.arrange(activeProject(), 'organize', exec.signal)
+        const board = await deps.canvas.arrange(activeProject(exec), 'organize', exec.signal)
         return { moved: board.cards.length }
       },
     }),
@@ -312,7 +323,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         },
       },
       async execute(args, exec) {
-        const projectId = activeProject()
+        const projectId = activeProject(exec)
         const x = typeof args.x === 'number' ? args.x : undefined
         const y = typeof args.y === 'number' ? args.y : undefined
         if (args.type === 'note') {
@@ -361,7 +372,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         },
       },
       async execute(args, exec) {
-        const edge = await deps.canvas.linkSource(activeProject(), String(args.from), String(args.to), exec.signal)
+        const edge = await deps.canvas.linkSource(activeProject(exec), String(args.from), String(args.to), exec.signal)
         return { upstream: edge.upstream, downstream: edge.downstream }
       },
     }),
@@ -387,7 +398,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         },
       },
       async execute(args, exec) {
-        const projectId = activeProject()
+        const projectId = activeProject(exec)
         const board = await deps.canvas.readBoard(projectId, exec.signal)
         const cardId = String(args.cardId)
         const result = await deps.card.generateImage(
@@ -423,7 +434,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         },
       },
       async execute(args, exec) {
-        const projectId = activeProject()
+        const projectId = activeProject(exec)
         const board = await deps.canvas.readBoard(projectId, exec.signal)
         const result = await deps.card.exportCard(projectId, String(args.cardId), args.format as ExportFormat, exec.signal)
         return { ok: result.ok, path: result.path || board.project.root, reason: result.reason }
@@ -450,7 +461,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         },
       },
       async execute(args, exec) {
-        const result = await deps.card.publishCard(activeProject(), String(args.cardId), exec.signal)
+        const result = await deps.card.publishCard(activeProject(exec), String(args.cardId), exec.signal)
         return { ok: result.ok, url: result.path, reason: result.reason }
       },
     }),

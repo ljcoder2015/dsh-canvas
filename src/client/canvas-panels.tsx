@@ -165,10 +165,15 @@ export function registerCanvasPanels(ctx: ClientContext, deps: CanvasPanelsDeps)
   /** 每个画布一份主面板清理器，按面板 key 记账。 */
   const mounted = new Map<string, () => void>()
 
+  /** 主区域交回对话。画布与对话互斥：主区域只有一格，交出去就等于回到对话。 */
+  const handBackMain = (): void => {
+    layout.selectPanel(null)
+  }
+
   /** 画布里的「对话」：会话成为当前会话，并把主区域交回对话。 */
   const activateSession = (sessionId: string): void => {
     deps.openSession(sessionId)
-    layout.selectPanel(null)
+    handBackMain()
   }
 
   /**
@@ -176,8 +181,14 @@ export function registerCanvasPanels(ctx: ClientContext, deps: CanvasPanelsDeps)
    *
    * 画布可能刚刚才被创建——包括画布内部那个「新增画布项目」按钮建的——此时它的
    * `main` 条目还没注册，直接切会抛错，所以先重读列表补齐面板。
+   *
+   * 这里同时是「用户当前在看哪张画布」唯一的记账点：画布级的 agent 工具
+   * （`canvas_read_board` 一族）靠这条全局取值，而主面板的每一次切换——左栏的行、
+   * 画布内的选择器、新建后的落位——都从这里过。落盘失败不惊动用户：工具是下一轮
+   * 才跑的，最坏也只是让卡片会话回落到它自己所属的画布。
    */
   const openCanvas = (projectId: string): void => {
+    void deps.bridge.setActiveProject(projectId).catch(() => undefined)
     void catalog
       .reload()
       .then(() => layout.selectPanel(panelIdOf(projectId)))
@@ -247,7 +258,7 @@ export function registerCanvasPanels(ctx: ClientContext, deps: CanvasPanelsDeps)
             order: CREATE_ORDER,
             label: () => t('canvas.manage.new'),
             locale: NS,
-            inject: (): CanvasNavInject => ({ catalog, openCanvas, createCanvas }),
+            inject: (): CanvasNavInject => ({ catalog, openCanvas, createCanvas, bridge: deps.bridge, handBackMain }),
           },
           (props: never) => <CanvasNavSeat {...(props as unknown as CanvasNavProps)} />,
         ),

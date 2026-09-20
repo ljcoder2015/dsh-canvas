@@ -16,7 +16,10 @@
 const STYLE_ID = 'dsh-canvas-styles'
 
 const css = `
-.dsh-canvas-root{
+/* 画布自己那套变量。选择器里带上 .dsh-canvas-floating 是因为有些构件被 portal 到
+   body 上（画布行的右键菜单、它的删除确认框）——那些元素不在 .dsh-canvas-root 里，
+   少了这一条，--dsh-card / --dsh-hairline 全是空值，菜单会渲染成透明的一层字。 */
+.dsh-canvas-root,.dsh-canvas-floating{
   --dsh-surface:var(--dsw-alias-bg-base,#0A0A0A);
   --dsh-card:var(--dsw-alias-bg-elevated,#191919);
   --dsh-soft:#1A1C20;
@@ -188,6 +191,11 @@ const css = `
 .dsh-canvas-viewer-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:auto}
 .dsh-canvas-viewer-truncated{flex:none;padding:7px 16px;border-bottom:1px solid var(--dsh-hairline);
   font:11px/16px var(--dsh-mono);color:var(--dsh-sunset)}
+/* 预览面渲染的是编辑器里的缓冲区（草稿比磁盘新）。这一条把话说在前面，否则
+   「切到预览还是旧文」会被读成刚才的字丢了。用 breeze 而不是 sunset：它不是
+   告警，只是说明你正看着未落盘的那一份。 */
+.dsh-canvas-viewer-draft{flex:none;padding:7px 16px;border-bottom:1px solid var(--dsh-hairline);
+  font:11px/16px var(--dsh-mono);color:var(--dsh-breeze)}
 .dsh-canvas-viewer-note{flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:24px;
   color:var(--dsh-fg-3);font:13px/20px var(--dsh-font);text-align:center}
 /* 文本节点的编辑面：编辑区就是整块画布面积——预览与编辑是同一弹窗的两种尺寸。 */
@@ -195,9 +203,26 @@ const css = `
   border:none;outline:none;background:transparent;color:var(--dsh-fg);
   font:13px/22px var(--dsh-mono);tab-size:2}
 .dsh-canvas-viewer-status{font:500 11px/16px var(--dsh-font);color:var(--dsh-fg-3);letter-spacing:.4px}
+/* 预览 / 编辑是一条**单选组**，不是一枚标签会翻转的按钮：底槽凹进（slot 面 + 发丝边），
+   选中的那一半落成实心拇指（mid 面 + 白字）。旧写法按钮上写的是**另一面**的名字，
+   想知道「现在在哪一面」得反推；单选组把这件事直接画出来。
+   两半等宽（min-width），所以点的时候指头不用跟着字的宽度挪。 */
+.dsh-canvas-modeswitch{display:inline-flex;flex:none;align-items:center;gap:2px;height:24px;box-sizing:border-box;
+  padding:2px;border:1px solid var(--dsh-hairline);border-radius:999px;background:var(--dsh-slot)}
+.dsh-canvas-modeswitch-opt{display:inline-flex;align-items:center;justify-content:center;height:18px;
+  min-width:48px;padding:0 10px;border:none;border-radius:999px;background:transparent;cursor:pointer;
+  font:500 11px/18px var(--dsh-font);letter-spacing:.4px;color:var(--dsh-fg-3)}
+.dsh-canvas-modeswitch-opt:hover{color:var(--dsh-fg)}
+.dsh-canvas-modeswitch-opt[aria-checked=true]{background:var(--dsh-mid);color:var(--dsh-fg)}
+.dsh-canvas-modeswitch-opt:focus-visible{outline:1px solid var(--dsh-breeze);outline-offset:1px}
 .dsh-canvas-viewer-confirm,.dsh-canvas-viewer-error{flex:none;display:flex;align-items:center;gap:8px;
   padding:8px 16px;border-bottom:1px solid var(--dsh-hairline);font:12px/18px var(--dsh-font);color:var(--dsh-fg-2)}
-.dsh-canvas-viewer-error{color:var(--dsh-sunset)}
+.dsh-canvas-viewer-error{color:var(--dsh-sunset);flex-wrap:wrap}
+.dsh-canvas-viewer-errmain{flex:0 1 auto;min-width:0}
+/* 被拒的那次写入把原生错误也留在下面一行：它写着是哪个 syscall、哪条暂存路径——
+   对要修的人（或要提 issue 的人）这就是全部诊断，但不该是写作者在正文顶上先读到的东西。 */
+.dsh-canvas-viewer-errdetail{flex:1 1 100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font:10px/14px var(--dsh-mono);color:var(--dsh-fg-3)}
 .dsh-canvas-media{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto}
 .dsh-canvas-media img,.dsh-canvas-media video{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px}
 .dsh-canvas-frame{flex:1 1 auto;width:100%;height:100%;border:none;background:#fff}
@@ -305,6 +330,12 @@ const css = `
   background:transparent;color:var(--dsh-fg-2);font:12px/18px var(--dsh-font);text-align:left;cursor:pointer}
 .dsh-canvas-row:hover{background:var(--dsh-soft);color:var(--dsh-fg)}
 .dsh-canvas-row-meta{margin-left:auto;font:10px/14px var(--dsh-mono);color:var(--dsh-fg-3)}
+.dsh-canvas-dialog-body{padding:12px 14px;font:12px/19px var(--dsh-font);color:var(--dsh-fg-2)}
+.dsh-canvas-dialog-error{padding:8px 14px;border-top:1px solid var(--dsh-hairline);font:11px/16px var(--dsh-mono);
+  color:var(--dsh-twilight);word-break:break-all}
+/* 删除画布的确认框从**侧栏**长出来，要盖住的是整个视口（不是某一块画布），所以这一档
+   遮罩改成 fixed。 */
+.dsh-canvas-scrim.is-floating{position:fixed;z-index:61;pointer-events:auto}
 .dsh-canvas-dialog-foot{display:flex;align-items:center;gap:8px;padding:12px 14px;border-top:1px solid var(--dsh-hairline)}
 .dsh-canvas-input{flex:1 1 auto;height:28px;box-sizing:border-box;padding:0 10px;border:1px solid var(--dsh-hairline);border-radius:999px;
   background:var(--dsh-slot);color:var(--dsh-fg);font:12px/18px var(--dsh-font)}
@@ -374,6 +405,34 @@ const css = `
   color:var(--dsw-alias-label-primary,#fff);font-weight:500}
 .dsh-canvas-navname{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-canvas-navempty{padding:2px 8px 6px 20px;font:12px/18px var(--dsh-font);color:var(--dsw-alias-label-secondary,#7D8187);opacity:.7}
+/* 打开目录失败的那句话：贴在列表下面，说的还是这一列的事。下一次右键即清掉。 */
+.dsh-canvas-naverror{padding:2px 8px 6px 20px;font:11px/16px var(--dsh-font);color:var(--dsh-twilight);word-break:break-all}
+
+/* ── 画布行的右键菜单（F1.8）────────────────────────────────────────────── */
+/* 菜单挂在 body 上、坐标是视口的（画布行在宿主侧栏里，那里有 overflow 与 transform，
+   菜单若挂在行内会被裁掉一半）；.dsh-canvas-floating 把画布那套变量一并带过去。
+   底色用 --dsh-card（它指向宿主的高层面，浅色主题下跟着变浅），不求一个自己的深色
+   ——菜单是画布对宿主的延伸，不是画布内部那块工作台。 */
+.dsh-canvas-ctxmenu{position:fixed;z-index:60;display:flex;flex-direction:column;min-width:190px;max-width:320px;pointer-events:auto;
+  padding:4px;border:1px solid var(--dsh-hairline);border-radius:12px;background:var(--dsh-card)}
+/* 头一行写清「你右键的是哪张画布」：菜单就盖在那一行上，名字与目录是唯一的交代。 */
+.dsh-canvas-ctxhead{display:flex;flex-direction:column;gap:1px;min-width:0;padding:5px 10px 7px;margin-bottom:4px;
+  border-bottom:1px solid var(--dsh-hairline)}
+.dsh-canvas-ctxname{font:500 12px/17px var(--dsh-font);color:var(--dsh-fg);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-canvas-ctxpath{font:10px/14px var(--dsh-mono);color:var(--dsh-fg-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-canvas-ctxmenu .dsh-canvas-row svg{flex:none;color:var(--dsh-fg-3)}
+.dsh-canvas-ctxmenu .dsh-canvas-row:hover svg{color:var(--dsh-fg)}
+/* 「删除画布」是菜单的最后一项，用 twilight（本表里「有大事」的那一档）与「打开目录」
+   分开：它不是告警红——删除是用户自己点下去的动作。 */
+.dsh-canvas-ctxmenu .dsh-canvas-row:last-child{color:var(--dsh-twilight)}
+.dsh-canvas-ctxmenu .dsh-canvas-row:last-child svg{color:inherit}
+.dsh-canvas-ctxmenu .dsh-canvas-row:last-child:hover{color:var(--dsh-fg)}
+/* 悬浮构件的容器。尺寸写死、不吃指针（内容自己 re-enable）：菜单与确认框都挂进这一层，
+   因为宿主 body 是个 flex 容器，绝对定位元素落在 flex 容器里连尺寸都要接受容器的对齐
+   属性——直接把菜单挂 body 上时，它被 stretch 撑成了整屏高（见 canvas-menu.tsx）。 */
+.dsh-canvas-menuhost{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none}
 
 /* ── sidebar rail（本表仅有的全局选择器，两条，特此记名）────────────────── */
 /* 折叠是宿主在框架元素上发布的一个稳定属性（data-sidebar-collapsed），而宿主的

@@ -20,8 +20,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { Project } from '../types.ts'
+import type { CanvasBridge } from './bridge.ts'
 import type { Translate } from './locales.ts'
 import type { ProjectCatalog } from './project-catalog.ts'
+import { CanvasContextMenu, CanvasDeleteDialog, availableApps, fileManagerOf, openInApp } from './canvas-menu.tsx'
 
 /**
  * 画布区那一行、它的主面板（新建流程）、以及面板列表里包裹的归属，共用这一个 id。
@@ -110,6 +112,10 @@ export interface CanvasNavInject {
   openCanvas: (projectId: string) => void
   /** 新建画布：主区域交给文件夹选择器。 */
   createCanvas: () => void
+  /** 画布的行内动作（右键菜单里的两个）要用的调用面。 */
+  bridge: CanvasBridge
+  /** 把主区域交回对话：删除的正是当前看着的那张画布时调它。 */
+  handBackMain: () => void
 }
 
 /** 宿主交给行图形的 props（`sidebar` 的 SidebarPanelIconOwnerProps）。 */
@@ -148,6 +154,8 @@ export function CanvasNavSeat(props: CanvasNavProps) {
           catalog={props.catalog}
           openCanvas={props.openCanvas}
           createCanvas={props.createCanvas}
+          bridge={props.bridge}
+          handBackMain={props.handBackMain}
         />,
         list,
       )}
@@ -160,12 +168,60 @@ type CanvasNavPaneProps = CanvasNavInject & Pick<CanvasNavProps, 't' | 'usePanel
 
 /** 包裹本体：header（标题 + 新建）与画布列表。 */
 function CanvasNavPane(props: CanvasNavPaneProps) {
-  const { t, catalog, openCanvas, createCanvas } = props
+  const { t, catalog, openCanvas, createCanvas, bridge, handBackMain } = props
   const subscribe = useCallback((listener: () => void) => catalog.subscribe(listener), [catalog])
   const snapshot = useCallback(() => catalog.snapshot(), [catalog])
   const projects = useSyncExternalStore(subscribe, snapshot)
   const usePanelInfo = props.usePanelInfo ?? useNoPanel
   const activeId = usePanelInfo((info) => info.activePanelId)
+  /** 右键菜单此刻指着哪张画布、落在视口哪一点，以及右键那一行（关掉时把焦点还给它）。 */
+  const [menu, setMenu] = useState<{ project: Project; x: number; y: number; row: HTMLElement } | undefined>(undefined)
+  /** 等待确认删除的那张画布。 */
+  const [removing, setRemoving] = useState<Project | undefined>(undefined)
+  /** 宿主这台机器上的文件管理器标识；空串表示这台部署打不开目录。 */
+  const [fileManager, setFileManager] = useState('')
+  /** 打开目录失败的那句话；下一次右键即清掉。 */
+  const [actionError, setActionError] = useState('')
+
+  // 宿主报出的可用应用在页面内读一次就定了，但要在**右键之前**读到：菜单里那一项
+  // 有没有，取决于何时拿到答案，边点边等会让菜单先长出一项再缩回去。
+  useEffect(() => {
+    let cancelled = false
+    void availableApps().then((apps) => {
+      if (!cancelled) setFileManager(fileManagerOf(apps))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const closeMenu = useCallback((): void => {
+    // 焦点还给右键的那一行：菜单是从它身上长出来的，关掉之后键盘该回到原处。
+    // 写在这里而不是状态更新函数里——那里是渲染期的纯函数，不该有副作用。
+    const row = menu?.row
+    setMenu(undefined)
+    row?.focus()
+  }, [menu])
+
+  /** 打开画布目录：把这张画布的根交给系统文件管理器。 */
+  const openFolder = useCallback(
+    (project: Project): void => {
+      openInApp(fileManager, project.root).catch((reason: unknown) => {
+        setActionError(reason instanceof Error ? reason.message : String(reason))
+      })
+    },
+    [fileManager],
+  )
+
+  /** 删除成功之后：主区域若正看着这张画布就先交回对话，再让列表重读一次（面板随列表回收）。 */
+  const settleRemoval = useCallback(
+    (project: Project): void => {
+      setRemoving(undefined)
+      if (activeId === panelIdOf(project.id)) handBackMain()
+      void catalog.reload()
+    },
+    [activeId, catalog, handBackMain],
+  )
 
   return (
     <div
@@ -202,6 +258,14 @@ function CanvasNavPane(props: CanvasNavPaneProps) {
                 className="dsh-canvas-navrow"
                 data-active={activeId === panelIdOf(project.id) ? 'true' : undefined}
                 onClick={() => openCanvas(project.id)}
+                // 行上再放第二枚按钮会把左栏挤成按钮墙，所以「打开画布目录」与
+                // 「删除画布」住在右键菜单里。宿主的默认菜单在这里没有意义（浏览器
+                // 自己的「重新加载 / 检查」与这张画布无关），直接顶掉。
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  setActionError('')
+                  setMenu({ project, x: event.clientX, y: event.clientY, row: event.currentTarget })
+                }}
                 title={project.name}
               >
                 <Glyph size={14} active={activeId === panelIdOf(project.id)} />
@@ -210,6 +274,31 @@ function CanvasNavPane(props: CanvasNavPaneProps) {
             </li>
           ))}
         </ul>
+      )}
+      {actionError === '' ? null : (
+        <div className="dsh-canvas-naverror">{t('canvas.menu.openFailed', { message: actionError })}</div>
+      )}
+      {menu === undefined ? null : createPortal(
+        <CanvasContextMenu
+          project={menu.project}
+          at={{ x: menu.x, y: menu.y }}
+          app={fileManager}
+          t={t}
+          onOpenFolder={() => openFolder(menu.project)}
+          onRemove={() => setRemoving(menu.project)}
+          onClose={closeMenu}
+        />,
+        document.body,
+      )}
+      {removing === undefined ? null : createPortal(
+        <CanvasDeleteDialog
+          project={removing}
+          bridge={bridge}
+          t={t}
+          onRemoved={() => settleRemoval(removing)}
+          onClose={() => setRemoving(undefined)}
+        />,
+        document.body,
       )}
     </div>
   )

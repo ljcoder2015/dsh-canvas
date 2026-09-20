@@ -128,6 +128,28 @@ export function kindSupportsExport(
   return kindById(id, definitions)?.exportFormats.includes(format) ?? false
 }
 
+/**
+ * The kinds whose artifact is a whole HTML page (F3.8).
+ *
+ * A slide deck, a site's entry page and an app's entry page are three kinds
+ * but one preview: the markup runs in a sandboxed iframe. They also need the
+ * same preparation before that happens — a `srcdoc` document has no base URL,
+ * so a locally referenced `styles.css` or `app.js` resolves against nothing
+ * and the page renders unstyled and dead. The host inlines those references
+ * for every kind in this set.
+ *
+ * Two layers read this set — the host's inlining gate and the client's
+ * kind→viewer table — which is the point: they were two hand-written lists
+ * once, and the one that forgot a kind is exactly how an HTML artifact lost
+ * its stylesheet.
+ */
+export const HTML_KINDS: readonly string[] = ['html-deck', 'site', 'webapp']
+
+/** Whether a kind's artifact is a whole HTML page (see {@link HTML_KINDS}). */
+export function isHtmlKind(kind: string): boolean {
+  return HTML_KINDS.includes(kind)
+}
+
 /** True for a directory that carries its own `index.html` entry point. */
 function isSiteDirectory(probe: KindProbe): boolean {
   return probe.directory && probe.children.some((name) => name.toLowerCase() === 'index.html')

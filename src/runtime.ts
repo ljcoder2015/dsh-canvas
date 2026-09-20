@@ -192,7 +192,15 @@ export class CanvasRuntime extends TypertRemoteService {
     for (const [id, record] of [...this.notes.entries()]) {
       if (record.project === projectId) await this.notes.delete(id)
     }
-    return this.projects.delete(projectId)
+    const removed = await this.projects.delete(projectId)
+    // The deleted canvas may be the one the board-wide tools answer for. Left
+    // pointing at a project that no longer exists, that slot would turn every
+    // later board-wide call into `canvas/project-not-found` — so it is cleared
+    // here, and only when it names this very project.
+    if (removed && this.deps.domain.global.get().activeProjectId === projectId) {
+      await this.writeActiveProject('')
+    }
+    return removed
   }
 
   /** Direct subdirectories of a path, for the folder picker (design screen 02). */
@@ -205,6 +213,23 @@ export class CanvasRuntime extends TypertRemoteService {
   }
 
   // ── board ───────────────────────────────────────────────────────────────
+
+  /**
+   * Record which canvas the user is looking at.
+   *
+   * The board-wide agent tools (`canvas_read_board` and its siblings) answer for
+   * *the canvas the user has open*, and this global slot is the only place that
+   * fact lives: a card conversation can resolve its own project, but a plain
+   * conversation inside the deployment cannot. The client writes it whenever the
+   * visible canvas changes, and nothing else does.
+   */
+  @Remote
+  async setActiveProject(projectId: ProjectId, signal?: AbortSignal): Promise<Project> {
+    signal?.throwIfAborted()
+    const project = this.requireProject(projectId)
+    await this.writeActiveProject(projectId)
+    return project
+  }
 
   /** The whole board: seating, edges, notes (F1.3). */
   @Remote
@@ -440,6 +465,19 @@ export class CanvasRuntime extends TypertRemoteService {
   }
 
   // ── internals ───────────────────────────────────────────────────────────
+
+  /**
+   * Replace the global's active-project slot, leaving the rest of the global be.
+   *
+   * Writing the same value again is skipped: the global is durable, and a board
+   * that re-renders — or a seat that re-mounts on the canvas already open —
+   * would otherwise spend a write on every paint.
+   */
+  private async writeActiveProject(projectId: ProjectId | ''): Promise<void> {
+    const current = this.deps.domain.global.get()
+    if (current.activeProjectId === projectId) return
+    await this.deps.domain.global.set({ ...current, activeProjectId: projectId })
+  }
 
   /** The stored project record, or a typed refusal. */
   private requireProjectRecord(projectId: ProjectId): ProjectRecord {

@@ -15,7 +15,7 @@ import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsTarget, FsVersion, FsWriteIntent } from '@deepseek-ai/dsh-fs'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { ArtifactView, CardId, CardSummary, FolderEntry } from '../types.ts'
-import { PROBE_HEAD_LIMIT, digestOf, detectKind, kindLabel, outlineOf, type KindProbe } from './kind-registry.ts'
+import { PROBE_HEAD_LIMIT, digestOf, detectKind, isHtmlKind, kindLabel, outlineOf, type KindProbe } from './kind-registry.ts'
 import { inlineWebAppAssets, webAppAssetRefs, webappFiles } from './webapp.ts'
 
 /** A classified artifact: the kind plus the facts the board and the digest need. */
@@ -261,34 +261,39 @@ export class ArtifactIo {
     }
   }
 
-  /** Cap on the local assets one webapp preview inlines. */
-  private static readonly WEBAPP_ASSET_BUDGET = 12
+  /** Cap on the local assets one HTML preview inlines. */
+  private static readonly PAGE_ASSET_BUDGET = 12
   /** Character cap on one inlined asset; bigger files are left as references. */
-  private static readonly WEBAPP_ASSET_CAP = 1_000_000
+  private static readonly PAGE_ASSET_CAP = 1_000_000
 
   /**
-   * Read a webapp entry's local assets and inline them into the page text.
+   * Inline an HTML page's local stylesheets and scripts into its text.
    *
-   * The fullscreen viewer renders one `srcDoc`, and a `srcdoc` document has no
-   * base URL to resolve `styles.css` or `app.js` against — so the preview of a
-   * multi-file app would run unstyled and dead without this. Referenced assets
-   * that are missing or unreadable are left as references, which is the honest
-   * rendering of a broken page rather than a silent one.
+   * Every kind in {@link HTML_KINDS} previews by running its markup in a
+   * sandboxed iframe, and the fullscreen viewer renders exactly one `srcDoc` —
+   * a document with no base URL to resolve `styles.css` or `app.js` against.
+   * Without this, the preview of *any* multi-file page runs unstyled and dead;
+   * with it the folder keeps its multi-file shape on disk and the preview
+   * still shows the running page. References resolve against the entry page's
+   * own directory, so a card seated on `app/index.html` inlines
+   * `app/styles.css`. Referenced assets that are missing or unreadable are
+   * left as references, which is the honest rendering of a broken page rather
+   * than a silent one.
    */
-  private async inlineWebAppEntry(
+  private async inlinePageAssets(
     root: string,
     cardId: CardId,
     html: string,
     signal?: AbortSignal | undefined,
   ): Promise<string> {
-    const refs = webAppAssetRefs(html).slice(0, ArtifactIo.WEBAPP_ASSET_BUDGET)
+    const refs = webAppAssetRefs(html).slice(0, ArtifactIo.PAGE_ASSET_BUDGET)
     if (refs.length === 0) return html
     const dir = cardId.includes('/') ? cardId.slice(0, cardId.lastIndexOf('/') + 1) : ''
     const assets = new Map<string, string>()
     for (const ref of refs) {
       try {
         const { text } = await this.readText(root, `${dir}${ref}`, signal)
-        if (text.length <= ArtifactIo.WEBAPP_ASSET_CAP) assets.set(ref, text)
+        if (text.length <= ArtifactIo.PAGE_ASSET_CAP) assets.set(ref, text)
       } catch (error) {
         if (!isSeamError(error)) throw error
       }
@@ -309,6 +314,11 @@ export class ArtifactIo {
    *
    * A missing target is a state, not a failure — a seated card whose file has
    * not been written yet still gets its viewer, showing an absent state.
+   *
+   * An HTML page is the one kind whose *text* is not what it shows: the view
+   * carries the page with its local stylesheets and scripts inlined, because
+   * the iframe renders a `srcdoc` with no base URL to resolve them against
+   * ({@link inlinePageAssets}).
    */
   async view(root: string, cardId: CardId, signal?: AbortSignal): Promise<ArtifactView> {
     const facts = await this.facts(root, cardId, signal)
@@ -337,7 +347,7 @@ export class ArtifactIo {
 
     try {
       const { text } = await this.readText(root, cardId, signal)
-      const body = facts.kind === 'webapp' ? await this.inlineWebAppEntry(root, cardId, text, signal) : text
+      const body = isHtmlKind(facts.kind) ? await this.inlinePageAssets(root, cardId, text, signal) : text
       return { ...base, text: body.slice(0, VIEW_TEXT_CAP), truncated: body.length > VIEW_TEXT_CAP }
     } catch (error) {
       // An untextual file of an unknown kind (a PDF, a binary) still gets a

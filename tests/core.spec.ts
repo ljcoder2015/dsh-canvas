@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { CARD_HEIGHT, CARD_WIDTH, arrangeSeats, depthsOf, nextFreeSeat } from '../src/core/board.ts'
 import { projectIdOf, shortDigest, slugify } from '../src/core/ids.ts'
-import { BUILTIN_KINDS, detectKind, digestOf, kindSupportsExport, outlineOf } from '../src/core/kind-registry.ts'
+import { BUILTIN_KINDS, HTML_KINDS, detectKind, digestOf, isHtmlKind, kindSupportsExport, outlineOf } from '../src/core/kind-registry.ts'
 import {
   reconcileEdges,
   referencedPaths,
@@ -184,6 +184,22 @@ describe('kind registry', () => {
 
   it('falls back to a generic file rather than guessing', () => {
     expect(detectKind(probe({ path: 'x.bin', basename: 'x.bin', extension: 'bin' }))).toBe('file')
+  })
+
+  /**
+   * 两份手抄的 kind 清单会漂移，而漏掉一个的后果就是 HTML 卡片丢样式：
+   * host 不内联它的本地样式表，srcdoc 里 `styles.css` 又无处解析。所以清单
+   * 只有一份，且只列真实存在的 kind —— 拼错一个 id 也会在这里被抓住。
+   */
+  it('lists exactly the kinds whose artifact is one HTML page', () => {
+    for (const kind of HTML_KINDS) {
+      expect(BUILTIN_KINDS.some((entry) => entry.id === kind)).toBe(true)
+      expect(isHtmlKind(kind)).toBe(true)
+    }
+    expect(HTML_KINDS).toEqual(['html-deck', 'site', 'webapp'])
+    for (const kind of ['markdown', 'image', 'video', 'data', 'folder', 'file', '']) {
+      expect(isHtmlKind(kind)).toBe(false)
+    }
   })
 
   it('keeps every built-in kind addressable and exporting only what it can', () => {
