@@ -195,7 +195,14 @@ describe('artifact view inlining', () => {
     const view = await viewHarness({ 'a.html': remote }).view('/root', 'a.html')
 
     expect(view.kind).toBe('site')
-    expect(view.text).toBe(remote)
+    // The page's own markup survives untouched — nothing remote is fetched,
+    // rewritten or inlined — while the preview link guard is still installed:
+    // a relative *link* resolves against the host page in a `srcdoc` iframe
+    // exactly as a relative stylesheet reference does, so a page with no local
+    // asset can still have a local link to intercept.
+    expect(view.text.startsWith(remote)).toBe(true)
+    expect(view.text.match(/id="dsh-canvas-link-guard"/g)).toHaveLength(1)
+    expect(view.text.trimEnd().endsWith('</script>')).toBe(true)
   })
 
   it('does not touch a kind the iframe does not render', async () => {

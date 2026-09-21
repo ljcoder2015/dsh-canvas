@@ -20,7 +20,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { validateJsonSchemaValue, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { TOOL_NAMES } from '../src/contract.ts'
 import { registerTools, type ToolDeps } from '../src/tools.ts'
-import type { BoardCard, BoardSnapshot, CardSummary, Note, SourceChain } from '../src/types.ts'
+import type { BoardCard, BoardSnapshot, CardSummary, Note, ReferencedFiles, SourceChain } from '../src/types.ts'
 
 /** The project every fixture answers for. */
 const PROJECT = {
@@ -125,6 +125,21 @@ function harness(options: { activeProject?: string; card?: { project: string; ca
     card: {
       readSummary: async (): Promise<CardSummary> => DIGEST,
       readSources: async (): Promise<CardSummary[]> => [DIGEST],
+      referenceFiles: async (): Promise<ReferencedFiles> => ({
+        cardId: 'deck.html',
+        skipped: [],
+        files: [
+          {
+            cardId: 'brief.md',
+            path: 'brief.md',
+            mention: '@brief.md',
+            kind: 'markdown',
+            kindLabel: 'Markdown',
+            present: true,
+            bytes: 512,
+          },
+        ],
+      }),
       injectCard: async (): Promise<CardSummary> => DIGEST,
       createCard: async (): Promise<BoardCard> => CARD,
       scaffoldWebapp: async (): Promise<BoardCard> => ({ ...CARD, id: 'site/index.html' }),
@@ -161,6 +176,7 @@ const exec = (sessionId: string | undefined): never =>
 const ARGS: Record<string, unknown> = {
   [TOOL_NAMES.readCard]: { cardId: 'brief.md' },
   [TOOL_NAMES.readSources]: {},
+  [TOOL_NAMES.referenceFiles]: {},
   [TOOL_NAMES.linkSource]: { sourceCardId: 'brief.md' },
   [TOOL_NAMES.getSources]: {},
   [TOOL_NAMES.injectCard]: { cardId: 'brief.md' },

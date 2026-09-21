@@ -10,6 +10,7 @@
     "tools": [
       "canvas_read_card",
       "canvas_read_sources",
+      "canvas_reference_files",
       "canvas_link_source",
       "canvas_get_sources",
       "canvas_inject_card",

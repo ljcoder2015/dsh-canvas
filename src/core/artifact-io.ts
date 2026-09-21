@@ -16,7 +16,7 @@ import type { FsTarget, FsVersion, FsWriteIntent } from '@deepseek-ai/dsh-fs'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { ArtifactView, CardId, CardSummary, FolderEntry } from '../types.ts'
 import { PROBE_HEAD_LIMIT, digestOf, detectKind, isHtmlKind, kindLabel, outlineOf, type KindProbe } from './kind-registry.ts'
-import { inlineWebAppAssets, webAppAssetRefs, webappFiles } from './webapp.ts'
+import { injectPreviewLinkGuard, inlineWebAppAssets, webAppAssetRefs, webappFiles } from './webapp.ts'
 
 /** A classified artifact: the kind plus the facts the board and the digest need. */
 export interface ArtifactFacts {
@@ -318,7 +318,10 @@ export class ArtifactIo {
    * An HTML page is the one kind whose *text* is not what it shows: the view
    * carries the page with its local stylesheets and scripts inlined, because
    * the iframe renders a `srcdoc` with no base URL to resolve them against
-   * ({@link inlinePageAssets}).
+   * ({@link inlinePageAssets}) — and with the link guard installed, for the
+   * same reason: a relative *link* resolves against the host page just as a
+   * relative stylesheet reference does, which is what clicking one used to do
+   * (navigate the preview to the host app, and land on its 401).
    */
   async view(root: string, cardId: CardId, signal?: AbortSignal): Promise<ArtifactView> {
     const facts = await this.facts(root, cardId, signal)
@@ -347,7 +350,9 @@ export class ArtifactIo {
 
     try {
       const { text } = await this.readText(root, cardId, signal)
-      const body = isHtmlKind(facts.kind) ? await this.inlinePageAssets(root, cardId, text, signal) : text
+      const body = isHtmlKind(facts.kind)
+        ? injectPreviewLinkGuard(await this.inlinePageAssets(root, cardId, text, signal))
+        : text
       return { ...base, text: body.slice(0, VIEW_TEXT_CAP), truncated: body.length > VIEW_TEXT_CAP }
     } catch (error) {
       // An untextual file of an unknown kind (a PDF, a binary) still gets a

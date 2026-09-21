@@ -27,6 +27,7 @@ import type {
   Point,
   Project,
   ProjectBinding,
+  ReferencedFiles,
   SessionBinding,
   SourceChain,
   StyleProfile,
@@ -77,6 +78,7 @@ export interface CardFace {
   readSummary(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary>>
   readArtifact(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<ArtifactView>>
   readSources(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary[]>>
+  referenceFiles(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<ReferencedFiles>>
   injectCard(
     projectId: string,
     cardId: string,
@@ -139,6 +141,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'card/readSummary': CardFace['readSummary']
     'card/readArtifact': CardFace['readArtifact']
     'card/readSources': CardFace['readSources']
+    'card/referenceFiles': CardFace['referenceFiles']
     'card/injectCard': CardFace['injectCard']
     'card/openSession': CardFace['openSession']
     'card/releaseSession': CardFace['releaseSession']

@@ -49,6 +49,7 @@ const CARD_MEMBERS: readonly TypertMemberModel[] = [
   member('readSummary', 'readSummary(projectId, cardId, signal?): Promise<CardSummary>', '读取一张卡片产物的摘要。'),
   member('readArtifact', 'readArtifact(projectId, cardId, signal?): Promise<ArtifactView>', '读取一张卡片产物的全屏视图载荷（全文或媒体 data URL）。'),
   member('readSources', 'readSources(projectId, cardId, signal?): Promise<CardSummary[]>', '读取一张卡片的全部取材来源摘要。'),
+  member('referenceFiles', 'referenceFiles(projectId, cardId, signal?): Promise<ReferencedFiles>', '把取材来源以「文件引用」注入卡片会话：上游产物按 @工作区相对路径 命名（模型自己 read 按需读取），不复制内容；路径无法写成 @引用的会在 skipped 里说明。'),
   member('injectCard', 'injectCard(projectId, cardId, sourceCardId, mode, signal?): Promise<CardSummary>', '把上游产物注入卡片会话。'),
   member('openSession', 'openSession(projectId, cardId, signal?): Promise<SessionBinding>', '打开（或复用）卡片绑定的 Agent 会话。'),
   member('releaseSession', 'releaseSession(projectId, cardId, signal?): Promise<boolean>', '释放卡片会话；日志保留，重开即续。'),

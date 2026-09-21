@@ -21,6 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { createUserMessage, boundContextSummary } from '@deepseek-ai/dsh-llm'
 import type { CardId, CardSummary, Project } from './types.ts'
+import { renderFileReferences, type FileReference } from './core/file-reference.ts'
 import { TOOL_NAMES } from './contract.ts'
 
 /** Plugin identity used on every injected message source. */
@@ -63,7 +64,9 @@ export function registerGlobalPrompt(ctx: Context): void {
       '',
       'Vocabulary: a **card** is one artifact plus its board seat; a **session** is that card\'s conversation; a **source** (取材) is the statement "this artifact builds on that artifact" — material at the upstream end, product at the downstream end. There is exactly one relationship type, and it is directed.',
       '',
-      `The \`${TOOL_NAMES.readCard}\`, \`${TOOL_NAMES.readSources}\`, \`${TOOL_NAMES.linkSource}\`, \`${TOOL_NAMES.getSources}\` and \`${TOOL_NAMES.injectCard}\` tools act on *the card whose conversation is calling them*. Outside a card conversation they are refused — that is the intended behavior, not a fault, and the fix is to open the card first rather than to retry.`,
+      'A source edge (取材) carries material in two forms, and they answer different questions. The upstream **artifact** can be *named* as a file reference (`canvas_reference_files`): the board injects its workspace-relative path as an `@` token and you read it with the ordinary file tools when it matters — that is the cheap, always-current form. The same artifact can also be *summarized into this conversation* on demand (`canvas_read_sources`, `canvas_inject_card`), which costs context whether or not you wanted it but puts the material in front of you without a read.',
+      '',
+      `The \`${TOOL_NAMES.readCard}\`, \`${TOOL_NAMES.readSources}\`, \`${TOOL_NAMES.referenceFiles}\`, \`${TOOL_NAMES.linkSource}\`, \`${TOOL_NAMES.getSources}\` and \`${TOOL_NAMES.injectCard}\` tools act on *the card whose conversation is calling them*. Outside a card conversation they are refused — that is the intended behavior, not a fault, and the fix is to open the card first rather than to retry.`,
       `\`${TOOL_NAMES.readBoard}\`, \`${TOOL_NAMES.arrangeOnBoard}\`, \`${TOOL_NAMES.organizeBoard}\`, \`${TOOL_NAMES.createOnBoard}\`, \`${TOOL_NAMES.linkSourceOnBoard}\`, \`${TOOL_NAMES.generateImage}\`, \`${TOOL_NAMES.export}\` and \`${TOOL_NAMES.publish}\` are board-wide: they answer for the canvas the user has open — and inside a card conversation, where the project is certain, for that card's canvas.`,
     ].join('\n'),
   })
@@ -107,7 +110,9 @@ export function installCardScope(agentCtx: Context, input: CardScopeInput): void
       '',
       '### Material this artifact sources from',
       '',
-      'The block below is the *current* digest of every artifact this one is declared to source from (取材). Treat it as material you may build on, not as text to copy: if an upstream artifact changed, this digest changed with it.',
+      'The block below names the artifacts this one is declared to source from (取材), as workspace-relative paths — which is exactly what the `@file` grammar denotes. Read any of them with the ordinary file tools: they are references, not content, and nothing has been copied into this conversation on your behalf.',
+      '',
+      `When a name is not enough — you want the material in front of you without spending a read — \`${TOOL_NAMES.readSources}\` returns a digest of every upstream, \`${TOOL_NAMES.readCard}\` returns one, and \`${TOOL_NAMES.injectCard}\` pushes one into this conversation. \`${TOOL_NAMES.referenceFiles}\` re-states the upstream files as \`@\` tokens, which is what to call after a long exchange has pushed the block out of sight.`,
     ]
       .filter((line) => line !== '')
       .join('\n'),
@@ -146,6 +151,31 @@ export function upstreamChangedMessage(upstream: CardId, downstream: CardId, dig
       plugin: PLUGIN_ID,
       form: 'snapshot',
       sections: [{ name: UPSTREAM_CONTEXT, text: body }],
+    },
+  })
+}
+
+/**
+ * Build the message that hands a downstream session its material as file names.
+ *
+ * The source is `kind: 'plugin'`, never `kind: 'user'`: the board is naming the
+ * files, not putting words in the user's mouth, and the harness's own `@file`
+ * guidance already tells the model how to treat such tokens. The body carries
+ * no file content at all — a reference is an offer to read, and its whole value
+ * is that it costs nothing until the model accepts.
+ */
+export function referenceMessage(
+  references: readonly FileReference[],
+  skipped: readonly string[],
+): UserMessage {
+  const body = renderFileReferences(references, skipped)
+  return createUserMessage({
+    content: [{ type: 'text', text: body }],
+    source: {
+      kind: 'plugin',
+      plugin: PLUGIN_ID,
+      form: 'notice',
+      summary: boundContextSummary(`取材 ${references.map((reference) => reference.cardId).join(' / ')}`),
     },
   })
 }

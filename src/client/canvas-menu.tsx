@@ -1,325 +1,139 @@
 /**
- * dsh-canvas — 画布行的右键动作（F1.8）。
+ * dsh-canvas — 画布行的两个动作（F1.5 修订）。
  *
  * 画布列表里的一条画布需要两个「关于这张画布本身」的动作，而它们都不属于画布
  * 面板内部：**打开画布目录**（把这台机器上的文件夹交给系统文件管理器）与**删除
- * 画布**（把这张画布从列表里移开，磁盘一个字节都不动）。行上再放第二枚按钮会把
- * 左栏挤成按钮墙（同 F1.5 里舍弃「一个画布一行按钮」的理由），所以它们住在右键
- * 菜单里——一个动作只在被找的时候露面。
+ * 画布**（把这张画布从列表里移开，磁盘一个字节都不动）。
  *
- * 三件事在这里定：
+ * 它们住在**行右侧的操作按钮**里（v1.33 起；此前住在右键菜单里）：指针落到那一
+ * 行才露面的一枚省略号，点开是一张锚着它的下拉菜单——与左栏「工作区」那一段的
+ * 行操作**同款同源**：同样的浮层原语、同样的令牌与圆角、同样的「点外面 / Esc /
+ * 移开指针即关」的规矩。左右两段列表因此读起来是一套东西。
  *
- * - **打开目录走宿主的「在应用中打开」路由**（`/open-in-app/open`）。宿主自己那套
- *   探测（哪个应用在这台机器上真的存在、按平台过滤）已经做好了，插件再走一遍
- *   `spawn` 是重复劳动，也没有必要自己判断当前是 macOS 还是 Windows。代价是这
- *   条路由**可能不存在**（裸组合、没装 `dsh-host-open-in-app` 的部署），所以那是
- *   一次探测：探测不到就把这一项整条藏起来，而不是给出一枚点了会报错的按钮。
+ * 这一层只做两件事：把动作**画出来**、把动作**接到调用点上**。两旁的判断都在别处，
+ * 各自待在一个不碰宿主 UI 原语的模块里，于是单测能直接跑它们：
+ *
+ * - 「该有哪几行、每行叫什么、哪一行是破坏性的」→ `row-actions.ts`；
+ * - 「怎么把目录交给系统文件管理器、这台机器上有没有」→ `open-folder.ts`。
+ *
+ * 留下的两件事在这里定：
+ *
  * - **删除只删画布**。`canvas/removeProject` 的语义是「忘掉这张画布」——卡片座次、
  *   取材关系、笔记一起消失，磁盘上的文件夹与文件原样保留。文案必须把这一点说在
- *   前头：这是用户右键删除时最怕的那件事。
- * - **菜单位置由视口兜底**。菜单是 `position:fixed` 挂在 body 上的（画布行在宿主
- *   侧栏里，那里有 overflow 与 transform，挂在行内会被裁），所以贴边时要自己翻
- *   回来，否则右键画布列表最下面那张时菜单会有一半在屏幕外。
+ *   前头：这是用户点下删除时最怕的那件事。
+ * - **浮层两件都交给宿主的原语**（`Menu` / `Modal`），插件不再自己往 body 上挂
+ *   东西。宿主那两枚原语自带 portal、遮罩、Esc、焦点与无障碍角色，也自带主题
+ *   令牌——画布那套 `--dsh-*` 变量只活在 `.dsh-canvas-root` 里，跨 portal 带过去
+ *   正是旧版要写一层零尺寸容器、再补一个 `.dsh-canvas-floating` 变量的全部原因。
+ *   让它们留在宿主的配色里还另有一层意思：这两件说的是**左栏那一段列表**的事，
+ *   与画布内部的深色工作台无关。
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useCallback, useState, type ReactNode } from 'react'
+import {
+  Button,
+  IconEllipsisOutline16,
+  IconFolderOpenOutline16,
+  IconTrashOutline16,
+  Menu,
+  Modal,
+  type MenuEntry,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Project } from '../types.ts'
 import type { CanvasBridge } from './bridge.ts'
 import type { Translate } from './locales.ts'
-
-/** 宿主「在应用中打开」路由（见 `@deepseek-ai/dsh-host-open-in-app` 的 shared）。 */
-const OPEN_IN_APP_APPS = '/open-in-app/apps'
-const OPEN_IN_APP_OPEN = '/open-in-app/open'
+import { ROW_ACTIONS, rowActions, type RowActionId } from './row-actions.ts'
 
 /**
- * 「文件管理器」在各平台的目录标识。
+ * 行操作菜单里的那几行。
  *
- * 宿主只报出与自己平台相符的那一个（darwin/finder、win32/explorer、linux/
- * filemanager），所以这里是一位候选表而不是一张平台表——插件不需要知道自己是
- * 跑在哪个系统上，问宿主要答案比猜平台稳。
+ * 「该有哪几行」由 `row-actions.ts` 定（纯策略）；这里只把每个动作配上图形——`Menu`
+ * 的每一行都带一枚前导图形，宿主那一段工作区列表也是这么画的。
+ *
+ * @param app - 宿主这台机器上的文件管理器标识；空串表示打不开目录。
+ * @param t - 字典。
+ * @returns 按显示顺序排好的菜单行。
  */
-export const FILE_MANAGER_APPS = ['finder', 'explorer', 'filemanager'] as const
-
-/**
- * 这份可用应用清单里的文件管理器；一个都没有时返回空串。
- *
- * 空串是「这台部署打不开目录」（路由不在、或系统里连 xdg-open 都没有），调用点
- * 据此把「打开画布目录」整条藏掉。
- *
- * @param apps - 宿主报出的可用应用标识。
- * @returns 可用的文件管理器标识，没有则 `''`。
- */
-export function fileManagerOf(apps: readonly string[]): string {
-  return FILE_MANAGER_APPS.find((id) => apps.includes(id)) ?? ''
-}
-
-/** 菜单在视口里的落点。`margin` 是贴边时留出的空隙。 */
-export interface MenuPlacement {
-  left: number
-  top: number
-}
-
-/**
- * 右键落点 → 菜单落点，四条边都夹在视口内。
- *
- * 优先贴指针（右键菜单的手感全在「菜单就在手指边上」），只有空间不够时才让开：
- * 先按右下方向摆，越过视口边界就整体收回来。收回来时不翻到指针左边——菜单盖住
- * 指针会把「刚点的是哪一行」也一起盖掉，而列表最下面一行恰恰是最需要看清的那行。
- *
- * @param x - 指针的视口横坐标。
- * @param y - 指针的视口纵坐标。
- * @param width - 菜单宽度（先渲染后量出来）。
- * @param height - 菜单高度。
- * @param viewportWidth - 视口宽度。
- * @param viewportHeight - 视口高度。
- * @param margin - 与视口边缘的最小距离。
- * @returns 菜单左上角的视口坐标。
- */
-export function placeMenu(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  viewportWidth: number,
-  viewportHeight: number,
-  margin: number = 8,
-): MenuPlacement {
-  const clamp = (value: number, max: number): number => Math.max(margin, Math.min(value, Math.max(margin, max)))
-  return {
-    left: clamp(x, viewportWidth - width - margin),
-    top: clamp(y, viewportHeight - height - margin),
+export function rowMenuItems(app: string, t: Translate): MenuEntry[] {
+  const icons: Record<RowActionId, ReactNode> = {
+    open: <IconFolderOpenOutline16 />,
+    remove: <IconTrashOutline16 />,
   }
+  return rowActions(app).map((id) => ({
+    id,
+    label: t(ROW_ACTIONS[id].label),
+    icon: icons[id],
+    // `false` 与「不声明」在宿主那边是两回事：只声明真的破坏性的那一行。
+    ...(ROW_ACTIONS[id].danger ? { danger: true } : {}),
+  }))
 }
 
-/**
- * 页面的基准地址。
- *
- * 与宿主自己的客户端同一条规矩：来自 `file:` 之类的嵌入上下文里 `origin` 是字符串
- * `"null"`，那时 `new URL('/open-in-app/apps', 'null')` 会抛错，所以退到一个固定的
- * 主机名——这条路径只在嵌入场景里走，相对地址在那里本来也没有意义。
- */
-function hostBase(): string {
-  const origin = globalThis.location?.origin
-  return origin !== undefined && origin !== 'null' ? origin : 'http://dsh.internal'
-}
-
-/** 本页读到过的可用应用；探测在宿主侧要跑一遍应用定位，每页读一次就够。 */
-let applications: Promise<readonly string[]> | undefined
-
-/** 宿主这台机器上可用的应用标识（读不到时是空表，不是异常）。 */
-export function availableApps(): Promise<readonly string[]> {
-  applications ??= fetch(new URL(OPEN_IN_APP_APPS, hostBase()), { headers: { accept: 'application/json' } })
-    .then((response) => (response.ok ? response.json() : undefined))
-    .then((payload: unknown) => {
-      const apps = (payload as { apps?: unknown } | undefined)?.apps
-      return Array.isArray(apps) ? apps.filter((id): id is string => typeof id === 'string') : []
-    })
-    // 探测失败与「一个都没装」在调用点是一件事：没有可用的应用。
-    .catch((): readonly string[] => [])
-  return applications
-}
-
-/**
- * 在一个应用里打开一个目录。
- *
- * 失败时抛出宿主给的那句话（目录不存在、应用启动失败都是它说的，插件编不出更准
- * 的），调用点把它放进错误行。
- */
-export async function openInApp(app: string, path: string): Promise<void> {
-  const response = await fetch(new URL(OPEN_IN_APP_OPEN, hostBase()), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ app, path }),
-  })
-  if (response.ok) return
-  const payload = (await response.json().catch(() => undefined)) as { message?: unknown } | undefined
-  throw new Error(typeof payload?.message === 'string' ? payload.message : `HTTP ${String(response.status)}`)
-}
-
-/**
- * 悬浮构件的容器。
- *
- * 菜单与确认框都不直接挂到 body 上，而是挂进这一层：宿主的 body 本身是个 flex 容器，
- * 而**绝对定位元素落在 flex 容器里时，它的静态位置仍要接受容器的对齐属性**——实测这个
- * 菜单被 align-items:stretch 撑成整屏高（computed height 882px、下沿永远贴着视口底部，
- * 两项内容的菜单看起来像一块盖住半屏的板子）。这一层尺寸是写死的、不参与任何布局，菜单
- * 便只受视口摆布；不吃指针，免得它自己挡住下面那一列。
- */
-function MenuHost(props: { children: ReactNode }) {
-  return createPortal(<div className="dsh-canvas-menuhost">{props.children}</div>, document.body)
-}
-
-/** 打开目录的图形：一个文件夹。 */function FolderGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"
-      strokeLinejoin="round" aria-hidden="true">
-      <path d="M1.9 4.1h4l1.3 1.6h6.9v6.2H1.9z" />
-    </svg>
-  )
-}
-
-/** 删除画布的图形：一个垃圾桶。 */
-function TrashGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2.8 4.4h10.4M6.4 4.4V3.1h3.2v1.3M4.2 4.4l.7 8.5h6.2l.7-8.5M6.7 6.8v4M9.3 6.8v4" />
-    </svg>
-  )
-}
-
-/** 画布行的右键菜单。 */
-export interface CanvasMenuProps {
-  /** 右键的那张画布。 */
+/** 画布行的操作按钮与它下拉出来的菜单。 */
+export interface CanvasRowMenuProps {
+  /** 这一行是哪张画布；只用来把无障碍名说清楚。 */
   project: Project
-  /** 右键落点（视口坐标）。 */
-  at: { x: number; y: number }
+  /** 菜单是否开着（由列表持有，同一时刻只允许一行开着）。 */
+  open: boolean
+  /** 开合请求：调用点据此记账。 */
+  onOpenChange: (open: boolean) => void
   /** 宿主这台机器上的文件管理器标识；空串表示打不开目录，那一项不出现。 */
   app: string
   t: Translate
   /** 打开画布目录。 */
   onOpenFolder: () => void
-  /** 删除画布（先问一句，问在对话框里）。 */
+  /** 删除画布（先问一句，问在确认框里）。 */
   onRemove: () => void
-  onClose: () => void
 }
 
 /**
- * 右键菜单本体。
+ * 画布行的操作按钮。
  *
- * 键盘按菜单的规矩来：打开即把焦点放到第一项（右键不移动焦点，菜单若只认鼠标，
- * 键盘用户就够不着这两个动作），上下键在两项之间走，Esc 关掉并把焦点还给画布行
- * （`onClose` 的调用点负责还）。关掉的另外几条路——点到菜单外、窗口滚动或改变
- * 大小——都是「菜单会漂到离目标很远的地方」的前兆，宁可关掉。
+ * 按钮本身是宿主 `Menu` 的锚点，所以菜单的位置、贴边回拉、滚动跟随都由宿主自己
+ * 算——插件不再需要一个 `placeMenu` 纯函数，也不会出现「菜单长到视口外面」的
+ * 那一类缺陷。
+ *
+ * 按下去不让事件继续走：这一行的行体是「切到这张画布」，点省略号不该顺带切过去。
+ * 菜单项也走同一条路——菜单被 portal 到 body，但 React 的事件沿 **React 树**上溯，
+ * 所以它照样会经过这里；不拦的话，选「打开目录」会连带把画布切一次。
  */
-export function CanvasContextMenu(props: CanvasMenuProps) {
-  const { project, at, app, t, onOpenFolder, onRemove, onClose } = props
-  const ref = useRef<HTMLDivElement | null>(null)
-  const items = useRef<(HTMLButtonElement | null)[]>([])
-  const [box, setBox] = useState<MenuPlacement | undefined>(undefined)
+export function CanvasRowMenu(props: CanvasRowMenuProps) {
+  const { project, open, onOpenChange, app, t, onOpenFolder, onRemove } = props
 
-  // 尺寸要等渲染出来才知道，所以第一帧先摆在指针处且不可见，量完再归位。
-  const place = useCallback((): void => {
-    const element = ref.current
-    if (element === null) return
-    const rect = element.getBoundingClientRect()
-    setBox(placeMenu(at.x, at.y, rect.width, rect.height, window.innerWidth, window.innerHeight))
-  }, [at.x, at.y])
-
-  useLayoutEffect(() => {
-    place()
-  }, [place])
-
-  // 量到的高度可能不是最终的高度：字体落地、以及「打开画布目录」那一项在宿主报回
-  // 可用应用之前还不存在，都会让菜单长高——尺寸一变就得重算，否则贴在视口底边时会被
-  // 切掉一截。观察器只改 left/top，不改尺寸，所以不会自激。
-  useEffect(() => {
-    const element = ref.current
-    if (element === null) return
-    const observer = new ResizeObserver(place)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [place])
-
-  useEffect(() => {
-    // 焦点要让一帧再抢。右键的 mousedown 默认动作是**把焦点落到被点的那一行上**，
-    // 而 contextmenu 在 Blink 里就派发在那条默认动作之前——同步 focus 会被它顶掉
-    // （实测：菜单开着，activeElement 却还是画布行）。等到这一轮事件跑完再落到第一项，
-    // 键盘才真的能直接用。第一项可能不存在（这台部署打不开目录），所以取第一个非空项。
-    const frame = window.requestAnimationFrame(() => {
-      items.current.find((item) => item !== null)?.focus()
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [])
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent): void => {
-      const element = ref.current
-      if (element !== null && event.target instanceof Node && element.contains(event.target)) return
-      onClose()
-    }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        onClose()
-      }
-    }
-    window.addEventListener('pointerdown', onPointerDown, true)
-    window.addEventListener('keydown', onKeyDown, true)
-    window.addEventListener('scroll', onClose, true)
-    window.addEventListener('resize', onClose)
-    window.addEventListener('blur', onClose)
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown, true)
-      window.removeEventListener('keydown', onKeyDown, true)
-      window.removeEventListener('scroll', onClose, true)
-      window.removeEventListener('resize', onClose)
-      window.removeEventListener('blur', onClose)
-    }
-  }, [onClose])
-
-  /** 上下键在菜单项之间走；到头停住（与单选组同一个约定：不绕回）。 */
-  const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-    const list = items.current.filter((item): item is HTMLButtonElement => item !== null)
-    const index = list.indexOf(document.activeElement as HTMLButtonElement)
-    const step = event.key === 'ArrowDown' ? 1 : -1
-    const next = list[Math.min(list.length - 1, Math.max(0, index + step))]
-    if (next !== undefined && next !== document.activeElement) {
-      event.preventDefault()
-      next.focus()
-    }
-  }, [])
-
-  /** 点一项：动作交给调用点，菜单自己先关（动作要开对话框，别让菜单压在它上面）。 */
-  const pick = (action: () => void): void => {
-    onClose()
-    action()
+  /** 选一行：菜单先关（接着要开的可能是确认框，别让菜单压在它上面），再动作。 */
+  const pick = (id: string): void => {
+    onOpenChange(false)
+    if (id === 'open') onOpenFolder()
+    else if (id === 'remove') onRemove()
   }
 
+  const label = t('canvas.menu.aria', { name: project.name })
+
   return (
-    <MenuHost>
-      <div
-        className="dsh-canvas-floating dsh-canvas-ctxmenu"
-        role="menu"
-        aria-label={t('canvas.menu.aria')}
-        ref={ref}
-        style={{ left: at.x, top: at.y, visibility: box === undefined ? 'hidden' : 'visible', ...box }}
-        onKeyDown={onKeyDown}
-      >
-        <div className="dsh-canvas-ctxhead" title={project.root}>
-          <span className="dsh-canvas-ctxname">{project.name}</span>
-          <span className="dsh-canvas-ctxpath">{project.root}</span>
-        </div>
-        {app === '' ? null : (
+    <span className="dsh-canvas-navactions" data-open={open ? 'true' : undefined}>
+      <Menu
+        open={open}
+        anchor={(
           <button
             type="button"
-            role="menuitem"
-            className="dsh-canvas-row"
-            ref={(node) => {
-              items.current[0] = node
+            className="dsh-canvas-navicon"
+            aria-label={label}
+            title={label}
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpenChange(!open)
             }}
-            title={project.root}
-            onClick={() => pick(onOpenFolder)}
           >
-            <FolderGlyph />
-            {t('canvas.menu.open')}
+            <IconEllipsisOutline16 />
           </button>
         )}
-        <button
-          type="button"
-          role="menuitem"
-          className="dsh-canvas-row"
-          ref={(node) => {
-            items.current[1] = node
-          }}
-          onClick={() => pick(onRemove)}
-        >
-          <TrashGlyph />
-          {t('canvas.menu.remove')}
-        </button>
-      </div>
-    </MenuHost>
+        items={rowMenuItems(app, t)}
+        onSelect={pick}
+        onClose={() => {
+          onOpenChange(false)
+        }}
+        portal
+        closeOnPointerLeave
+      />
+    </span>
   )
 }
 
@@ -337,8 +151,10 @@ export interface CanvasDeleteProps {
  * 删除确认。
  *
  * 没有「撤销」可点，所以确认之前把后果说明白：磁盘上的东西都在，消失的是这张画布
- * 自己的排版与取材关系。默认焦点落在「取消」上——这个对话框是右键菜单里的一次
- * 误触就能走到的地方，回车不该等于删除。
+ * 自己的排版与取材关系。用宿主的 `Modal`（左栏「工作区」删除那一张是同款），于是
+ * Esc、点遮罩即关、`role="dialog"` 都由宿主给全，插件只管这一句话写得对不对。
+ *
+ * 两枚按钮都是描边款、焦点落在「取消」上：破坏性的那一个要用户真的把指针移过去。
  */
 export function CanvasDeleteDialog(props: CanvasDeleteProps) {
   const { project, bridge, t, onRemoved, onClose } = props
@@ -352,7 +168,7 @@ export function CanvasDeleteDialog(props: CanvasDeleteProps) {
     bridge
       .removeProject(project.id)
       .then(() => {
-        // 删成功之后就不要再碰本组件自己的状态了：调用点会把这张对话框卸掉。
+        // 删成功之后就不要再碰本组件自己的状态了：调用点会把这张框卸掉。
         onRemoved()
       })
       .catch((reason: unknown) => {
@@ -361,40 +177,39 @@ export function CanvasDeleteDialog(props: CanvasDeleteProps) {
       })
   }, [bridge, busy, onRemoved, project.id, t])
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      event.stopPropagation()
-      onClose()
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [onClose])
+  const footer: ReactNode = (
+    <>
+      <Button variant="outline" disabled={busy} onClick={onClose}>
+        {t('canvas.action.cancel')}
+      </Button>
+      <Button variant="outline" disabled={busy} onClick={confirm}>
+        {t('canvas.action.delete')}
+      </Button>
+    </>
+  )
 
   return (
-    <MenuHost>
-      <div
-        className="dsh-canvas-floating dsh-canvas-scrim is-floating"
-        onPointerDown={(event) => {
-          if (event.target === event.currentTarget) onClose()
-        }}
-      >
-        <div className="dsh-canvas-dialog" role="dialog" aria-modal="true" aria-label={t('canvas.menu.remove.title')}>
-          <div className="dsh-canvas-dialog-head">{t('canvas.menu.remove.title')}</div>
-          <div className="dsh-canvas-dialog-body">{t('canvas.menu.remove.desc', { name: project.name })}</div>
-          <div className="dsh-canvas-dialog-path">{project.root}</div>
-          {error === '' ? null : <div className="dsh-canvas-dialog-error">{t('canvas.error', { message: error })}</div>}
-          <div className="dsh-canvas-dialog-foot">
-            <span style={{ marginLeft: 'auto' }} />
-            <button type="button" className="dsh-canvas-chipbtn" autoFocus onClick={onClose}>
-              {t('canvas.action.cancel')}
-            </button>
-            <button type="button" className="dsh-canvas-chipbtn" data-primary="true" disabled={busy} onClick={confirm}>
-              {t('canvas.action.delete')}
-            </button>
-          </div>
+    <Modal
+      open
+      onClose={onClose}
+      closeLabel={t('canvas.action.cancel')}
+      title={t('canvas.menu.remove.title')}
+      description={t('canvas.menu.remove.desc', { name: project.name })}
+      footer={footer}
+    >
+      {/* 路径单独一行而不是塞进说明句：它可能很长，混进句子里那句话会被读成一条路径。
+          这也是「你说的到底是哪个目录」的唯一交代。 */}
+      <div className="dsh-canvas-navmodal-path">{project.root}</div>
+      {busy ? (
+        <div className="dsh-canvas-navmodal-status" role="status">
+          {t('canvas.menu.remove.pending')}
         </div>
-      </div>
-    </MenuHost>
+      ) : null}
+      {error === '' ? null : (
+        <div className="dsh-canvas-navmodal-error" role="alert">
+          {t('canvas.error', { message: error })}
+        </div>
+      )}
+    </Modal>
   )
 }

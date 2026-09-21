@@ -74,6 +74,17 @@ export interface CardSelectionProps {
   onRemove: () => void
   /** Declare an edge from `sourceId` and push its digest into the session. */
   onAddMaterial: (sourceId: string) => void
+  /**
+   * Hand this card's materials over as file references.
+   *
+   * A different channel from {@link CardSelectionProps.onAddMaterial}, and its
+   * own entry rather than a second meaning for the same click: that one picks a
+   * card and pushes a **digest** of its artifact into this conversation, while
+   * this one names the upstream files that are *already* sourced — `@paths` the
+   * model reads when it wants them, no content copied. See
+   * `canvas_reference_files`.
+   */
+  onReferenceMaterials: () => void
   /** Delete the material edge carrying this storage id. */
   onDropMaterial: (sourceId: string) => void
   /** Open the prompt modal (⤢) — the same draft, at full size. */
@@ -337,7 +348,7 @@ function ModelPicker({
  */
 export function CardSelection(props: CardSelectionProps) {
   const {
-    bridge, card, summary, materials, others, t, draft, onAddMaterial, onDropMaterial,
+    bridge, card, summary, materials, others, t, draft, onAddMaterial, onReferenceMaterials, onDropMaterial,
     onExpand, onDraftChange, onSend,
   } = props
   const [menu, setMenu] = useState(false)
@@ -391,6 +402,18 @@ export function CardSelection(props: CardSelectionProps) {
             </button>
             {menu ? (
               <div className="dsh-canvas-menu is-raised">
+                {/* 文件引用不是「挑一张卡片」：它交的是本卡片**已有**取材来源的 @路径，
+                    所以它是一枚独立入口，而不是给每一行再加一个更弱的按钮。 */}
+                <button
+                  className="dsh-canvas-row"
+                  onClick={() => {
+                    setMenu(false)
+                    onReferenceMaterials()
+                  }}
+                >
+                  {t('canvas.composer.reference')}
+                  <span className="dsh-canvas-row-meta">{t('canvas.composer.referenceMeta')}</span>
+                </button>
                 {others.length === 0 ? (
                   <span className="dsh-canvas-composer-menuempty">{t('canvas.composer.empty')}</span>
                 ) : (

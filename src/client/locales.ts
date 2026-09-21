@@ -89,6 +89,8 @@ export const zh = {
   // Card overlay / panel
   'canvas.panel.latest': '最新一条',
   'canvas.composer.material': '引入其它节点产物',
+  'canvas.composer.reference': '引用上游产物文件',
+  'canvas.composer.referenceMeta': '文件引用',
   'canvas.composer.drop': '删除这条取材关系',
   'canvas.composer.placeholder': '输入提示词，发送给这张卡片…',
   'canvas.composer.send': '发送',
@@ -124,6 +126,10 @@ export const zh = {
   'canvas.viewer.saving': '保存中…',
   'canvas.viewer.autosave': '自动保存',
   'canvas.viewer.draftPreview': '以下渲染的是编辑器里的草稿，尚未落盘。',
+  // 预览里的站内链接（宿主注入的闸门拦下并报上来的那一类）。话要说全：这不是
+  // 「坏了」，是内联快照里这条地址**无从解析**——然后给出真能走的下一步。
+  'canvas.viewer.linkBlocked': '「{href}」指向画布内的文件，预览不跟随：预览是一份内联快照，没有服务器，相对地址没有可解析的基准（跟下去只会把预览顶掉，落到宿主页面的 401 上）。要看它，把该文件建成卡片，或用左栏「打开画布目录」交给文件管理器。',
+  'canvas.viewer.linkBlocked.dismiss': '知道了',
   'canvas.viewer.writeBlocked': '写入被拒：这个位置不允许改写文件（权限或沙箱限制），自动保存已暂停——改动仍在编辑器里，没有丢。修好后点「重试」。',
   'canvas.viewer.autosaveOff': '自动保存已暂停',
   'canvas.viewer.retry': '重试',
@@ -142,13 +148,15 @@ export const zh = {
   'canvas.manage.add': '新建画布',
   'canvas.manage.picking': '请在系统选择器中选定一个文件夹…',
 
-  // 画布行的右键菜单（F1.8）：行上放不下第二枚按钮，这两个动作住在菜单里。
+  // 画布行的操作菜单（F1.5 修订）：行右侧一枚省略号，点开是「关于这张画布本身」的两个
+  // 动作。无障碍名带上画布名——左栏有好几行，只说「画布操作」读不出说的是哪一张。
   // 「删除」说的是画布本身，文案必须把「磁盘上什么都没少」写在前头。
-  'canvas.menu.aria': '画布操作',
+  'canvas.menu.aria': '「{name}」的操作',
   'canvas.menu.open': '打开画布目录',
   'canvas.menu.openFailed': '打不开这个目录：{message}',
   'canvas.menu.remove': '删除画布',
   'canvas.menu.remove.title': '删除这张画布？',
+  'canvas.menu.remove.pending': '正在删除画布…',
   'canvas.menu.remove.desc': '只把「{name}」从画布列表里移开：磁盘上的文件夹与文件原样保留，内容不会丢。这张画布自己的排版与取材关系会一起消失，把这个文件夹重新加成画布即可重来。',
 
   // Folder picker
@@ -166,6 +174,12 @@ export const zh = {
   'canvas.tool.title': '画布：{name}',
   'canvas.tool.pending': '等待结果…',
   'canvas.tool.failed': '调用失败：{message}',
+
+  // 文件引入（F5.3）：把上游产物按 @路径 交给卡片会话，读取由模型决定
+  'canvas.reference.files': '已把 {count} 个上游产物作为文件引用交给这张卡的会话（要不要读、读哪一段由它决定）',
+  'canvas.reference.filesEmpty': '这张卡片还没有取材来源，没有可引用的文件。',
+  'canvas.reference.filesNone': '上游产物的路径都写不成 @引用，已在消息里说明。',
+  'canvas.reference.skipped': '另有 {count} 个上游的路径无法写成 @引用，已在消息里说明。',
 
   // Errors and time
   'canvas.error': '操作失败：{message}',
@@ -260,6 +274,8 @@ export const en = {
   // Card overlay / panel
   'canvas.panel.latest': 'Latest',
   'canvas.composer.material': 'Bring in another node’s artifact',
+  'canvas.composer.reference': 'Reference upstream files',
+  'canvas.composer.referenceMeta': 'file reference',
   'canvas.composer.drop': 'Remove this material link',
   'canvas.composer.placeholder': 'Type a prompt to send to this card…',
   'canvas.composer.send': 'Send',
@@ -295,6 +311,11 @@ export const en = {
   'canvas.viewer.saving': 'Saving…',
   'canvas.viewer.autosave': 'Autosave',
   'canvas.viewer.draftPreview': 'This renders the editor buffer, which is not on disk yet.',
+  // A link into the canvas, stopped by the guard the host installs. Say the whole
+  // thing: this is not a breakage, the address has nothing to resolve against —
+  // and then name the two routes that do work.
+  'canvas.viewer.linkBlocked': '"{href}" points at a file inside the canvas, and the preview does not follow it: a preview is an inlined snapshot with no server, so a relative address has no base to resolve against (following it would only replace the preview with the host page\'s 401). To open it, make that file a card, or use "Open canvas folder" in the left rail.',
+  'canvas.viewer.linkBlocked.dismiss': 'Got it',
   'canvas.viewer.writeBlocked':
     'The write was refused: this location does not allow the file to be replaced (permissions or a sandbox), so autosave has stopped. Your text is still in the editor — nothing is lost. Press Retry once it is fixed.',
   'canvas.viewer.autosaveOff': 'Autosave stopped',
@@ -311,12 +332,15 @@ export const en = {
   'canvas.manage.add': 'New canvas',
   'canvas.manage.picking': 'Pick a folder in the system dialog…',
 
-  // A canvas row's context menu (F1.8)
-  'canvas.menu.aria': 'Canvas actions',
+  // A canvas row's action menu (F1.5 revision): the ellipsis on the right of the row. The
+  // accessible name carries the canvas name — the column has several rows, and
+  // a bare "Canvas actions" cannot say which one.
+  'canvas.menu.aria': 'Actions for “{name}”',
   'canvas.menu.open': 'Open canvas folder',
   'canvas.menu.openFailed': 'Could not open this folder: {message}',
   'canvas.menu.remove': 'Delete canvas',
   'canvas.menu.remove.title': 'Delete this canvas?',
+  'canvas.menu.remove.pending': 'Deleting canvas…',
   'canvas.menu.remove.desc': 'This only takes “{name}” off the canvas list: the folder and its files stay exactly where they are, nothing on disk is lost. The canvas’s own layout and source edges go with it — add the folder as a canvas again to start over.',
 
   // Folder picker
@@ -338,6 +362,13 @@ export const en = {
   // Errors and time
   'canvas.error': 'Action failed: {message}',
   'canvas.error.unknown': 'Unknown error',
+
+  // Session references (F5.3–F5.5): the second channel under a source edge
+  // File references (F5.3): upstream artifacts handed over as @paths, read on demand
+  'canvas.reference.files': 'Handed {count} upstream artifact(s) to this card\'s conversation as file references — reading them is the model\'s call',
+  'canvas.reference.filesEmpty': 'This card has no sources yet, so there is no file to reference.',
+  'canvas.reference.filesNone': 'None of the upstream paths could be written as an @reference; the message says which.',
+  'canvas.reference.skipped': '{count} upstream path(s) could not be written as an @reference; the message says which.',
   'canvas.time.now': 'now',
   'canvas.time.minutes': '{n}min ago',
   'canvas.time.hours': '{n}h ago',

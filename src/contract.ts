@@ -27,6 +27,7 @@ import type { InvocationDescriptor } from '@deepseek-ai/dsh-typert-protocol'
 export const TOOL_NAMES = {
   readCard: 'canvas_read_card',
   readSources: 'canvas_read_sources',
+  referenceFiles: 'canvas_reference_files',
   linkSource: 'canvas_link_source',
   getSources: 'canvas_get_sources',
   injectCard: 'canvas_inject_card',
@@ -161,6 +162,27 @@ export const sourceChainSchema = z
     downstream: z.array(cardIdSchema),
   })
   .readonly()
+/** One upstream artifact named to a conversation as a file reference (F5.3). */
+export const referencedFileSchema = z
+  .object({
+    cardId: cardIdSchema,
+    path: z.string(),
+    mention: z.string(),
+    kind: z.string(),
+    kindLabel: z.string(),
+    present: z.boolean(),
+    bytes: z.number(),
+  })
+  .readonly()
+/** Outcome of one file-reference injection (F5.3). */
+export const referencedFilesSchema = z
+  .object({
+    cardId: cardIdSchema,
+    files: z.array(referencedFileSchema),
+    /** Upstreams whose path the `@file` grammar cannot denote. */
+    skipped: z.array(cardIdSchema),
+  })
+  .readonly()
 /** One entry of the folder picker listing (design screen 02). */
 export const folderEntrySchema = z
   .object({
@@ -276,6 +298,7 @@ const R = {
   source: resultOf('dsh-canvas#BoardSource', boardSourceSchema),
   sourceList: resultOf('dsh-canvas#BoardSourceList', z.array(boardSourceSchema)),
   chain: resultOf('dsh-canvas#SourceChain', sourceChainSchema),
+  referencedFiles: resultOf('dsh-canvas#ReferencedFiles', referencedFilesSchema),
   note: resultOf('dsh-canvas#Note', noteSchema),
   style: resultOf('dsh-canvas#StyleProfile', styleProfileSchema),
   summary: resultOf('dsh-canvas#CardSummary', cardSummarySchema),
@@ -399,6 +422,10 @@ export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
   {
     id: 'dsh-canvas#card/read_sources', service: 'card', namespace: 'card', method: 'readSources',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.summaryList,
+  },
+  {
+    id: 'dsh-canvas#card/reference_files', service: 'card', namespace: 'card', method: 'referenceFiles',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.referencedFiles,
   },
   {
     id: 'dsh-canvas#card/inject_card', service: 'card', namespace: 'card', method: 'injectCard',

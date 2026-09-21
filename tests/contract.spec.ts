@@ -3,6 +3,7 @@
  * the same wire contract, and no descriptor may drift from the method it names.
  */
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { DSH_CANVAS_INVOCATIONS, TOOL_NAMES, TOOL_NAME_LIST, TOOL_NAME_PATTERN, boardSnapshotSchema } from '../src/contract.ts'
 import { CANVAS_DOMAIN } from '../src/domain.ts'
 import { TYPERT_MANIFEST } from '../src/typert.ts'
@@ -36,7 +37,7 @@ describe('dsh-canvas wire contract', () => {
 
   it('names every model-facing tool exactly once and inside the provider charset', () => {
     expect(new Set(TOOL_NAME_LIST).size).toBe(TOOL_NAME_LIST.length)
-    expect(TOOL_NAME_LIST).toHaveLength(13)
+    expect(TOOL_NAME_LIST).toHaveLength(14)
     // The provider validates `tools[].name` against ^[a-zA-Z0-9_-]+$ and
     // answers 400 for anything else, so the canvas namespace is joined with an
     // underscore: a dotted name never reaches the model.
@@ -46,6 +47,18 @@ describe('dsh-canvas wire contract', () => {
     }
     expect(TOOL_NAMES.readCard).toBe('canvas_read_card')
     expect(TOOL_NAMES.linkSourceOnBoard).toBe('canvas_link_source_on_board')
+    expect(TOOL_NAMES.referenceFiles).toBe('canvas_reference_files')
+  })
+
+  it('keeps the plugin manifest\u2019s contributed tools equal to the registered names', () => {
+    // The manifest is registry-facing — no runtime path reads it — so it drifts
+    // in silence: v1.35 added a fourteenth tool and this list still said
+    // thirteen, through v1.37's rename as well. One read here is what makes
+    // that particular silent drift impossible.
+    const manifest = JSON.parse(
+      readFileSync(new URL('../dsh.plugin.json', import.meta.url), 'utf8'),
+    ) as { contributes: { tools: string[] } }
+    expect(manifest.contributes.tools).toEqual(TOOL_NAME_LIST)
   })
 
   it('publishes a manifest whose member list matches the descriptor set', () => {

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { detectKind, outlineOf, type KindProbe } from '../src/core/kind-registry.ts'
-import { WEBAPP_MANIFEST, inlineWebAppAssets, webAppAssetRefs, webappFiles } from '../src/core/webapp.ts'
+import {
+  PREVIEW_CHANNEL,
+  PREVIEW_GUARD_ID,
+  PREVIEW_GUARD_SOURCE,
+  WEBAPP_MANIFEST,
+  injectPreviewLinkGuard,
+  inlineWebAppAssets,
+  webAppAssetRefs,
+  webappFiles,
+} from '../src/core/webapp.ts'
 
 const directoryProbe = (children: string[]): KindProbe => ({
   path: 'app',
@@ -116,5 +125,144 @@ describe('inlineWebAppAssets', () => {
   it('returns a page without local references unchanged', () => {
     const original = '<p>没有引用</p>'
     expect(inlineWebAppAssets(original, () => 'x')).toBe(original)
+  })
+})
+
+/**
+ * The preview's link guard (F3.8).
+ *
+ * The guard ships as a *string* the host pastes into the page, so a test that
+ * only read the string would pin nothing. This one runs it — `new Function`
+ * with the four globals the guard touches handed in — and drives it with
+ * synthetic clicks. That is what makes the table below a measurement rather
+ * than a restatement: `#bottom`, `https://…` and `child.html` must come out
+ * three different ways, and only executing the shipped code can show that.
+ *
+ * Why the branches exist: a `srcdoc` document has no address of its own, so its
+ * base URL is the *host page's* URL — a relative link therefore resolves into
+ * the host application and clicking one navigates the preview there (a 401
+ * page, in the deployment). Measured in `.workbuddy/repro/link-probe.cjs`.
+ */
+describe('preview link guard', () => {
+  interface Acted {
+    prevented: boolean
+    opened: string[]
+    reported: string[]
+    hash: string[]
+  }
+
+  /**
+   * Run the shipped guard against one click on one anchor.
+   *
+   * @param href - the anchor's `href` attribute; null for an anchor without one.
+   * @param options - how the click arrives.
+   * @returns what the guard did.
+   */
+  const click = (
+    href: string | null,
+    options: { button?: number; prevented?: boolean; onAnchor?: boolean } = {},
+  ): Acted => {
+    const acted: Acted = { prevented: false, opened: [], reported: [], hash: [] }
+    let captured: ((event: unknown) => void) | undefined
+    const document = {
+      addEventListener: (type: string, handler: (event: unknown) => void): void => {
+        if (type === 'click') captured = handler
+      },
+    }
+    const window = { open: (url: string): void => { acted.opened.push(url) } }
+    const location = {
+      get hash(): string { return '' },
+      set hash(value: string) { acted.hash.push(value) },
+    }
+    const parent = { postMessage: (data: { href: string }): void => { acted.reported.push(data.href) } }
+    // The guard is a plain script: these four are its entire outside world.
+    const install = new Function('window', 'document', 'location', 'parent', PREVIEW_GUARD_SOURCE)
+    install(window, document, location, parent)
+
+    const anchor = { getAttribute: (name: string): string | null => (name === 'href' ? href : null) }
+    const event = {
+      defaultPrevented: options.prevented ?? false,
+      button: options.button ?? 0,
+      target: { closest: (): unknown => ((options.onAnchor ?? true) ? anchor : null) },
+      preventDefault: (): void => { acted.prevented = true },
+    }
+    const handler = captured as ((event: unknown) => void) | undefined
+    if (handler === undefined) throw new Error('闸门没有注册 click 监听')
+    handler(event)
+    return acted
+  }
+
+  it('keeps an in-page anchor in the page, through location.hash', () => {
+    const acted = click('#bottom')
+    expect(acted.hash).toEqual(['#bottom'])
+    expect(acted.prevented).toBe(true)
+    // 关键：不 window.open、也不上报——它本来就是同文档跳转。
+    expect(acted.opened).toEqual([])
+    expect(acted.reported).toEqual([])
+  })
+
+  it('treats a bare # and an empty href as the same in-page jump', () => {
+    // 两者都交给 location.hash：'#' 落到 about:srcdoc#（回顶部），'' 等于没设。
+    expect(click('#').hash).toEqual(['#'])
+    expect(click('').hash).toEqual([''])
+  })
+
+  it('opens an absolute address in a real window', () => {
+    const acted = click('https://github.com/ljcoder2015/dsh-canvas')
+    expect(acted.opened).toEqual(['https://github.com/ljcoder2015/dsh-canvas'])
+    expect(acted.prevented).toBe(true)
+    expect(acted.reported).toEqual([])
+  })
+
+  it('opens protocol-relative, mailto and tel addresses too', () => {
+    expect(click('//example.com/x').opened).toEqual(['//example.com/x'])
+    expect(click('mailto:a@b.c').opened).toEqual(['mailto:a@b.c'])
+  })
+
+  it('blocks an address that only resolves against the host page', () => {
+    for (const href of ['child.html', './child.html', '/', '/page/two.html', '?x=1', '  child.html  ']) {
+      const acted = click(href)
+      expect(acted.prevented, href).toBe(true)
+      expect(acted.opened, href).toEqual([])
+      expect(acted.reported, href).toEqual([href.trim()])
+    }
+  })
+
+  it('leaves the page own machinery alone', () => {
+    for (const href of ['javascript:go()', 'data:text/html,<b>x</b>', 'blob:https://x/y']) {
+      const acted = click(href)
+      expect(acted.prevented, href).toBe(false)
+      expect(acted.opened, href).toEqual([])
+      expect(acted.reported, href).toEqual([])
+    }
+  })
+
+  it('stands down on a non-primary button, a taken click and a non-anchor', () => {
+    expect(click('child.html', { button: 1 }).reported).toEqual([])
+    expect(click('https://example.com', { button: 2 }).opened).toEqual([])
+    expect(click('child.html', { prevented: true }).reported).toEqual([])
+    expect(click('child.html', { onAnchor: false }).reported).toEqual([])
+  })
+
+  it('installs itself at the end of the page, where it cannot break a script', () => {
+    const out = injectPreviewLinkGuard('<!doctype html><html><body><p>hi</p></body></html>')
+    expect(out).toContain(`id="${PREVIEW_GUARD_ID}"`)
+    expect(out.startsWith('<!doctype html>')).toBe(true)
+    expect(out.indexOf(PREVIEW_GUARD_ID)).toBeGreaterThan(out.indexOf('</html>'))
+    // 页面自己脚本文里带 </body> 是真事（探针量过）：追加到文末，原文一字不动，
+    // 外层脚本也就不会被提前闭合。
+    const risky = '<script>var s = "</body>";run()</script>'
+    expect(injectPreviewLinkGuard(risky).startsWith(risky)).toBe(true)
+  })
+
+  it('is idempotent', () => {
+    const once = injectPreviewLinkGuard('<p>x</p>')
+    expect(injectPreviewLinkGuard(once)).toBe(once)
+  })
+
+  it('speaks the channel the viewer listens on', () => {
+    // 闸门里那条 postMessage 与预览弹窗的收件判断必须是同一句话。
+    expect(PREVIEW_GUARD_SOURCE).toContain(PREVIEW_CHANNEL)
+    expect(injectPreviewLinkGuard('<p>x</p>')).toContain(PREVIEW_CHANNEL)
   })
 })

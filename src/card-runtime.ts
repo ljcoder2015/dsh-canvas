@@ -25,6 +25,7 @@ import type {
   Point,
   Project,
   ProjectId,
+  ReferencedFiles,
   SessionBinding,
   UpstreamPolicy,
   WriteResult,
@@ -38,9 +39,18 @@ import { cardPreset, composeCardAgent } from './core/agent-preset.ts'
 import { lastUserPromptOfEvents, sessionQueryFace } from './core/session-log.ts'
 import type { ModelRouting } from './core/model-routing.ts'
 import { kindById, kindLabel, kindSupportsExport } from './core/kind-registry.ts'
-import { injectionMessage, installCardScope, PLUGIN_ID, renderMaterial, upstreamChangedMessage, userPromptMessage } from './prompt.ts'
+import {
+  injectionMessage,
+  installCardScope,
+  PLUGIN_ID,
+  referenceMessage,
+  renderMaterial,
+  upstreamChangedMessage,
+  userPromptMessage,
+} from './prompt.ts'
 import { attachCanvasSession } from './core/workspace.ts'
 import { transitiveUpstreams } from './core/source-store.ts'
+import { nameFileReferences, nameWithoutProbe, type FileReferenceTarget } from './core/file-reference.ts'
 import { TOOL_NAMES } from './contract.ts'
 
 /** What {@link CardRuntime} needs from the plugin's composition root. */
@@ -257,22 +267,53 @@ export class CardRuntime extends TypertRemoteService {
     const project = this.requireProject(projectId)
     this.requireCard(projectId, cardId)
     this.requireCard(projectId, sourceCardId)
+    return this.injectDigest(project, cardId, sourceCardId, mode, this.liveSession(projectId, cardId), signal)
+  }
 
-    const summary = await this.deps.io.summarize(project.root, sourceCardId, this.deps.summaryBudget, signal)
-    const body =
-      mode === 'full'
-        ? (await this.deps.io.readText(project.root, sourceCardId, signal)).text.slice(0, 200_000)
-        : renderMaterial([summary])
+  /**
+   * Hand this card's material over as **file references** (F5.3).
+   *
+   * A 取材 edge says "this artifact builds on that artifact", and the harness
+   * already has a way to say that inside a prompt: an `@` token holding a
+   * workspace-relative path. Every card id *is* such a path — the file sits at
+   * `<project root>/<cardId>`, which is the card session's own working directory
+   * — so this method names upstream artifacts rather than copying them.
+   *
+   * Nothing is read here and no content is attached, and that is the point of a
+   * reference: the material stays the one file it already is, so it cannot go
+   * stale, the model chooses whether it is worth the context, and the plugin
+   * escapes the whole class of problems a copy brings — truncation the model
+   * cannot see, a digest budget to negotiate, a service to be missing. The
+   * convention is not invented here either: `@deepseek-ai/dsh-file-reference-local`
+   * installs exactly this grammar whenever the agent has a `read` tool, which
+   * every card conversation does.
+   *
+   * The two channels answer different questions and both are kept. A reference
+   * says *where* the material is and leaves reading to the model; a digest puts
+   * a bounded summary *in* the context whether or not anyone asks
+   * ({@link injectDigest}, `canvas_inject_card`). The answer never blurs them:
+   * `files` lists what was named, `skipped` names what the `@file` grammar
+   * cannot carry (a quote or a control character in the path), so a board that
+   * could not name something says so instead of quietly dropping it.
+   *
+   * The chain is walked from this card, indirect upstreams included, for the
+   * same reason {@link readSources} includes them: a card three hops from the
+   * brief still needs the brief, and making the model walk the chain itself
+   * would cost a turn per hop.
+   */
+  @Remote
+  async referenceFiles(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<ReferencedFiles> {
+    signal?.throwIfAborted()
+    const project = this.requireProject(projectId)
+    this.requireCard(projectId, cardId)
+    const session = this.liveSession(projectId, cardId)
 
-    const session = this.deps.sessions.live(projectId, cardId)
-    if (session === undefined) {
-      throw new RemoteError('card/session-missing', `card ${cardId} has no open conversation to inject into`, {
-        projectId,
-        cardId,
-      })
-    }
-    session.agent.inject(injectionMessage(summary, mode, body))
-    return summary
+    const targets = await this.fileReferenceTargets(project, cardId, signal)
+    const { references, skipped } = nameFileReferences(targets)
+    // Injected when there is anything to say — including "some of your material
+    // could not be named", which a silent return would hide.
+    if (references.length > 0 || skipped.length > 0) session.agent.inject(referenceMessage(references, skipped))
+    return { cardId, files: references, skipped }
   }
 
   // ── sessions ────────────────────────────────────────────────────────────
@@ -707,6 +748,79 @@ export class CardRuntime extends TypertRemoteService {
 
   // ── internals ───────────────────────────────────────────────────────────
 
+  /** The card's live conversation, or the refusal every injection path shares. */
+  private liveSession(projectId: ProjectId, cardId: CardId): CardSession {
+    const session = this.deps.sessions.live(projectId, cardId)
+    if (session === undefined) {
+      throw new RemoteError('card/session-missing', `card ${cardId} has no open conversation to inject into`, {
+        projectId,
+        cardId,
+      })
+    }
+    return session
+  }
+
+  /** Read one upstream artifact and hand it over as durable context (F5.2). */
+  private async injectDigest(
+    project: Project,
+    cardId: CardId,
+    sourceCardId: CardId,
+    mode: 'summary' | 'full',
+    session: CardSession,
+    signal?: AbortSignal,
+  ): Promise<CardSummary> {
+    const summary = await this.deps.io.summarize(project.root, sourceCardId, this.deps.summaryBudget, signal)
+    const body =
+      mode === 'full'
+        ? (await this.deps.io.readText(project.root, sourceCardId, signal)).text.slice(0, 200_000)
+        : renderMaterial([summary])
+    session.agent.inject(injectionMessage(summary, mode, body))
+    return summary
+  }
+
+  /**
+   * The upstream artifacts of one card, nearest first, as reference targets.
+   *
+   * Indirect upstreams are included for the same reason {@link readSources}
+   * includes them: a card three hops from the brief still needs the brief, and
+   * making the model walk the chain itself wastes a turn per hop.
+   *
+   * Each upstream is *probed* rather than assumed: whether it is a directory
+   * decides the mention's shape (a directory keeps a trailing slash), and a card
+   * that is seated but has not been written yet is a real board state worth
+   * naming with `present: false` instead of hiding — the model can see that the
+   * material is not there yet, which is different from the board forgetting to
+   * mention it.
+   */
+  private async fileReferenceTargets(
+    project: Project,
+    cardId: CardId,
+    signal?: AbortSignal,
+  ): Promise<FileReferenceTarget[]> {
+    const { direct, indirect } = transitiveUpstreams(cardId, this.edgesOf(project.id), this.deps.sourceDepth)
+    const targets: FileReferenceTarget[] = []
+    for (const upstream of [...direct, ...indirect]) {
+      const kind = this.cards.get(cardKeyOf(project.id, upstream))?.kind ?? 'text'
+      let directory = false
+      let present = false
+      let bytes = 0
+      try {
+        const probe = await this.deps.io.probe(project.root, upstream, signal)
+        directory = probe.directory
+        present = probe.present
+        bytes = probe.bytes
+      } catch (error) {
+        if (signal?.aborted === true) throw signal.reason
+        this.ctx.logger(PLUGIN_ID).debug(`card ${cardId}: cannot probe upstream ${upstream}`, error)
+      }
+      // The card id *is* the workspace-relative path: the artifact lives at
+      // `<project root>/<cardId>`, which is exactly the session's cwd, so the
+      // name is one the model's own `read` resolves without translation.
+      targets.push({ cardId: upstream, path: upstream, directory, kind, kindLabel: kindLabel(kind), present, bytes })
+    }
+    return targets
+  }
+
   /**
    * Tell every open downstream conversation that its material changed (F5.7).
    *
@@ -753,15 +867,25 @@ export class CardRuntime extends TypertRemoteService {
     const project = this.projects.get(projectId)
     if (project === undefined) return ''
     const { direct, indirect } = transitiveUpstreams(cardId, this.edgesOf(projectId), this.deps.sourceDepth)
-    // Resolved synchronously against cached facts: an assembly must not await
-    // I/O, so the digest here is the chain and the paths, not the file bodies.
+    // Resolved synchronously against cached facts, so this block carries *names*
+    // and never file bodies: the card id is the workspace-relative path, which
+    // is exactly what the harness's `@file` grammar denotes, and the material
+    // itself arrives when somebody reads it. A digest served from here would
+    // have to be cached — and nothing invalidates such a cache, so a card whose
+    // upstream was rewritten by an ordinary file edit would keep feeding the
+    // prompt a stale summary.
     const lines = [...direct, ...indirect].map((upstream) => {
       const record = this.cards.get(cardKeyOf(projectId, upstream))
-      return record === undefined ? `- ${upstream}` : `- ${upstream} (${kindLabel(record.kind)})`
+      // `nameWithoutProbe` and not the kind: this block is assembled without
+      // I/O, and a `site`/`webapp` card is a *file* even though its kind is a
+      // directory — see that helper. `canvas_reference_files` probes, so it
+      // owns the exact token; this block just names the files.
+      const name = nameWithoutProbe(upstream)
+      return record === undefined ? `- ${name}` : `- ${name} (${kindLabel(record.kind)})`
     })
     if (lines.length === 0) return ''
     return [
-      `Sourced material — call \`${TOOL_NAMES.readSources}\` for the digests, \`${TOOL_NAMES.readCard}\` for one artifact:`,
+      `Sourced material — the files this artifact builds on. Read one with the ordinary file tools when you need it; call \`${TOOL_NAMES.readSources}\` for digests of all of them, or \`${TOOL_NAMES.readCard}\` for one artifact directly:`,
       ...lines,
     ].join('\n')
   }

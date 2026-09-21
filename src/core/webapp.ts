@@ -21,6 +21,12 @@
  * the wire — the folder keeps its multi-file shape on disk, and the preview
  * still shows the running app.
  *
+ * The same missing base URL is why {@link injectPreviewLinkGuard} exists. An
+ * asset reference that cannot resolve leaves a broken asset; a *link* that
+ * cannot resolve leaves a click that navigates the preview into the host
+ * application — the one outcome a preview must never have. So the page also
+ * leaves here with a guard that owns its clicks.
+ *
  * That inlining is not webapp-specific: every kind in `HTML_KINDS` — a deck, a
  * site entry, an app entry — previews as one `srcDoc` and loses its local
  * styles without it. This module owns the *mechanism*; the kind list lives in
@@ -391,7 +397,7 @@ export function inlineWebAppAssets(html: string, resolve: (ref: string) => strin
     return `<style>\n${content}\n</style>`
   })
 
-  inlined = inlined.replace(/<script\b([^>]*?)\bsrc\s*=\s*["']([^"']+)["']([^>]*)>\s*<\/script>/gi, (tag, before: string, src: string, after: string) => {
+  inlined = inlined.replace(/<script\b([^>]*?)\bsrc\s*=\s*["']([^"']+)["']([^>]*?)>\s*<\/script>/gi, (tag, before: string, src: string, after: string) => {
     if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src)) return tag
     const content = resolve(src)
     if (content === undefined) return tag
@@ -401,4 +407,102 @@ export function inlineWebAppAssets(html: string, resolve: (ref: string) => strin
   })
 
   return inlined
+}
+
+// ── the preview's link guard ────────────────────────────────────────────────
+
+/**
+ * The `postMessage` channel the guard reports blocked links on.
+ *
+ * Shared by both halves — the guard (host-side text) and the viewer that shows
+ * the notice — so the two cannot drift into speaking different dialects.
+ */
+export const PREVIEW_CHANNEL = 'dsh-canvas.preview'
+
+/** The guard script's own id, so injecting it twice is a no-op. */
+export const PREVIEW_GUARD_ID = 'dsh-canvas-link-guard'
+
+/**
+ * What a click on a link inside a preview should do.
+ *
+ * Every branch exists because the *default* is wrong in a `srcdoc` preview, and
+ * the reason is one line of URL semantics: a `srcdoc` document has no address of
+ * its own, so its `baseURI` is the **host page's** URL. Every relative address
+ * therefore resolves against the host application — `#bottom` becomes
+ * `http://127.0.0.1:3080/#bottom`, `child.html` becomes
+ * `http://127.0.0.1:3080/child.html`. Clicking one navigates the preview frame
+ * to the host app: the user loses the preview, and the request arrives without
+ * the credentials the app needs, so it lands on a 401 page. Measured, not
+ * guessed — see `.workbuddy/repro/link-probe.cjs`.
+ *
+ * So the guard takes the click before the browser resolves it, and sends each
+ * shape where it can actually go:
+ *
+ * - `#anchor` → in-place. `location.hash` is a same-document navigation in a
+ *   `srcdoc` frame (the fragment resolves against the document's own URL, not
+ *   the base), so the jump works, the `hashchange` event still fires — a
+ *   hash-routing app keeps working — and no request leaves the frame.
+ * - Absolute (`https://…`, `//…`, `mailto:…`) → a real new window. Asserted
+ *   with `noopener`: the popup must not hold a handle back into the preview
+ *   (its `location` would be writable from the frame). Without this branch a
+ *   link with no `target` navigates the *frame* to the far site, which for most
+ *   sites ends as a refused frame — the preview gone, nothing gained.
+ * - Anything relative (and `""`) → blocked, and reported to the viewer, which
+ *   says so in words. A silent no-op would be worse than the breakage: the
+ *   address genuinely cannot resolve, and the user needs to know that the file
+ *   exists somewhere reachable (a card, or the folder in the file manager).
+ * - `javascript:` / `data:` / `blob:` → left entirely alone. These are the
+ *   page's own machinery; stepping in would break working apps to fix nothing.
+ *
+ * The listener is on `document` in the capture phase, so it also covers links
+ * an app adds later, and it stands down on a non-primary button or on a click
+ * some other handler already took.
+ */
+export const PREVIEW_GUARD_SOURCE = `(function () {
+  var ABSOLUTE = /^(?:[a-z][a-z0-9+.-]*:|\\/\\/)/i
+  var OURS = /^(?:javascript|data|blob):/i
+  function report(href) {
+    try { parent.postMessage({ channel: '${PREVIEW_CHANNEL}', kind: 'local-link', href: href }, '*') } catch (error) {}
+  }
+  document.addEventListener('click', function (event) {
+    if (event.defaultPrevented || event.button !== 0) return
+    var node = event.target
+    var anchor = node && node.closest ? node.closest('a[href]') : null
+    if (anchor === null) return
+    var href = anchor.getAttribute('href')
+    if (href === null) return
+    var raw = href.trim()
+    if (OURS.test(raw)) return
+    if (raw === '' || raw.charAt(0) === '#') {
+      event.preventDefault()
+      try { location.hash = raw } catch (error) {}
+      return
+    }
+    event.preventDefault()
+    if (ABSOLUTE.test(raw)) { window.open(raw, '_blank', 'noopener'); return }
+    report(raw)
+  }, true)
+})()`
+
+/**
+ * Put the link guard into a page that is about to be previewed.
+ *
+ * Appended at the very end of the text, deliberately, and *not* spliced in
+ * before `</body>`: a page whose own script contains the string `</body>` is a
+ * real thing (measured — `.workbuddy/repro/tail-script-probe.cjs`), and a tag
+ * injected at the wrong `</body>` would close that script early and break the
+ * app. The tail has no such hazard. It also costs nothing: the HTML parser
+ * hoists trailing content into the body and runs it (measured in the same
+ * probe), and the guard listens in the capture phase on `document`, so it is
+ * registered before any click can arrive.
+ *
+ * Idempotent — a page that already carries the guard comes back unchanged.
+ * Pure: text in, text out; the caller does the reading and the asset inlining.
+ *
+ * @param html - the entry page's text.
+ * @returns the same page with the guard installed.
+ */
+export function injectPreviewLinkGuard(html: string): string {
+  if (html.includes(PREVIEW_GUARD_ID)) return html
+  return `${html}\n<script id="${PREVIEW_GUARD_ID}">\n${PREVIEW_GUARD_SOURCE}\n</script>`
 }

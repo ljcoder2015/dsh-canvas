@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, ReactElement } from 'react'
 import type { ArtifactView } from '../types.ts'
 import { isHtmlKind } from '../core/kind-registry.ts'
+import { PREVIEW_CHANNEL } from '../core/webapp.ts'
 import type { Translate } from './locales.ts'
 
 /** Props every kind viewer receives. */
@@ -217,15 +218,69 @@ function VideoViewer({ view }: ViewerProps) {
  * `allow-scripts` without `allow-same-origin` is the working compromise: decks
  * run their own JS (revealing slides needs it), while the document sits in an
  * opaque origin that cannot reach the host page, its storage or its cookies.
+ *
+ * The two popup permissions are the other half of that compromise, and they are
+ * about *links*: a page whose only exit is a link would otherwise be a page you
+ * cannot leave. `allow-popups` unblocks `target="_blank"` (without it Chrome
+ * refuses with "the request was made in a sandboxed frame whose 'allow-popups'
+ * permission is not set"), and `allow-popups-to-escape-sandbox` makes the window
+ * that opens a normal one — a sandboxed popup keeps the opaque origin, so the
+ * far site would run without its own storage or session. The preview's own
+ * frames stay exactly as locked down as before; only the window the *user* asked
+ * for is free.
+ *
+ * `postMessage` from the frame is the one channel left open, and it is treated
+ * as untrusted content: the sender is checked against this frame's own window,
+ * the shape is checked field by field, and nothing is done with it beyond
+ * showing a sentence — the guard in the page ({@link PREVIEW_GUARD_SOURCE}) is
+ * what acts, so the viewer never opens anything on a page's say-so.
  */
-function DeckViewer({ view }: ViewerProps) {
+function DeckViewer({ view, t }: ViewerProps) {
+  const frame = useRef<HTMLIFrameElement | null>(null)
+  /** The href of a link the guard refused to follow; `''` when there is none. */
+  const [blocked, setBlocked] = useState('')
+  // A re-read (an edit saved, the card's file written again) replaces the text
+  // and reloads the frame; the note belongs to the page that is gone.
+  useEffect(() => {
+    setBlocked('')
+  }, [view.text])
+  useEffect(() => {
+    const onMessage = (event: MessageEvent): void => {
+      const source = frame.current?.contentWindow
+      // The frame's own window, not merely *a* frame: a page elsewhere on the
+      // host must not be able to put words in this viewer's mouth.
+      if (source === null || source === undefined || event.source !== source) return
+      const data = event.data as { channel?: unknown; kind?: unknown; href?: unknown } | null
+      if (typeof data !== 'object' || data === null) return
+      if (data.channel !== PREVIEW_CHANNEL || data.kind !== 'local-link') return
+      if (typeof data.href !== 'string') return
+      setBlocked(data.href.slice(0, 200))
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
   return (
-    <iframe
-      className="dsh-canvas-frame"
-      sandbox="allow-scripts"
-      srcDoc={view.text}
-      title={view.cardId}
-    />
+    <>
+      {blocked === '' ? null : (
+        <div className="dsh-canvas-frame-note">
+          <span className="dsh-canvas-frame-notetext">{t('canvas.viewer.linkBlocked', { href: blocked })}</span>
+          <button
+            className="dsh-canvas-chipbtn"
+            onClick={() => setBlocked('')}
+            aria-label={t('canvas.viewer.linkBlocked.dismiss')}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      <iframe
+        ref={frame}
+        className="dsh-canvas-frame"
+        sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+        srcDoc={view.text}
+        title={view.cardId}
+      />
+    </>
   )
 }
 

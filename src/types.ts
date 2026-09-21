@@ -179,6 +179,44 @@ export interface SourceChain {
   downstream: string[]
 }
 
+/**
+ * One upstream artifact named to a card's conversation as a **file reference**
+ * (F5.3).
+ *
+ * The canvas does not copy upstream content into the conversation: it names the
+ * upstream artifact with the harness's own `@file` mention grammar, and the
+ * model reads it with its ordinary `read` tool when it decides the material
+ * matters. That is the whole point of a reference — the material stays the one
+ * file it already is, so it cannot go stale, and it costs no context until
+ * somebody asks for it.
+ */
+export interface ReferencedFile {
+  /** The upstream card, as this board names it. */
+  cardId: CardId
+  /** Workspace-relative path of the artifact — the same string as `cardId`. */
+  path: string
+  /** The prompt token the model resolves: `@brief.md` or `@"my brief.md"`. */
+  mention: string
+  kind: string
+  kindLabel: string
+  /** Whether the artifact exists on disk yet (a seated card may have no file). */
+  present: boolean
+  /** Byte size when it exists — the model's only cue about reading cost. */
+  bytes: number
+}
+
+/** What one {@link CardRuntime.referenceFiles} call handed over (F5.3). */
+export interface ReferencedFiles {
+  cardId: CardId
+  /** Files actually named, nearest upstream first. */
+  files: ReferencedFile[]
+  /**
+   * Upstreams left out because their path cannot be written in the `@file`
+   * grammar (a control character or a quote in the name). Never silent.
+   */
+  skipped: string[]
+}
+
 /** Result of an artifact write (F8.1). */
 export interface WriteResult {
   cardId: CardId

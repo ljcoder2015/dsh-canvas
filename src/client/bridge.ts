@@ -28,6 +28,7 @@ import type {
   Point,
   Project,
   ProjectBinding,
+  ReferencedFiles,
   SessionBinding,
   SourceChain,
   StyleProfile,
@@ -298,6 +299,16 @@ export class CanvasBridge {
   /** The digests of one card's direct materials. */
   readSources(projectId: string, cardId: string): Promise<CardSummary[]> {
     return unwrap(this.card.readSources(projectId, cardId, this.signal))
+  }
+
+  /**
+   * Hand a card's materials to its conversation as file references.
+   *
+   * Names, not content: the upstream artifacts are injected as `@`-path tokens
+   * and the model reads them with its own file tools if it decides they matter.
+   */
+  referenceFiles(projectId: string, cardId: string): Promise<ReferencedFiles> {
+    return unwrap(this.card.referenceFiles(projectId, cardId, this.signal))
   }
 
   /** Push an upstream digest into a card's session. */

@@ -19,7 +19,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { CardSummary, ExportFormat, SourceChain } from './types.ts'
+import type { CardSummary, ExportFormat, ReferencedFiles, SourceChain } from './types.ts'
 import { TOOL_NAMES } from './contract.ts'
 import type { CanvasRuntime } from './runtime.ts'
 import type { CardRuntime } from './card-runtime.ts'
@@ -214,6 +214,63 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         if (caller === undefined) throw new Error(`${TOOL_NAMES.injectCard} 只能在卡片会话内调用。`)
         const mode = args.mode === 'full' ? 'full' : 'summary'
         return deps.card.injectCard(caller.project, caller.cardId, String(args.cardId), mode, exec.signal)
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: TOOL_NAMES.referenceFiles,
+      description:
+        '把当前卡片的取材来源以「文件引用」交给本会话：注入的是上游产物的 @路径（模型自己用 read 工具按需读取），不是内容副本。想知道上游文件在哪、按需取用时用它；想把上游内容摘要直接拿到上下文里，用 canvas_read_sources 或 canvas_inject_card。',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            cardId: { type: 'string' },
+            files: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  cardId: { type: 'string' },
+                  path: { type: 'string' },
+                  mention: { type: 'string' },
+                  kind: { type: 'string' },
+                  kindLabel: { type: 'string' },
+                  present: { type: 'boolean' },
+                  bytes: { type: 'number' },
+                },
+                additionalProperties: false,
+              },
+            },
+            skipped: { type: 'array', items: { type: 'string' } },
+          },
+          additionalProperties: false,
+        },
+        render: (_args, value) => {
+          const named = value as ReferencedFiles
+          if (named.files.length === 0) {
+            return text(named.skipped.length === 0 ? '本卡片没有取材来源，没有可引用的文件。' : '没有可引用的文件（见 skipped）。')
+          }
+          const lines = [
+            `已把 ${named.files.length} 个上游产物以文件引用注入本会话（读取由你决定）：`,
+            ...named.files.map((file) => {
+              const state = file.present ? `${file.bytes} 字节` : '文件尚未写出来'
+              return `- ${file.mention}（${file.kindLabel}，${state}）`
+            }),
+          ]
+          if (named.skipped.length > 0) {
+            lines.push(`无法写成 @文件引用（路径里有引号或控制字符）：${named.skipped.join('、')}`)
+          }
+          return text(lines.join('\n'))
+        },
+      },
+      async execute(_args, exec) {
+        const caller = callingCard(exec.agent?.id)
+        if (caller === undefined) throw new Error(`${TOOL_NAMES.referenceFiles} 只能在卡片会话内调用。`)
+        return deps.card.referenceFiles(caller.project, caller.cardId, exec.signal)
       },
     }),
   )

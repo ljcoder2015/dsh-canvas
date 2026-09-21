@@ -44,6 +44,7 @@ import { CardTile } from './card-tile.tsx'
 import { CardSelection, type MaterialRef } from './card-overlay.tsx'
 import { SourceEdges, seatAtAnchor, type PendingEdge } from './source-edges.tsx'
 import { FolderPicker } from './folder-picker.tsx'
+import { referenceNotice } from './material-notice.ts'
 import { ArtifactModal } from './artifact-view.tsx'
 import { basenameOf, isInside, parseFileAddress } from './address.ts'
 import { isTypingTarget, shortcutOf, SHORTCUT_SHEET, SPACE_KEY, type KeyCap } from './shortcuts.ts'
@@ -290,6 +291,17 @@ export function CanvasBoard(props: CanvasBoardProps) {
   /** 空格是否按着：它把指针从「选择」切成「抓手」（见 styles.ts 的 is-space）。 */
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [error, setError] = useState('')
+  /**
+   * The board's answer to the last material handoff, when there is one.
+   *
+   * A handoff leaves no visible trace on the card face — the names go into the
+   * conversation, not into the artifact — so without this line the user cannot
+   * tell whether anything happened, or how much of the material could be named.
+   * Cleared by
+   * every new action, exactly like the error strip, so the two never compete for
+   * the same spot.
+   */
+  const [notice, setNotice] = useState('')
   const [stamp, setStamp] = useState(0)
   /** What each card's composer holds on its own account; see `ComposerDraft`. */
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft | undefined>>({})
@@ -575,6 +587,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
   const run = useCallback(
     (action: () => Promise<unknown>) => {
       setError('')
+      setNotice('')
       void action()
         .then(() => setStamp((value) => value + 1))
         .catch(report)
@@ -758,6 +771,29 @@ export function CanvasBoard(props: CanvasBoardProps) {
       })
     },
     [bridge, projectId, run, sources],
+  )
+
+  /**
+   * 把上游产物以**文件引用**交给本卡片的会话（F5.3）——取材的名字通道。
+   *
+   * 与 `addMaterial` 的区别不是粒度而是**交付的东西**：那条路把上游产物的**内容摘要**
+   * 读出来塞进上下文（本插件自己读盘、自己截断），这条只把上游的**路径**交过去——按
+   * Harness 自己的 `@file` 写法，模型要用时自己 `read`。所以它也不选卡片：一张卡片的
+   * 取材来源就是它的取材来源，动作作用在**已有的**连线上。
+   *
+   * 结果必须说出来。文件引用进的是会话、不是产物，卡面上不留痕迹——不说「已把 N 个
+   * 上游产物作为文件引用交给它」，用户就无从知道刚才那一下是否发生了；有路径写不成
+   * `@引用` 时更要说，否则等于悄悄少给了一部分材料。
+   */
+  const referenceMaterials = useCallback(
+    (card: BoardCard) => {
+      if (projectId === '') return
+      void run(async () => {
+        await bridge.openSession(projectId, card.id)
+        setNotice(referenceNotice(await bridge.referenceFiles(projectId, card.id), t))
+      })
+    },
+    [bridge, projectId, run, t],
   )
 
   /**
@@ -1224,6 +1260,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 onExport={() => exportCard(selectionCard)}
                 onRemove={() => setRemoval(selectionCard.id)}
                 onAddMaterial={(sourceId) => addMaterial(selectionCard, sourceId)}
+                onReferenceMaterials={() => referenceMaterials(selectionCard)}
                 onDropMaterial={dropMaterial}
                 onExpand={() => setExpanded(true)}
                 onDraftChange={(text) => editDraft(selectionCard.id, text)}
@@ -1323,6 +1360,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
         )}
 
         {error === '' ? null : <div className="dsh-canvas-error">{t('canvas.error', { message: error })}</div>}
+        {error !== '' || notice === '' ? null : <div className="dsh-canvas-notice">{notice}</div>}
 
         {removal === undefined ? null : (
           <div className="dsh-canvas-toolbar is-horizontal" style={{ left: '50%', top: '12px', transform: 'translateX(-50%)', zIndex: 6 }}>

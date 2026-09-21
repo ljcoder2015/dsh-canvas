@@ -6,38 +6,86 @@
  * reach a host-rendered button): the canvas lives inside a host pane it does
  * not own.
  *
- * Colour rides the host's theme tokens first and falls back to the canvas's own
- * dark working surface second, so the board follows a themed deployment while
- * still rendering correctly in one that ships no tokens. The tokens are the
- * confirmed canvas system: a single dark surface with no shadows, layered by
- * hairlines, buttons always capsules, and exactly four accents —
+ * Colour ships as **two palettes**. Light is the default (the host's light mode is
+ * "no `data-ds-dark-theme` on `body`"); dark arrives by the host putting that
+ * attribute there, which is exactly how the host's own token sheets switch. The
+ * plugin never decides which one is active — it reads the attribute. Neutrals
+ * (text, hairlines) ride the host's real alias tokens, so they follow the host's
+ * palette *and* any third-party theme that overrides those aliases; the canvas-only
+ * surfaces (board, card, soft/slot, accents, sheen) carry both values here because
+ * the host has no token for an endless board. The rest of the system is unchanged:
+ * no shadows, hairline layering, capsule buttons, and exactly four accents —
  * sunset (running), dusk, twilight (has news) and breeze (material edges).
  */
 const STYLE_ID = 'dsh-canvas-styles'
 
-const css = `
-/* 画布自己那套变量。选择器里带上 .dsh-canvas-floating 是因为有些构件被 portal 到
-   body 上（画布行的右键菜单、它的删除确认框）——那些元素不在 .dsh-canvas-root 里，
-   少了这一条，--dsh-card / --dsh-hairline 全是空值，菜单会渲染成透明的一层字。 */
-.dsh-canvas-root,.dsh-canvas-floating{
-  --dsh-surface:var(--dsw-alias-bg-base,#0A0A0A);
-  --dsh-card:var(--dsw-alias-bg-elevated,#191919);
+/** 导出只为测试解析（tests/theme-tokens.spec.ts 把这张表当数据审）；运行时仍走 adoptStyles 注入。 */
+export const css = `
+/* 画布自己那套变量。**两套配色**：亮色写在前面（宿主亮色模式就是「body 上没有
+   data-ds-dark-theme」），暗色由宿主挂上那个属性时覆盖——宿主自己也是这么做
+   （ui-theme 那套设计令牌整套按 body[data-ds-dark-theme] 覆盖同名变量）。而
+   「现在是亮还是暗」**不归插件管**：ui-theme 解析 light/dark/system（system 走
+   prefers-color-scheme），预置引导先把属性写上、ui-layout 的 ThemePresenter
+   之后接着维护，插件只读属性、不问配置，于是主题一切换画布跟着换。
+
+   中性色（文字、发丝边）**直接吃宿主的别名令牌**——那些令牌本身就有两套值，
+   于是它们自动跟随，连第三方主题（ctx.theme 覆盖同名别名）也一并跟随。
+   画布专属的几个（无限画布底 / 卡底 / 悬停选中底 / 凹槽底 / 品牌色 / 流光）
+   宿主没有对应语义，就在下面老实写两套。
+
+   ⚠️ v1.38 之前这里写的是 --dsw-alias-bg-elevated 与 --dsw-alias-border-secondary
+   两个**宿主的令牌表里并不存在**的名字：兜底值永远生效，看着像接了宿主令牌、
+   其实卡底与发丝边是写死的暗色，亮色下必然花（次文字 --dsh-fg-2 更是白底白字）。
+   真名是 --dsw-alias-bg-layer-1 与 --dsw-alias-border-l2；「只准用真名」这条已由
+   tests/theme-tokens.spec.ts 的白名单钉住。
+
+   画布之外的一切（左栏那一段列表、它的行操作菜单与删除确认框）都走宿主的
+   --dsw-* 令牌：那些构件说的是宿主侧栏的事，也该跟着宿主的主题走。它们 portal 在
+   宿主 <nav> 里、拿不到画布根上的变量，所以 --dsh-font/--dsh-mono 这两个与主题
+   无关的量提在 :root 上。v1.33 之前这里还带一个 .dsh-canvas-floating，是把这套
+   变量带过 portal 给右键菜单用的——那两件现在都换成宿主的原语了。 */
+:root{
+  --dsh-font:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI","Noto Sans SC",sans-serif;
+  --dsh-mono:ui-monospace,"Geist Mono","SF Mono",Menlo,monospace;
+}
+
+/* ── 亮色（默认那一套） ─────────────────────────────────────────────────── */
+.dsh-canvas-root{
+  --dsh-surface:#EBEEF2;
+  --dsh-card:#FFFFFF;
+  --dsh-soft:#F5F6F7;
+  --dsh-slot:#E9ECF2;
+  --dsh-mid:#CFD3D6;
+  --dsh-hairline:var(--dsw-alias-border-l2,#0000001A);
+  --dsh-fg:var(--dsw-alias-label-primary,#0F1115);
+  --dsh-fg-2:var(--dsw-alias-label-secondary,#61666B);
+  --dsh-fg-3:var(--dsw-alias-label-tertiary,#81858C);
+  --dsh-sunset:#C25A0A;
+  --dsh-dusk:#6D28D9;
+  --dsh-twilight:#6D28D9;
+  --dsh-breeze:#4176E6;
+  --dsh-sheen:#0000000F;
+  --dsh-sheen-peak:#0000001F;
+  position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0;
+  background:var(--dsh-surface);color:var(--dsh-fg);font:13px/20px var(--dsh-font);
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── 暗色（宿主在 <body> 上挂 data-ds-dark-theme 时覆盖亮色那套） ─────────
+   属性由宿主写：预置引导脚本负责首屏之前那一次，ui-layout 的 ThemePresenter
+   负责之后每次快照。**亮色＝属性缺席**，所以这里只覆盖，不另开类名。 */
+body[data-ds-dark-theme] .dsh-canvas-root{
+  --dsh-surface:#0A0A0A;
+  --dsh-card:#191919;
   --dsh-soft:#1A1C20;
   --dsh-slot:#0E0F12;
-  --dsh-hairline:var(--dsw-alias-border-secondary,#212327);
   --dsh-mid:#363A3F;
-  --dsh-fg:var(--dsw-alias-label-primary,#FFFFFF);
-  --dsh-fg-2:#DADBDF;
-  --dsh-fg-3:var(--dsw-alias-label-secondary,#7D8187);
   --dsh-sunset:#FF7A17;
   --dsh-dusk:#7C3AED;
   --dsh-twilight:#C4B5FD;
   --dsh-breeze:#A0C3EC;
-  --dsh-font:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI","Noto Sans SC",sans-serif;
-  --dsh-mono:ui-monospace,"Geist Mono","SF Mono",Menlo,monospace;
-  position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0;
-  background:var(--dsh-surface);color:var(--dsh-fg);font:13px/20px var(--dsh-font);
-  -webkit-font-smoothing:antialiased;
+  --dsh-sheen:#FFFFFF14;
+  --dsh-sheen-peak:#FFFFFF29;
 }
 
 /* ── surface ────────────────────────────────────────────────────────────── */
@@ -62,8 +110,16 @@ const css = `
 /* 节点样式对齐参考稿：标题行在顶（只有名字，没有状态点），预览铺满其余全部，
    取材端口悬在左右两侧的垂直中点。卡上不解释状态——运行由流光说，静止就是
    「没事发生」；边框只归用户自己的两个动作（悬停、选中）。 */
-.dsh-canvas-card{position:absolute;width:200px;height:140px;box-sizing:border-box;display:flex;flex-direction:column;
-  border:1px solid var(--dsh-hairline);border-radius:8px;background:var(--dsh-card);user-select:none;
+/* 卡片自身的圆角写在 --dsh-card-r 上，因为贴在它内缘的两层（标题行与预览）必须用
+   **同心**的圆角，而「同心」这件事只有把半径算出来才是真的：两层都铺满卡片的内容
+   盒、都没有边框，所以它们的盒角正好压在边框的内缘上——半径各减掉一个边框宽度
+   （8 − 1 = 7），圆心才落在同一点。少了这一步，凡是有底色的那层就会在圆角处**盖掉
+   卡片的边框**：后代的背景画在祖先的边框之上（CSS 绘制顺序：祖先的边框先画，流内
+   块级后代后画），而卡片按设计不能 overflow:hidden（两个取材端口悬在卡外）。左下、
+   右下两角的边框整段消失就是这么来的——标题行没有底色，所以上两角安然无恙。 */
+.dsh-canvas-card{--dsh-card-r:8px;--dsh-card-inner-r:calc(var(--dsh-card-r) - 1px);
+  position:absolute;width:200px;height:140px;box-sizing:border-box;display:flex;flex-direction:column;
+  border:1px solid var(--dsh-hairline);border-radius:var(--dsh-card-r);background:var(--dsh-card);user-select:none;
   transition:border-color .12s ease,background .12s ease}
 .dsh-canvas-card:hover{border-color:var(--dsh-mid)}
 .dsh-canvas-card.is-selected{background:var(--dsh-soft);border-color:var(--dsh-mid)}
@@ -78,12 +134,14 @@ const css = `
 .dsh-canvas-card.is-working{background:var(--dsh-slot)}
 .dsh-canvas-shimmer{position:absolute;inset:0;overflow:hidden;border-radius:inherit;pointer-events:none}
 .dsh-canvas-shimmer::after{content:'';position:absolute;top:0;left:0;width:100%;height:100%;
-  background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.08) 40%,
-    rgba(255,255,255,.16) 50%,rgba(255,255,255,.08) 60%,rgba(255,255,255,0) 100%);
+  background:linear-gradient(90deg,transparent 0%,var(--dsh-sheen) 40%,
+    var(--dsh-sheen-peak) 50%,var(--dsh-sheen) 60%,transparent 100%);
   transform:skewX(-25deg) translateX(-120%);animation:dsh-canvas-shimmer 1.8s linear infinite}
-.dsh-canvas-card-head{flex:none;display:flex;align-items:center;gap:6px;padding:7px 10px 5px;min-width:0}
+.dsh-canvas-card-head{flex:none;display:flex;align-items:center;gap:6px;padding:7px 10px 5px;min-width:0;
+  border-top-left-radius:var(--dsh-card-inner-r);border-top-right-radius:var(--dsh-card-inner-r)}
 .dsh-canvas-card-name{flex:1 1 auto;min-width:0;font:500 12px/16px var(--dsh-font);color:var(--dsh-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsh-canvas-card-preview{flex:1 1 auto;min-height:0;box-sizing:border-box;padding:0 10px 8px;overflow:hidden;background:var(--dsh-card)}
+.dsh-canvas-card-preview{flex:1 1 auto;min-height:0;box-sizing:border-box;padding:0 10px 8px;overflow:hidden;background:var(--dsh-card);
+  border-bottom-left-radius:var(--dsh-card-inner-r);border-bottom-right-radius:var(--dsh-card-inner-r)}
 .dsh-canvas-card-preview-line{font:11px/16px var(--dsh-mono);color:var(--dsh-fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-canvas-card-preview-line:first-child{color:var(--dsh-fg-2)}
 .dsh-canvas-card-meta{font:10px/14px var(--dsh-mono);letter-spacing:.6px;color:var(--dsh-fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -226,6 +284,12 @@ const css = `
 .dsh-canvas-media{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto}
 .dsh-canvas-media img,.dsh-canvas-media video{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px}
 .dsh-canvas-frame{flex:1 1 auto;width:100%;height:100%;border:none;background:#fff}
+/* 预览里的链接闸门拦下一条站内链接时，那句话挂在这里（iframe 之上、头顶工具条之下）。
+   用 breeze 而不是 sunset：页面本身没错，只是这份地址在内联快照里无从解析。 */
+.dsh-canvas-frame-note{flex:none;display:flex;align-items:center;gap:8px;padding:8px 16px;
+  border-bottom:1px solid var(--dsh-hairline);background:var(--dsh-slot);
+  font:12px/18px var(--dsh-font);color:var(--dsh-breeze)}
+.dsh-canvas-frame-notetext{flex:1 1 auto;min-width:0}
 .dsh-canvas-pre{flex:none;margin:0;padding:16px 20px;font:12px/19px var(--dsh-mono);color:var(--dsh-fg-2);
   white-space:pre-wrap;word-break:break-word}
 .dsh-canvas-tablewrap{flex:1 1 auto;min-height:0;padding:12px 16px;overflow:auto}
@@ -316,6 +380,10 @@ const css = `
 .dsh-canvas-empty-title{font:500 13px/20px var(--dsh-font);color:var(--dsh-fg-2)}
 .dsh-canvas-error{position:absolute;left:12px;right:12px;top:12px;padding:8px 12px;border-radius:8px;
   border:1px solid var(--dsh-hairline);background:var(--dsh-card);color:var(--dsh-twilight);font:12px/18px var(--dsh-mono)}
+/* 动作回执（会话引用走了哪条通道）：与错误条同一处、同一副骨架，只是颜色更弱——
+   两条不会同时出现（每次动作都先清空回执），所以叠在同一位置是安全的。 */
+.dsh-canvas-notice{position:absolute;left:12px;right:12px;top:12px;padding:8px 12px;border-radius:8px;
+  border:1px solid var(--dsh-hairline);background:var(--dsh-card);color:var(--dsh-fg-3);font:12px/18px var(--dsh-mono)}
 
 /* ── folder picker ──────────────────────────────────────────────────────── */
 .dsh-canvas-scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:5}
@@ -397,42 +465,46 @@ const css = `
   border:none;border-radius:6px;background:transparent;color:inherit;cursor:pointer}
 .dsh-canvas-navadd:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.18));color:var(--dsw-alias-label-primary,#fff)}
 .dsh-canvas-navlist{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
-.dsh-canvas-navrow{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:6px 8px 6px 20px;
+/* 行体与它右侧的操作按钮同住一个 li：按钮绝对定位在行的右端，所以行体照旧铺满
+   整个宽度，也不参与布局——露出来的时候标题不会跟着挪一下。 */
+.dsh-canvas-navitem{position:relative}
+/* 右侧留给操作按钮：常驻的 30px 内边距是给它预留的位子（名字本来就带省略号，
+   少这 16px 只是早一点截断），这样按钮露面时不会压住名字，也不必推挤它。 */
+.dsh-canvas-navrow{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:6px 30px 6px 20px;
   border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#7D8187);
   font:inherit;font-size:13px;line-height:20px;text-align:left;cursor:pointer}
 .dsh-canvas-navrow:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.14));color:var(--dsw-alias-label-primary,#fff)}
 .dsh-canvas-navrow[data-active=true]{background:var(--dsw-alias-interactive-bg-active,rgba(128,128,128,.2));
   color:var(--dsw-alias-label-primary,#fff);font-weight:500}
 .dsh-canvas-navname{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 行右侧的操作按钮：指针落到这一行才露面（常驻会让列表看起来是一排省略号）。
+   行的:hover 与 :focus-within 是两条入口——前者给指针，后者给键盘（Tab 到行体即
+   显形，再 Tab 一下就落在按钮上）。与左栏工作区那一段同宽同色：16px 图形、4px
+   圆角、三级文字色，悬停升到一级。菜单开着时也留着（data-menu），这时指针可能
+   已经移到菜单上，而这一行仍是「正在说哪张画布」的唯一交代。 */
+.dsh-canvas-navactions{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;align-items:center}
+.dsh-canvas-navitem:hover .dsh-canvas-navactions,
+.dsh-canvas-navitem:focus-within .dsh-canvas-navactions,
+.dsh-canvas-navitem[data-menu=true] .dsh-canvas-navactions{display:inline-flex}
+.dsh-canvas-navicon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;padding:0;
+  border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary,#7D8187);cursor:pointer}
+.dsh-canvas-navicon:hover{color:var(--dsw-alias-label-primary,#fff)}
 .dsh-canvas-navempty{padding:2px 8px 6px 20px;font:12px/18px var(--dsh-font);color:var(--dsw-alias-label-secondary,#7D8187);opacity:.7}
-/* 打开目录失败的那句话：贴在列表下面，说的还是这一列的事。下一次右键即清掉。 */
-.dsh-canvas-naverror{padding:2px 8px 6px 20px;font:11px/16px var(--dsh-font);color:var(--dsh-twilight);word-break:break-all}
+/* 打开目录失败的那句话：贴在列表下面，说的还是这一列的事。下一次开菜单即清掉。 */
+.dsh-canvas-naverror{padding:2px 8px 6px 20px;font:11px/16px var(--dsh-font);color:var(--dsw-alias-state-error-primary,#C0392B);word-break:break-all}
 
-/* ── 画布行的右键菜单（F1.8）────────────────────────────────────────────── */
-/* 菜单挂在 body 上、坐标是视口的（画布行在宿主侧栏里，那里有 overflow 与 transform，
-   菜单若挂在行内会被裁掉一半）；.dsh-canvas-floating 把画布那套变量一并带过去。
-   底色用 --dsh-card（它指向宿主的高层面，浅色主题下跟着变浅），不求一个自己的深色
-   ——菜单是画布对宿主的延伸，不是画布内部那块工作台。 */
-.dsh-canvas-ctxmenu{position:fixed;z-index:60;display:flex;flex-direction:column;min-width:190px;max-width:320px;pointer-events:auto;
-  padding:4px;border:1px solid var(--dsh-hairline);border-radius:12px;background:var(--dsh-card)}
-/* 头一行写清「你右键的是哪张画布」：菜单就盖在那一行上，名字与目录是唯一的交代。 */
-.dsh-canvas-ctxhead{display:flex;flex-direction:column;gap:1px;min-width:0;padding:5px 10px 7px;margin-bottom:4px;
-  border-bottom:1px solid var(--dsh-hairline)}
-.dsh-canvas-ctxname{font:500 12px/17px var(--dsh-font);color:var(--dsh-fg);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsh-canvas-ctxpath{font:10px/14px var(--dsh-mono);color:var(--dsh-fg-3);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsh-canvas-ctxmenu .dsh-canvas-row svg{flex:none;color:var(--dsh-fg-3)}
-.dsh-canvas-ctxmenu .dsh-canvas-row:hover svg{color:var(--dsh-fg)}
-/* 「删除画布」是菜单的最后一项，用 twilight（本表里「有大事」的那一档）与「打开目录」
-   分开：它不是告警红——删除是用户自己点下去的动作。 */
-.dsh-canvas-ctxmenu .dsh-canvas-row:last-child{color:var(--dsh-twilight)}
-.dsh-canvas-ctxmenu .dsh-canvas-row:last-child svg{color:inherit}
-.dsh-canvas-ctxmenu .dsh-canvas-row:last-child:hover{color:var(--dsh-fg)}
-/* 悬浮构件的容器。尺寸写死、不吃指针（内容自己 re-enable）：菜单与确认框都挂进这一层，
-   因为宿主 body 是个 flex 容器，绝对定位元素落在 flex 容器里连尺寸都要接受容器的对齐
-   属性——直接把菜单挂 body 上时，它被 stretch 撑成了整屏高（见 canvas-menu.tsx）。 */
-.dsh-canvas-menuhost{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none}
+/* ── 画布行操作菜单与删除确认框（F1.5 修订）────────────────────────────── */
+/* 两件浮层都是宿主的原语（Menu / Modal），皮与骨都在宿主那边，本表只管删除
+   确认框正文里那几行字——画布根目录、进行中、失败原因。这三行说的是这张画布自己
+   的事，宿主不知道它们该长什么样，也就必须由插件给。它们跨 portal 落在 body 上，
+   所以只能用宿主的 --dsw-* 令牌与自带兜底的字体栈：画布那套 --dsh-* 变量只活在
+   .dsh-canvas-root 里，在这里全是空值。宿主的 Modal 正文已经带了 24px 左右内边距，
+   这一层只管字。 */
+.dsh-canvas-navmodal-path{font:12px/18px ui-monospace,Menlo,monospace;color:var(--dsw-alias-label-tertiary,#7D8187);
+  overflow-wrap:anywhere}
+.dsh-canvas-navmodal-status{margin-top:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#7D8187)}
+.dsh-canvas-navmodal-error{margin-top:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary,#C0392B);
+  overflow-wrap:anywhere}
 
 /* ── sidebar rail（本表仅有的全局选择器，两条，特此记名）────────────────── */
 /* 折叠是宿主在框架元素上发布的一个稳定属性（data-sidebar-collapsed），而宿主的
