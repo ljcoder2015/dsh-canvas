@@ -75,7 +75,6 @@ export const zh = {
   'canvas.action.grid': '网格整理',
   'canvas.action.reconcile': '引用对账',
   'canvas.action.refresh': '刷新',
-  'canvas.action.expand': '展开卡片会话',
   'canvas.action.collapse': '收起',
   'canvas.action.locate': '在画布中定位',
   'canvas.action.joinBoard': '加入画布',
@@ -94,6 +93,11 @@ export const zh = {
   'canvas.composer.drop': '删除这条取材关系',
   'canvas.composer.placeholder': '输入提示词，发送给这张卡片…',
   'canvas.composer.send': '发送',
+  // 右上角那颗按钮的两副面孔：行内是「放大」（⤢），放大态是「缩小」（⤡）。同一颗、
+  // 同一个位置，只是方向反过来。
+  'canvas.composer.enlarge': '放大输入框',
+  'canvas.composer.shrink': '缩小输入框',
+  'canvas.composer.resize': '拖动改这一条控制带的大小',
   'canvas.composer.empty': '画布上还没有其它卡片。',
   'canvas.composer.model': '模型',
   'canvas.composer.modelLoading': '正在加载模型目录…',
@@ -274,7 +278,6 @@ export const en = {
   'canvas.action.grid': 'Grid',
   'canvas.action.reconcile': 'Reconcile references',
   'canvas.action.refresh': 'Refresh',
-  'canvas.action.expand': 'Expand card session',
   'canvas.action.collapse': 'Collapse',
   'canvas.action.locate': 'Locate on board',
   'canvas.action.joinBoard': 'Add to canvas',
@@ -293,6 +296,11 @@ export const en = {
   'canvas.composer.drop': 'Remove this material link',
   'canvas.composer.placeholder': 'Type a prompt to send to this card…',
   'canvas.composer.send': 'Send',
+  // Two faces of the same corner button: 〔enlarge〕(⤢) on the strip, 〔shrink〕(⤡)
+  // once the box is at full size — same button, same spot, opposite direction.
+  'canvas.composer.enlarge': 'Enlarge the prompt box',
+  'canvas.composer.shrink': 'Shrink the prompt box',
+  'canvas.composer.resize': 'Drag to resize this control strip',
   'canvas.composer.empty': 'No other cards on the board yet.',
   'canvas.composer.model': 'Model',
   'canvas.composer.modelLoading': 'Loading the model catalog…',

@@ -1,6 +1,6 @@
 # DeepSeek Harness 通用创作画布插件 · 技术文档
 
-**版本**：v1.44
+**版本**：v1.45
 **最近更新**：2026-09-21
 **状态**：技术架构已按 [`dsh-plugin-template`](https://github.com/bugmaker2/dsh-plugin-template) 与 DeepSeek Harness 子系统文档（`docs/cookbook/*`、`docs/subsystems/*`）校准，并在真机跑通
 **产品文档**：[`DeepSeek-Harness-Canvas-产品文档.md`](./DeepSeek-Harness-Canvas-产品文档.md)——功能点清单（F1.1–F10.4）、MVP 范围、设计决策记录、修订记录都在那边
@@ -80,7 +80,8 @@ dsh-canvas/
 │       │   ├── source-edges.tsx      # 取材线几何
 │       │   ├── card-tile.tsx         # 卡片（含流光层）
 │       │   ├── card-face.tsx         # 卡面描述（画布 tab 与形态 tab 共用）
-│       │   ├── card-overlay.tsx      # 选中态控制带
+│       │   ├── card-overlay.tsx      # 选中态控制带（右下角把手：拖动改尺寸）
+│       │   ├── composer-size.ts      # 把手的算术（纯）：上下限与 zoom 换算
 │       │   ├── canvas-nav.tsx        # 左栏画布包裹（Portal）
 │       │   ├── canvas-menu.tsx       # 画布行的操作菜单与删除确认
 │       │   ├── row-actions.ts        # 那一行该给出哪几个动作（纯策略）
@@ -516,6 +517,20 @@ ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
 - 样式**两套配色**：亮色是默认块，暗色由 `body[data-ds-dark-theme]` 覆盖（宿主在首帧前由预置引导写属性、之后由 ThemePresenter 维护，**亮色＝属性缺席**，插件不管理状态）。中性色骑宿主 `--dsw-alias-*` 真令牌（名字必须真存在——`tests/theme-tokens.spec.ts` 有白名单），画布专属面给两套显式值；样式表注入一次、类名加包前缀（v1.38）。
 - 文案走 `ctx.locale.register(NS, { zh, en })` + `LocaleNamespaceMap` 声明合并，两个字典键必须齐全。
 - 别的功能插件只以 `import type` 引入声明，**绝不导入其运行时值或组件**。
+
+### 控制带的尺寸（F3.11 右下角那颗把手）
+
+控制带（`card-overlay.tsx`）能拖大，尺寸落在两处：整条带的宽写在内联 `width` 上、输入框的高写在 `textarea` 上。**带子的高从来不自己定**——它是「材料行 + 输入框 + 底栏」三行自然长出来的，所以放大能改的只有「输入框多占多少」；字号、行高、内边距、圆角一个都不动——放大态（⤢）走的是同一个 `ComposerBody` 与同一个输入框，变的只是外壳给它的余地（`data-fullscreen` 那两条 flex 规则），没有另一套更大的字。于是「放大之后还是同一副样子」是结构给的，不是靠人守的。
+
+算术全在 `composer-size.ts`（纯模块、不碰宿主原语，单测直接读它）：起笔时按 `getBoundingClientRect` 量一次当下多大，那就是**起点**（所以第一下不跳）；之后每一个指针位移都先除 `zoom`——带子坐在 `scale(zoom)` 的层里，不除的话把画布放到 200% 再拖就是鼠标的两倍快。上下限在那里收口，下限是「装得下自己」而不是「刚才多大」，所以拖大过还拖得回默认。
+
+**锚在卡片中心**（`translateX(-50%)`；卡片宽 200 ⇒ 与 `position.x + 100` 是同一条竖线）：放大时左右两侧对称地长，输入区始终在节点正下方。代价落在右沿——同一个鼠标位移只有一半落在它上面、另一半去了左沿，于是宽要按**两倍**吃位移（`CENTERED_WIDTH_GAIN`），右下角那颗把手才跟得住光标。**锚点与这个倍数是一对，改一个必须改另一个**：若换回左上锚（钉住左沿），倍数就得回到 1，否则要么把手跟不上鼠标、要么宽走过一倍。高的方向没有这一层，锚在上沿，一寸就是一寸。
+
+拖动期间是组件内的本地 state（同 `card-tile.tsx` 的卡片拖动），**放手才落进画布的记忆**；按一下不移动＝一次误触，什么都不改。尺寸按「画布 / 卡片」记在 `CanvasBoard` 的内存里（卡片 id 是路径，跨画布会撞名），**不落盘、刷新回默认**——它是一时的偏好，不是产物的属性。把手的按下要 `stopPropagation`：画布把空白处的一按读成「取消选择」。
+
+**放大态（右上角那颗 ⤢）不是另一副界面，是同一条控制带换了个壳**：那三行由同一个 `ComposerBody`（`card-overlay.tsx` 导出）画出来，卡片下方那条带子与放大后的弹窗都只是它的外壳——所以「放大之后布局与缩小态一致」不是靠两处对齐出来的，而是**根本没有第二套布局**。连输入框的高矮之别也走 `data-fullscreen` 这个属性而不是另一个类：三行的 class 序列在两种尺寸下逐字相同，真机探针直接比它（探针里那条「class 序列与行内一字不差」）。
+
+**两处按钮各管各的壳**，所以各站各的地盘：行内带子右上角那颗是〔放大〕（⤢，`canvas.composer.enlarge`，`corner` prop 可选——**只有行内传**），弹窗**头部右上角**那颗是〔缩小〕（⤡，`canvas.composer.shrink`）。底层的〔缩小〕因此站到 `.dsh-canvas-dialog-head` 里去（`.dsh-canvas-promptmodal-shrink`：`margin-left:auto` 推右沿、`flex:none` 防被长标题挤扁、上下 `-4px` 把 26px 的胶囊塞进头部那一行，头部高度因此不变），而不是混进那三行——**材料行与行内逐项相同，一颗多余的按钮都没有**，探针里「放大态那三行里不再有那颗 ⤢」和「缩小那颗整颗落在头部里、在内容区之上」两条判据盯着这件事。弹窗底部那枚重复的「收起」也已删掉：退出去走头部那颗、Esc 或点遮罩。前一个版本里放大态另有一套 13px/21px 的字号（`.is-modal`），那正是「放大之后不像同一个东西」的根源，已撤。
 
 ### 预览帧与元素选择探针
 

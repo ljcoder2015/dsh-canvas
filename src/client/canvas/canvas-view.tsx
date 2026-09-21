@@ -41,7 +41,8 @@ import type { CanvasBridge } from '../wire/bridge.ts'
 import type { CanvasKey, Translate } from '../ui/locales.ts'
 import { activityOf, cardStateOf, summaryOf } from '../wire/session-read.ts'
 import { CardTile } from './card-tile.tsx'
-import { CardSelection, type MaterialRef } from './card-overlay.tsx'
+import { CardSelection, ComposerBody, type MaterialRef } from './card-overlay.tsx'
+import type { ComposerSize } from './composer-size.ts'
 import { SourceEdges, seatAtAnchor, type PendingEdge } from './source-edges.tsx'
 import { FolderPicker } from './folder-picker.tsx'
 import { referenceNotice } from './material-notice.ts'
@@ -198,6 +199,17 @@ export type CanvasBoardProps = InjectFace<CanvasInject> & {
 /** Clamp a zoom factor into the board's working range. */
 function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
+}
+
+/**
+ * Which control strip a remembered size belongs to.
+ *
+ * Keyed by project *and* card: a card id is a path, and `index.html` exists on
+ * every board there is — keyed by the id alone, a strip dragged large on one
+ * canvas would come back large on the next one the user opens.
+ */
+function composerKey(card: BoardCard): string {
+  return `${card.project}/${card.id}`
 }
 
 /**
@@ -477,6 +489,17 @@ export function CanvasBoard(props: CanvasBoardProps) {
 
   /** The user's own last message per card, read from the Host's session logs. */
   const [prompts, setPrompts] = useState<Record<string, LastPrompt | undefined>>({})
+  /**
+   * How big each card's control strip was dragged to.
+   *
+   * In memory only, and keyed per card: how big one card's prompt box happens to
+   * be is a preference of this sitting, not a property of the artifact or of the
+   * board — so it never reaches the domain and a reload starts from the default.
+   * Not remembered across a project switch either, for the same reason the key
+   * carries the project: a card id is a path (`index.html`), and that same path
+   * exists on every board.
+   */
+  const [composerSizes, setComposerSizes] = useState<Record<string, ComposerSize | undefined>>({})
   const selectedCardId = selectedCard?.id
   const selectedSessionId = selectedCard?.sessionId ?? ''
   // The seed moves when the card's own conversation moves — a send from the
@@ -1265,6 +1288,11 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 onExpand={() => setExpanded(true)}
                 onDraftChange={(text) => editDraft(selectionCard.id, text)}
                 onSend={() => sendPrompt(selectionCard, promptDraft)}
+                zoom={view.zoom}
+                size={composerSizes[composerKey(selectionCard)]}
+                onResize={(size) =>
+                  setComposerSizes((current) => ({ ...current, [composerKey(selectionCard)]: size }))
+                }
               />
             )}
           </div>
@@ -1393,9 +1421,16 @@ export function CanvasBoard(props: CanvasBoardProps) {
         {expanded && selectedCard !== undefined ? (
           <PromptModal
             card={selectedCard}
+            summary={summaries[selectedCard.id]}
+            materials={selectionMaterials}
+            others={cards.filter((entry) => entry.id !== selectedCard.id)}
+            bridge={bridge}
             draft={promptDraft}
             onDraftChange={(text) => editDraft(selectedCard.id, text)}
             t={t}
+            onAddMaterial={(sourceId) => addMaterial(selectedCard, sourceId)}
+            onReferenceMaterials={() => referenceMaterials(selectedCard)}
+            onDropMaterial={dropMaterial}
             onClose={() => setExpanded(false)}
             onSend={() => {
               sendPrompt(selectedCard, promptDraft)
@@ -1425,23 +1460,38 @@ export function CanvasBoard(props: CanvasBoardProps) {
 }
 
 /**
- * The fullscreen prompt modal (⤢) — the only place a prompt is written.
+ * 放大态的提示词框（⤢）——同一个控制台，换了个更大的壳。
  *
- * Reached from the selected card's control strip, not a navigation: the modal
- * owns the draft and sends through the same path the board always used, then
- * hands the user back to the board — where the card lights up while the turn
- * runs and the artifact it produced is on the card when it ends.
+ * 里面装的还是那三行：**材料行 + 输入框 + 底栏**，由同一个 `ComposerBody` 画出来。
+ * 所以「放大之后布局与缩小态一致」不是靠两处对齐出来的，而是**根本没有第二套布局**：
+ * 字号、行高、内边距、取材 chips、模型席位、发送钮，两边逐字同一份。
+ *
+ * 两处按钮各站各的地盘：行内那条带子右上角是〔放大〕（⤢）——它开合的是带子；这里头
+ * 部右上角是〔缩小〕（⤡）——它开合的是**这个壳**，所以站在壳的头上，不必混进那三行
+ * 里（材料行因此与行内逐项相同，一颗多余的按钮都不多）。
+ *
+ * 退出的三条路各自独立：头部那颗〔缩小〕、Esc、点遮罩。发送之后同样交回画布——卡片亮
+ * 起流光，产物落在卡面上。
  */
 function PromptModal(props: {
   card: BoardCard
+  summary: CardSummary | undefined
+  materials: readonly MaterialRef[]
+  others: readonly BoardCard[]
+  bridge: CanvasBridge
   draft: string
   onDraftChange: (text: string) => void
   t: Translate
+  onAddMaterial: (sourceId: string) => void
+  onReferenceMaterials: () => void
+  onDropMaterial: (sourceId: string) => void
   onClose: () => void
   onSend: () => void
 }) {
-  const { card, draft, onDraftChange, t, onClose, onSend } = props
-  const canSend = draft.trim() !== ''
+  const {
+    card, summary, materials, others, bridge, draft, onDraftChange, t,
+    onAddMaterial, onReferenceMaterials, onDropMaterial, onClose, onSend,
+  } = props
 
   // Escape is the modal's dismiss; focus starts in the textarea.
   useEffect(() => {
@@ -1462,33 +1512,33 @@ function PromptModal(props: {
       <div className="dsh-canvas-dialog dsh-canvas-promptmodal">
         <div className="dsh-canvas-dialog-head">
           {card.id.split('/').pop() ?? card.id}
-          <span className="dsh-canvas-spacer" />
-          <button className="dsh-canvas-chipbtn" onClick={onClose} aria-label={t('canvas.action.collapse')}>
-            ×
+          {/* 把壳收回去的那颗（⤡）：它管的是这个弹窗的开合，所以站在壳的头上——三行里
+              因此一颗多余的按钮都没有（那边右上角那颗 ⤢ 管的是带子，不是壳）。 */}
+          <button
+            className="dsh-canvas-chipbtn dsh-canvas-promptmodal-shrink"
+            onClick={onClose}
+            title={t('canvas.composer.shrink')}
+            aria-label={t('canvas.composer.shrink')}
+          >
+            ⤡
           </button>
         </div>
-        <textarea
-          className="dsh-canvas-composer-input is-modal"
-          placeholder={t('canvas.composer.placeholder')}
-          autoFocus
-          value={draft}
-          onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault()
-              if (canSend) onSend()
-            }
-          }}
-        />
-        <div className="dsh-canvas-dialog-foot">
-          <span className="dsh-canvas-muted">{card.id}</span>
-          <span className="dsh-canvas-spacer" />
-          <button className="dsh-canvas-chipbtn" onClick={onClose}>
-            {t('canvas.action.collapse')}
-          </button>
-          <button className="dsh-canvas-chipbtn" data-primary="true" disabled={!canSend} onClick={onSend}>
-            {t('canvas.composer.send')}
-          </button>
+        <div className="dsh-canvas-promptmodal-body">
+          <ComposerBody
+            t={t}
+            bridge={bridge}
+            card={card}
+            summary={summary}
+            materials={materials}
+            others={others}
+            draft={draft}
+            onDraftChange={onDraftChange}
+            onSend={onSend}
+            onAddMaterial={onAddMaterial}
+            onReferenceMaterials={onReferenceMaterials}
+            onDropMaterial={onDropMaterial}
+            fullscreen
+          />
         </div>
       </div>
     </div>

@@ -214,13 +214,31 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-composer-materialzone .dsh-canvas-chipbtn{height:26px;padding:0 9px;font:14px/24px var(--dsh-font)}
 .dsh-canvas-menu.is-raised{position:absolute;left:0;bottom:28px;z-index:7;box-shadow:none}
 .dsh-canvas-composer-menuempty{display:block;padding:7px 10px;font:12px/18px var(--dsh-font);color:var(--dsh-fg-3);white-space:nowrap}
-.dsh-canvas-composer-expand{margin-left:auto}
+/* 材料行右上角那颗〔放大〕（⤢）**只有行内有**——它开合的是这条带子。放大态那颗
+   〔缩小〕（⤡）不在这儿，它站在弹窗头部右上角（见下面的 .dsh-canvas-promptmodal-shrink）。 */
+.dsh-canvas-composer-corner{margin-left:auto}
 .dsh-canvas-composer-input{flex:none;box-sizing:border-box;width:100%;min-height:54px;max-height:120px;padding:6px 10px;resize:none;
   border:1px solid var(--dsh-hairline);border-radius:8px;background:var(--dsh-slot);
   color:var(--dsh-fg);font:12px/18px var(--dsh-font)}
 .dsh-canvas-composer-input:focus{outline:none;border-color:var(--dsh-mid)}
-.dsh-canvas-composer-input.is-modal{flex:1 1 auto;min-height:0;max-height:none;font:13px/21px var(--dsh-font)}
+/* 放大态与行内是**同一个输入框**：字、行高、内边距、圆角一个字都不改，变的只有容器
+   给它的余地——外壳更高，它就多占一些（把 54/120 的上下限让开）。这个标记刻意走 data
+   属性而不是另加一个类：三行的 class 序列在两种尺寸下逐字相同，而那件事本身就该是真的
+   ——真机判据直接比 class 序列，含糊不得。 */
+.dsh-canvas-composer-input[data-fullscreen]{flex:1 1 auto;min-height:0;max-height:none}
+/* 拖过之后输入框自己揣着一个高度（内联写的），那 120px 的上限得让开；没拖过则一个字
+   都不动——今天的 CSS 就是默认那份。 */
+.dsh-canvas-composer-input[data-sized]{max-height:none}
 .dsh-canvas-composer-foot{display:flex;align-items:center;gap:8px;min-width:0}
+/* 控制带右下角那颗把手：拖它就是把这条带子放大。它拖出来的只是**空间**——字号、行高、
+   内边距、圆角与那三行结构一律照旧（放大态（⤢）用的是同一个 ComposerBody，连输入框都
+   是同一个 .dsh-canvas-composer-input，只是容器更高）。把手贴着外角站（与 chip 的删除
+   钮同一套做法），所以它既不占带里的位置、也不跟右下角那颗发送钮抢那一下点击；平时淡
+   着、指上去才亮出来。 */
+.dsh-canvas-composer-grip{position:absolute;right:-5px;bottom:-5px;display:flex;align-items:flex-end;justify-content:flex-end;
+  width:16px;height:16px;box-sizing:border-box;padding:0 3px 3px 0;color:var(--dsh-fg-3);
+  cursor:nwse-resize;opacity:.45;touch-action:none}
+.dsh-canvas-composer-grip:hover,.dsh-canvas-composer[data-resizing] .dsh-canvas-composer-grip{opacity:1;color:var(--dsh-fg-2)}
 .dsh-canvas-modelzone{position:relative;display:inline-flex;flex:none}
 .dsh-canvas-modelbtn{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 9px;border:none;border-radius:999px;
   background:transparent;color:var(--dsh-fg-3);font:500 11px/22px var(--dsh-font);cursor:pointer;white-space:nowrap;max-width:150px;
@@ -231,10 +249,18 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-menu .dsh-canvas-row[data-current=true]{color:var(--dsh-fg)}
 .dsh-canvas-menu .dsh-canvas-row[data-current=true]::after{content:'✓';margin-left:auto;color:var(--dsh-sunset)}
 
-/* 全屏提示词弹窗：这是**唯一**写提示词的地方（⤢），不是跳转到会话聊天页。 */
+/* 放大态提示词弹窗：这不是另一个界面，是**同一个控制台换了个壳**——里面装的还是那三行
+   （材料行 + 输入框 + 底栏），由同一个 ComposerBody 画出来，字号、行高、内边距与行内
+   逐字同一份。外壳只多做一件事：给那三行一圈边距与一点间隙。
+   两处按钮各站各的地盘：行内带子右上角是〔放大〕（⤢，管带子的开合），这里头部右上角
+   是〔缩小〕（⤡，管这个壳的开合）——所以那颗按钮站在壳的头上，不混进那三行里，材料行
+   因此与行内逐项相同。按钮本身还是通用的胶囊按钮（.dsh-canvas-chipbtn），位置由下面
+   这一条定：margin-left:auto 推到右沿、flex:none 免得被长标题挤扁、上下各 -4px 把 26px
+   的胶囊塞进头部那一行——头部因此还是 43px 高，多一颗按钮没让内容区矮下去。 */
 .dsh-canvas-scrim.is-modal{z-index:8}
 .dsh-canvas-promptmodal{width:min(720px,100%);height:min(480px,100%)}
-.dsh-canvas-promptmodal .dsh-canvas-dialog-head .dsh-canvas-chipbtn{margin-left:auto}
+.dsh-canvas-promptmodal-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;padding:12px 14px}
+.dsh-canvas-promptmodal-shrink{flex:none;margin:-4px -4px -4px auto}
 
 /* ── fullscreen artifact viewer (F3.8) ──────────────────────────────────── */
 /* 双击卡片打开：预览就是**整块画布**——对话框铺满画布区（同宽同高、不留边距、不切角），
