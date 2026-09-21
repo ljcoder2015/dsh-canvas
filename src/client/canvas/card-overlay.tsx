@@ -1,0 +1,475 @@
+/**
+ * dsh-canvas — what appears around a selected card.
+ *
+ * Two pieces, both following the card: the action pill just above it, and the
+ * card's control strip just below it. The strip carries what the card cannot
+ * say on its own — the prompt box, the materials that feed it, the model that
+ * runs its turns, and the way into the fullscreen editor (⤢).
+ *
+ * The prompt box is a mirror as much as an editor: with nothing of the user's
+ * own in it, it holds that card's latest message from the user, so the prompt a
+ * card was most recently asked with is the one sitting in front of them to
+ * refine. See `ComposerDraft` in `canvas-view.tsx` for how that is resolved
+ * without the box fighting the user's typing. The ⤢ modal edits that same draft
+ * at full size — one box at two sizes, not two boxes.
+ *
+ * The material row is how one node consumes another node's artifact: the ⊕
+ * menu lists the board's other cards, and picking one declares the source edge
+ * and pushes its digest into the session in the same gesture. Each chip is one
+ * declared edge and carries the delete button at its top-right: a chip and an
+ * edge are the same thing, so removing a chip removes exactly the relationship
+ * it stands for.
+ */
+import { useEffect, useState } from 'react'
+import { isDirectTextKind } from '../../core/artifact/kind-registry.ts'
+import type { BoardCard, CardSummary } from '../../types.ts'
+import type { CanvasBridge, CatalogModel, ModelCatalog } from '../wire/bridge.ts'
+import {
+  nodeTypeOf,
+  recallModel,
+  rememberModel,
+  selectionOf,
+  type ModelChoice,
+  type ModelSelectionView,
+} from '../wire/model-memory.ts'
+import type { Translate } from '../ui/locales.ts'
+
+/**
+ * One declared material edge of the selected card, as its chip renders it.
+ *
+ * A chip is an edge, and only an edge: `readSources` also walks indirect
+ * upstreams for the agent's benefit, but those are relationships of some card
+ * further up the chain — there would be nothing to delete from this one. So the
+ * strip lists exactly the direct edges the board reports, and joins each to its
+ * digest for the tooltip.
+ */
+export interface MaterialRef {
+  /** Storage id of the edge — the handle `unlinkSource` takes. */
+  id: string
+  /** The upstream card id. */
+  cardId: string
+  /** Bounded digest of the upstream artifact; `''` when it could not be read. */
+  summary: string
+}
+
+/** Props of the selected-card cluster. */
+export interface CardSelectionProps {
+  bridge: CanvasBridge
+  card: BoardCard
+  summary: CardSummary | undefined
+  /** This card's declared upstream edges, one chip each. */
+  materials: readonly MaterialRef[]
+  /** Every other card on the board — what the add-material menu offers. */
+  others: readonly BoardCard[]
+  t: Translate
+  /** What the prompt box holds: the user's unsent edit, or the card's latest message. */
+  draft: string
+  /** Make the card's session current so its conversation becomes the main surface. */
+  onChat: () => void
+  /** Open a text node's artifact in the viewer's editor — 手动输入. */
+  onManualEdit: () => void
+  /** Export in the kind's first supported format. */
+  onExport: () => void
+  /** Take the card off the board; the file stays. */
+  onRemove: () => void
+  /** Declare an edge from `sourceId` and push its digest into the session. */
+  onAddMaterial: (sourceId: string) => void
+  /**
+   * Hand this card's materials over as file references.
+   *
+   * A different channel from {@link CardSelectionProps.onAddMaterial}, and its
+   * own entry rather than a second meaning for the same click: that one picks a
+   * card and pushes a **digest** of its artifact into this conversation, while
+   * this one names the upstream files that are *already* sourced — `@paths` the
+   * model reads when it wants them, no content copied. See
+   * `canvas_reference_files`.
+   */
+  onReferenceMaterials: () => void
+  /** Delete the material edge carrying this storage id. */
+  onDropMaterial: (sourceId: string) => void
+  /** Open the prompt modal (⤢) — the same draft, at full size. */
+  onExpand: () => void
+  /** Record the user's text without sending it. */
+  onDraftChange: (text: string) => void
+  /** Send the draft as the card session's next turn. */
+  onSend: () => void
+}
+
+/**
+ * The action pill's translation keys, in display order.
+ *
+ * Only the actions with no other home sit here. Opening the artifact belongs to
+ * the card itself (double-click → fullscreen viewer, which carries its own way
+ * into the sidebar), and declaring a material edge belongs to the card's ports
+ * and the composer's ⊕ menu — repeating either as a pill button just put a
+ * second, weaker door next to the real one. 手动输入 is the exception that
+ * proves the rule: editing a text node by hand is not the same act as opening
+ * it, and nothing else on the board offers it — the pill is its only entry, and
+ * it opens the viewer *in its editor* rather than at the top of the file.
+ */
+const PILL = [
+  ['canvas.action.chat', 'onChat'],
+  ['canvas.action.manual', 'onManualEdit'],
+  ['canvas.action.export', 'onExport'],
+  ['canvas.action.remove', 'onRemove'],
+] as const
+
+/**
+ * The Host catalog, loaded at most once per client page and shared by every
+ * card's picker. A failed load clears the cache so the next open retries.
+ */
+let catalogCache: Promise<ModelCatalog> | undefined
+
+function loadCatalog(bridge: CanvasBridge): Promise<ModelCatalog> {
+  catalogCache ??= bridge.modelCatalog().catch((error: unknown) => {
+    catalogCache = undefined
+    throw error
+  })
+  return catalogCache
+}
+
+/** Resolve a model id to its catalog display name, falling back to the id. */
+function modelName(catalog: ModelCatalog | undefined, choice: ModelChoice | undefined): string {
+  if (choice === undefined) return ''
+  const group = catalog?.groups.find((entry) => entry.id === choice.provider)
+  return group?.models.find((model) => model.id === choice.model)?.name ?? choice.model
+}
+
+/**
+ * What the composer can say about the session's model.
+ *
+ * - `pending` — nothing read yet (catalog loading, or the list read in flight).
+ * - `chosen` — the session has a selection; it is what its next request uses.
+ * - `none` — the session has never picked a model and never run, so the node
+ *   type's memory may speak for it.
+ * - `unknown` — the session is not in the host's list, so nothing can be said.
+ *
+ * `pending` and `unknown` both keep the label at its placeholder rather than
+ * printing the catalog default: an unverified default reads as a fact, and that
+ * is exactly the claim this seat must not make.
+ */
+type ModelSeat =
+  | { status: 'pending' }
+  | { status: 'chosen'; choice: ModelChoice }
+  | { status: 'none' }
+  | { status: 'unknown' }
+
+/** Cards this page has already seeded from the type memory; one write each. */
+const seededCards = new Set<string>()
+
+/**
+ * The model seat in the composer's bottom-left corner.
+ *
+ * Reads the Host-generation catalog through the framework's `session` Remote
+ * namespace and writes a durable per-session selection with the same
+ * `selectModel` wire call the host composer's model seat makes — the choice
+ * governs the card session's next model request. What it *shows* comes from the
+ * session's own selection projection, read from the host's session list rather
+ * than kept locally, and a session that has no selection of its own inherits
+ * the model its node type remembers (see `model-memory.ts`).
+ *
+ * Inheriting means *opening the card's conversation first*: the host's
+ * `selectModel` resolves a session by resuming it, and a session resumed by
+ * that call is composed outside this card's agent scope — the plugin would then
+ * find a session it cannot re-open, and would start a second conversation for
+ * the card. Opening through the board's own call keeps the agent, its scope and
+ * the selection one conversation's worth of state.
+ */
+function ModelPicker({
+  bridge,
+  projectId,
+  cardId,
+  sessionId,
+  kind,
+  t,
+}: {
+  bridge: CanvasBridge
+  projectId: string
+  cardId: string
+  /** The session the card is bound to, or `''` before it has one. */
+  sessionId: string
+  /** The node type whose remembered model this session may inherit. */
+  kind: string
+  t: Translate
+}) {
+  const [open, setOpen] = useState(false)
+  const [catalog, setCatalog] = useState<ModelCatalog | undefined>(undefined)
+  const [seat, setSeat] = useState<ModelSeat>({ status: 'pending' })
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  // The catalog is loaded on mount, not on first open: the label needs a name
+  // for the session's model before the menu is ever consulted. The shared cache
+  // makes every later card free.
+  useEffect(() => {
+    let cancelled = false
+    loadCatalog(bridge)
+      .then((value) => {
+        if (!cancelled) setCatalog(value)
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : String(loadError))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [bridge])
+
+  // Read the session's own projection. It is the only face that can say what
+  // the next request will actually use, so the label is read from it rather
+  // than guessed from the catalog default. A card that has no conversation yet
+  // has no selection either — that is an answer, not a missing read.
+  useEffect(() => {
+    setSeat({ status: 'pending' })
+    if (sessionId === '') {
+      setSeat({ status: 'none' })
+      return
+    }
+    let cancelled = false
+    bridge
+      .readModelSelection(sessionId)
+      .then((view: ModelSelectionView | undefined) => {
+        if (cancelled) return
+        if (view === undefined) {
+          setSeat({ status: 'unknown' })
+          return
+        }
+        const choice = selectionOf(view)
+        setSeat(choice === undefined ? { status: 'none' } : { status: 'chosen', choice })
+      })
+      .catch(() => {
+        if (!cancelled) setSeat({ status: 'unknown' })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [bridge, sessionId])
+
+  // A session with no selection of its own inherits its node type's memory:
+  // that is what makes remembering worth doing. The open comes first — see the
+  // component doc — and the write happens once per card, and only on the
+  // projection's own "nothing chosen yet" answer.
+  useEffect(() => {
+    if (seat.status !== 'none' || catalog === undefined || projectId === '' || cardId === '') return
+    const remembered = recallModel(kind, catalog)
+    if (remembered === undefined || seededCards.has(cardId)) return
+    seededCards.add(cardId)
+    setBusy(true)
+    setError('')
+    bridge
+      .openSession(projectId, cardId)
+      .then((binding) => bridge.selectModel(binding.sessionId, remembered.provider, remembered.model))
+      .then(() => setSeat({ status: 'chosen', choice: remembered }))
+      .catch((seedError: unknown) => setError(seedError instanceof Error ? seedError.message : String(seedError)))
+      .finally(() => setBusy(false))
+  }, [seat, catalog, kind, projectId, cardId, bridge])
+
+  const pick = (provider: string, model: CatalogModel) => {
+    if (busy || sessionId === '') return
+    setBusy(true)
+    setError('')
+    const choice: ModelChoice = { provider, model: model.id }
+    bridge
+      .selectModel(sessionId, provider, model.id)
+      .then(() => {
+        // The memory is written only here: what the user picked, never a guess.
+        rememberModel(kind, choice)
+        setSeat({ status: 'chosen', choice })
+        setOpen(false)
+      })
+      .catch((pickError: unknown) => setError(pickError instanceof Error ? pickError.message : String(pickError)))
+      .finally(() => setBusy(false))
+  }
+
+  // What the label may state: the session's own selection, or — once the
+  // projection has confirmed there is none — the model the next request will
+  // start from. That is the type memory when there is one (it is about to be
+  // installed), and the deployment default otherwise.
+  const shown =
+    seat.status === 'chosen'
+      ? seat.choice
+      : seat.status === 'none'
+        ? recallModel(kind, catalog) ?? catalog?.default
+        : undefined
+  const label = shown === undefined ? t('canvas.composer.model') : modelName(catalog, shown)
+  const current = seat.status === 'chosen' ? seat.choice : undefined
+
+  return (
+    <span className="dsh-canvas-modelzone">
+      <button
+        className="dsh-canvas-modelbtn"
+        onClick={() => setOpen((value) => !value)}
+        disabled={sessionId === ''}
+        title={t('canvas.composer.model')}
+      >
+        {label}
+        <span aria-hidden="true">▾</span>
+      </button>
+      {open ? (
+        <div className="dsh-canvas-menu is-raised dsh-canvas-modelmenu">
+          {error !== '' ? <span className="dsh-canvas-composer-menuempty">{error}</span> : null}
+          {error === '' && catalog === undefined ? (
+            <span className="dsh-canvas-composer-menuempty">{t('canvas.composer.modelLoading')}</span>
+          ) : null}
+          {catalog?.groups.map((group) => (
+            <div key={group.id}>
+              <div className="dsh-canvas-modelgroup">{group.name}</div>
+              {group.models.length === 0 ? (
+                <span className="dsh-canvas-composer-menuempty">{t('canvas.composer.modelEmpty')}</span>
+              ) : (
+                group.models.map((model) => (
+                  <button
+                    className="dsh-canvas-row"
+                    data-current={current?.provider === group.id && current?.model === model.id ? 'true' : 'false'}
+                    disabled={busy}
+                    key={model.id}
+                    title={model.description}
+                    onClick={() => pick(group.id, model)}
+                  >
+                    {model.name}
+                  </button>
+                ))
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </span>
+  )
+}
+
+/**
+ * Render the action pill and the card's control strip for one selected card.
+ *
+ * The strip is the card's whole console: the prompt box and its send button,
+ * the materials feeding it (chips with their own delete buttons, then ⊕ to add
+ * one), the way into the fullscreen editor (⤢), and the model running its
+ * turns. The card face is where progress and the artifact are read.
+ */
+export function CardSelection(props: CardSelectionProps) {
+  const {
+    bridge, card, summary, materials, others, t, draft, onAddMaterial, onReferenceMaterials, onDropMaterial,
+    onExpand, onDraftChange, onSend,
+  } = props
+  const [menu, setMenu] = useState(false)
+  const hasExport = (summary?.kind ?? '') !== 'folder'
+  // 手动输入 是文本节点的门：编辑器整篇写回文件，所以只在「产物就是它自己的文字」的
+  // 形态上出现——文件夹、图片、Deck 都没有可打字的地方，给它们一枚按钮只是一枚点了没
+  // 反应（或更糟：把别的形态覆盖成文本）的按钮。这个事实住在宿主的 kind 表上
+  // （`isDirectTextKind`），弹窗里的编辑面读的是同一份，两边不会各说各话。
+  const canEditText = isDirectTextKind(summary?.kind ?? '')
+  const canSend = draft.trim() !== ''
+  // The memory is keyed by what the card *is*, not by which card it is: that is
+  // what lets the next node of the same type start from the last choice.
+  const nodeType = nodeTypeOf(card, summary)
+
+  return (
+    <>
+      <div className="dsh-canvas-toolbar is-horizontal" style={{ left: `${card.position.x + 100}px`, top: `${card.position.y - 44}px`, transform: 'translateX(-50%)' }}>
+        {PILL.map(([key, handler]) => {
+          if (key === 'canvas.action.export' && !hasExport) return null
+          if (key === 'canvas.action.manual' && !canEditText) return null
+          return (
+            <button className="dsh-canvas-chipbtn" key={key} onClick={props[handler]}>
+              {t(key)}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="dsh-canvas-overlay dsh-canvas-composer" style={{ left: `${card.position.x + 100}px`, top: `${card.position.y + 156}px`, transform: 'translateX(-50%)' }}>
+        <div className="dsh-canvas-composer-materials">
+          {materials.map((entry) => (
+            <span className="dsh-canvas-chip" key={entry.id} title={entry.summary === '' ? entry.cardId : entry.summary}>
+              <span className="dsh-canvas-chip-label">{entry.cardId.split('/').pop() ?? entry.cardId}</span>
+              <button
+                className="dsh-canvas-chipdrop"
+                title={t('canvas.composer.drop')}
+                aria-label={t('canvas.composer.drop')}
+                onClick={() => onDropMaterial(entry.id)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <span className="dsh-canvas-composer-materialzone">
+            <button
+              className="dsh-canvas-chipbtn"
+              data-primary="false"
+              onClick={() => setMenu((open) => !open)}
+              title={t('canvas.composer.material')}
+            >
+              ⊕
+            </button>
+            {menu ? (
+              <div className="dsh-canvas-menu is-raised">
+                {/* 文件引用不是「挑一张卡片」：它交的是本卡片**已有**取材来源的 @路径，
+                    所以它是一枚独立入口，而不是给每一行再加一个更弱的按钮。 */}
+                <button
+                  className="dsh-canvas-row"
+                  onClick={() => {
+                    setMenu(false)
+                    onReferenceMaterials()
+                  }}
+                >
+                  {t('canvas.composer.reference')}
+                  <span className="dsh-canvas-row-meta">{t('canvas.composer.referenceMeta')}</span>
+                </button>
+                {others.length === 0 ? (
+                  <span className="dsh-canvas-composer-menuempty">{t('canvas.composer.empty')}</span>
+                ) : (
+                  others.map((other) => (
+                    <button
+                      className="dsh-canvas-row"
+                      key={other.id}
+                      onClick={() => {
+                        setMenu(false)
+                        onAddMaterial(other.id)
+                      }}
+                    >
+                      {other.id.split('/').pop() ?? other.id}
+                      <span className="dsh-canvas-row-meta">{other.kindLabel}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </span>
+          <button className="dsh-canvas-chipbtn dsh-canvas-composer-expand" onClick={onExpand} title={t('canvas.action.expand')}>
+            ⤢
+          </button>
+        </div>
+
+        <textarea
+          className="dsh-canvas-composer-input"
+          placeholder={t('canvas.composer.placeholder')}
+          value={draft}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onKeyDown={(event) => {
+            // ⌘/Ctrl + Enter sends; a bare Enter belongs to the text, because a
+            // prompt is usually several lines. Same chord as the ⤢ modal.
+            if (event.key === 'Enter' && !event.shiftKey && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault()
+              if (canSend) onSend()
+            }
+          }}
+        />
+
+        <div className="dsh-canvas-composer-foot">
+          <ModelPicker
+            bridge={bridge}
+            projectId={card.project}
+            cardId={card.id}
+            sessionId={card.sessionId}
+            kind={nodeType}
+            t={t}
+          />
+          <span className="dsh-canvas-spacer" />
+          <button className="dsh-canvas-chipbtn" data-primary="true" disabled={!canSend} onClick={onSend}>
+            {t('canvas.composer.send')}
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}

@@ -10,8 +10,9 @@
 产物形态 = 文件证据自动认定              扩展 = 加一条形态注册表条目
 ```
 
-- 产品文档：[`docs/DeepSeek-Harness-Canvas-产品文档.md`](docs/DeepSeek-Harness-Canvas-产品文档.md)（版本号随每次改动更新）
-- 质量：`npm run check` 全绿（typecheck + eslint + **247 项**单元测试 + 双端打包）
+- 产品文档：[`docs/DeepSeek-Harness-Canvas-产品文档.md`](docs/DeepSeek-Harness-Canvas-产品文档.md)——只写功能：产品概述、功能点清单（F1.1–F10.4）、MVP 范围、设计决策、修订记录
+- 技术文档：[`docs/DeepSeek-Harness-Canvas-技术文档.md`](docs/DeepSeek-Harness-Canvas-技术文档.md)——技术架构：双端插件底座、源码分层、契约层、Host 与 Client 两侧、数据模型、构建与安装
+- 质量：`npm run check` 全绿（typecheck + eslint + **285 项**单元测试 + 双端打包）
 
 ---
 
@@ -70,6 +71,7 @@
 | F2.4 | 应用节点 | 新建「应用」即建一个**文件夹**并写入 web 应用脚手架：`dsh.webapp.json` 清单 + 入口 `index.html` + shadcn 设计令牌 `styles.css` + **Web Components** `app.js`（wc-button / wc-input / wc-card / wc-badge）。文件夹带清单即认定为 webapp（先于站点判定）；全屏预览把入口引用的**本地样式与脚本内联**进沙箱 iframe——多文件在磁盘上保持原样，预览照样跑起来 |
 | F3.8 | 双击全屏预览 | 弹窗**铺满整块画布**（同宽同高、不留边距），头部只有产物名 + 形态 + 关闭；按形态分派查看器：Markdown 渲染 / 图片视频 / **沙箱 iframe**（`allow-scripts` + `allow-popups` 无同源；**链接闸门**：页内锚点原地跳、绝对地址真开新窗、相对地址拦下并显说明条——`srcdoc` 的相对基准是宿主页面，跟下去就是宿主的 401）**整个 HTML 家族**——幻灯片 / 站点 / 应用——的入口页会先把**本地样式表与脚本内联**进正文，`srcdoc` 没有 base URL，不内联就是一张无样式白板）/ CSV·JSON 表格 / 纯文本兜底。**文本节点（Markdown / 文本）头部多一条「预览 / 编辑」单选组**（选中的一半是实心拇指，当前在哪一面一眼看得出；方向键跟着选中态走，到头不绕回）：切到编辑面即在原处改这篇产物——**预览渲染的是刚打的草稿**（切过去看的就是新内容，正文上方标明「尚未落盘」），**打字停手即自动落盘**（节流：停手 800ms 一次，连着打字最长 5s 也必写一次），⌘/Ctrl+S 或「保存」则是立刻落盘并交回预览；未保存时头部挂「未保存」并拦下关闭（放弃 / 继续编辑），**写入被拒时不自欺**：位置改不动（权限 / 沙箱）就暂停自动保存、状态改标「自动保存已暂停」，错误条说人话并把原生错误降为第二行细节，右挂「重试」把操作杆交回你——**改动一个字都不丢**；**整篇读回（截断）的产物不给编辑**——一次保存会把没读到的那部分一起覆盖 |
 | F3.10 | 操作胶囊收敛 | 只留**没有其它入口**的动作：对话、**手动输入**、导出、从画布移除。手动输入只出现在文本节点上（编辑器整篇写回，别的形态没有可打字的地方）：点它打开预览弹窗并**直接落在编辑面** |
+| F3.14 | **预览里的元素选择** | HTML 家族的全屏预览（沙箱 iframe）头部多一枚**元素选择**开关：按下即进入选择模式——页面里鼠标变**十字**、指针底下的元素**当场亮框**并写出它的记号（`button#go.primary.wide`，id 与最多两个类名）；**单击即选中**，而这一击**不落到页面自己的按钮或链接上**；随即在元素正下方弹出提示词框，框里**已经嵌着这个节点的源码**（产物文件 + `节点` + `位置` 选择器路径 + 源码片段）并以「改动要求：」收尾，光标落在末尾、那一行也**滚进可视区**（框里的正文常比框高，停在源码中间等于让人自己去找要写的那一行），用户接着往下写；发送走与画布输入框**同一条** `card/sendMessage`——交给这张卡自己的会话去改文件，产品改好后预览自动重读（等到会话域的变动）。**探针由 host 注入页面文本**（与链接闸门同一条路，`src/core/artifact/preview-picker.ts`；幂等、追加在文末）：帧是不透明源、浏览器半看不见帧内 DOM，只有注入进页面的脚本看得见，所以「鼠标底下是谁」这件事必须由页面自己回答；探针**默认是死的**（不接父窗口的 `enable` 之前不画不报，不动用户在看的页面），回话一律当**不可信内容**逐字段重建。模式说明条**浮在帧上、不占排版位**：它随模式在单击那一刻一起消失，若排在流里会把整帧顶上去一条，而高亮框与提示词框的位置在那之前就量好了 |
 
 ### 卡片与会话
 
@@ -144,13 +146,13 @@ dsh plugin --profile web remove dsh-canvas   # 卸载
 开发期把包加进工作区软链后：
 
 - **Client 半**（`src/client/**`）改动 → `dsh-client-hmr` 轮询客户端 bundle，**刷新页面即生效**
-- **Host 半**（`src/**`、`src/core/**`）改动 → 需**重启 Web Harness**
+- **Host 半**（`src/**` 减去 `src/client/**`：入口、协议基座、`src/host/**`、`src/core/**`）改动 → 需**重启 Web Harness**
 
 ---
 
 ## 画布操作
 
-dock 上的快捷键弹层印的就是下表——键位表与按键分派共用同一份声明（`src/client/shortcuts.ts`），**印出来的每一行都按得动**。
+dock 上的快捷键弹层印的就是下表——键位表与按键分派共用同一份声明（`src/client/ui/shortcuts.ts`），**印出来的每一行都按得动**。
 
 | 键位 | 动作 |
 |------|------|
@@ -221,31 +223,46 @@ dock 上的快捷键弹层印的就是下表——键位表与按键分派共用
 
 ```
 ┌──────────────────────────── Host (Node / Cordis) ────────────────────────────┐
-│  src/index.ts        Config schema + apply()                                 │
-│  src/runtime.ts      CanvasRuntime   画布 / 取材链 / 排布      ┐             │
-│  src/card-runtime.ts CardRuntime     产物读写 / 注入 / 导出发布 ┘ Remote 服务  │
-│  src/tools.ts        defineTool × 14                                          │
-│  src/prompt.ts       卡片会话的 prompt 注入段落                                │
-│  src/core/*          纯逻辑层（不依赖 Cordis）                                 │
-│  src/domain.ts       存储领域 defineDomain（per-record）                       │
+│  src/index.ts               Config schema + apply()                          │
+│  src/host/canvas-runtime.ts CanvasRuntime   画布 / 取材链 / 排布    ┐         │
+│  src/host/card-runtime.ts   CardRuntime     产物读写 / 注入 / 导出发布 ┘ Remote │
+│  src/host/tools.ts          defineTool × 14                                  │
+│  src/host/prompt.ts         卡片会话的 prompt 注入段落                        │
+│  src/core/{canvas,artifact,session}/  纯逻辑层（不依赖 Cordis）               │
+│  src/domain.ts              存储领域 defineDomain（per-record）               │
 └────────────────────────────────────┬─────────────────────────────────────────┘
                                      │ Typert Remote
                       契约唯一真源 src/contract.ts（一份 descriptors，三处引用）
                                      │ 每个方法一条 descriptor
 ┌────────────────────────────────────┴─────────────────────────────────────────┐
-│  src/client/index.tsx   席位注册（同步，先于 Remote mount 解析）               │
-│  src/client/canvas-view.tsx   无限画布正文                                   │
-│  src/client/artifact-view.tsx 按形态分派的查看器注册表                         │
-│  src/client/source-edges.tsx  取材线几何（锚点 / 落位反推 / 细线）              │
-│  src/client/locales.ts · styles.ts                                            │
+│  src/client/index.tsx                     席位注册（同步，先于 Remote mount）│
+│  src/client/canvas/canvas-view.tsx        无限画布正文                        │
+│  src/client/artifact/registry.ts          按形态分派的预览注册表（能力在预览器）│
+│  src/client/artifact/chrome.tsx           插槽与两条登记通道（Esc 分级 / 关闭闸）│
+│  src/client/canvas/source-edges.tsx       取材线几何（锚点 / 落位反推 / 细线） │
+│  src/client/ui/locales.ts · styles.ts                                         │
 └──────────────────────────── 浏览器 (lib/client.js, CJS) ──────────────────────┘
 ```
+
+**src/ 怎么分**：`src/` 根只留**入口 + 协议基座**（`index.ts` · `contract.ts` · `types.ts` · `domain.ts` · `typert.ts` · `capabilities.ts`，零依赖、只被依赖，且两边都 import）；往下四层，依赖方向单向向下：
+
+```
+src/host/       宿主运行时——装配与远程服务，依赖 core 与协议
+src/core/       纯逻辑，不依赖 Cordis：canvas/ 画布模型 · artifact/ 产物 · session/ 卡片会话
+src/client/     浏览器半：wire/ 通道 · canvas/ 画布面 · artifact/ 产物面 · ui/ 文案样式席位键位
+```
+
+**产物面怎么分**（`src/client/artifact/`）：`registry.ts` 是 kind → 预览器的**唯一分派点**，一行一个预览器，而一行只说一件事——它认领哪些 kind。**注册表里没有能力。** 一个预览器能做什么（能否就地改文本、有没有一个能对话的页面帧）由它的组件自己决定：外壳只提供**位置**（`chrome.tsx` 的三个插槽：头部右侧、头部下方那一条、遮罩层）与**两条登记通道**——`useEscapeLayer`（Esc 一次退一层：开着模式、开着确认条的那一方先收这一下）与 `useCloseGate`（× / 遮罩 / Esc 到最后都过它：手上有未保存草稿的那一方拦下来问一句）。所以 markdown 的「预览/编辑」单选组、页面帧的元素选择钮、未保存的确认条，都是各自预览器挂进插槽的，外壳的正文里没有一个 `if` 是关于某个形态的——**加一种形态 = 加一个文件（连它的按钮与状态一起写）+ 在注册表 import 一行**。
+
+一份事实只写一处：**「产物就是它自己的文字」是 kind 表上的事实**（`src/core/artifact/kind-registry.ts` 的 `isDirectTextKind`，与 `isHtmlKind` 同一层），因为两边都要问它——卡片控制带在弹窗**打开之前**问（手里只有一个 kind），文本预览器在弹窗里问（手里是整份 payload，还要看它读没读全）。从前这条是注册项上的一条谓词，而「谁有页面帧」是弹窗硬编码的 `viewerIdFor(kind) === 'deck'`，三处各说各话。
+
+两个**构建入口路径刻意不动**（`src/index.ts`、`src/client/index.tsx`），所以 `build.mjs`、`package.json` 的 `exports`、`dsh.plugin.json`、`cordis.patch.yml` 都不随目录调整而改动。
 
 **关键机制**
 
 - **打包**：`build.mjs` 用 esbuild 出两个 bundle。`external` 是**整个** `@deepseek-ai/*` 作用域——手写枚举曾把 `@deepseek-ai/schemastery` 打进宿主包，让插件多出一个 `Schema` 类身份；`zod` 则必须打进包。Client 半用 `window.__ModuleLoader__.load` 的 CJS 外壳包住，react 由宿主提供。
 - **持久化**：`defineDomain` + `domainTable`（zod 校验），布局为 `per-record`。**取材数据刻意不进文件系统**——文件系统不擅长表达跨文件依赖，而存储领域自带后端路由、记录版本、串行写链与 `domain/changed` 广播，插件不必自造元数据文件。
-- **存储键路径安全**：per-record 的键必须落在 `^[a-zA-Z0-9_-]+$`，而卡片 id 是**路径**（带点带杠）。凡拿 id 当键一律过 `src/core/ids.ts` 的 `encodeSegment`（定宽 `_xxxx` 转义，`_` 自身也转义，故 `__` 是无歧义分隔符）。不安全键会在写盘时被介质**整笔拒绝**。
+- **存储键路径安全**：per-record 的键必须落在 `^[a-zA-Z0-9_-]+$`，而卡片 id 是**路径**（带点带杠）。凡拿 id 当键一律过 `src/core/canvas/ids.ts` 的 `encodeSegment`（定宽 `_xxxx` 转义，`_` 自身也转义，故 `__` 是无歧义分隔符）。不安全键会在写盘时被介质**整笔拒绝**。
 - **卡片会话的两个来源**：卡片会话由本插件自建、不走控制器的组装路径，所以必须显式补两样东西——
   - `core/model-routing.ts`：补 `AgentOptions.provider/model`，并把已记录的会话选择装回（缺了会得到 `prompt variable "{{model}}" has no value`，整轮失败）
   - `core/agent-preset.ts`：在工厂 `setup(agentCtx)` 里 `mount` 部署 preset（缺了所有面向模型的写盘工具都是 `unknown tool`）
@@ -264,7 +281,7 @@ dock 上的快捷键弹层印的就是下表——键位表与按键分派共用
 | `pnpm run test` | vitest |
 | `pnpm run check` | typecheck → lint → test → build（提交前跑的就是它） |
 
-当前基线：**20 个测试文件、247 项测试全绿**。
+当前基线：**21 个测试文件、285 项测试全绿**。
 
 ---
 
@@ -275,55 +292,99 @@ dsh-canvas/
 ├── package.json            # 唯一 Harness 清单：dsh.bundle.patch + dsh.client
 ├── cordis.patch.yml        # 把 Host 插件行挂进 profile（可覆盖 Config 默认值）
 ├── dsh.plugin.json         # 注册表清单：id / engines / contributes
-├── build.mjs               # esbuild 双端打包
+├── build.mjs               # esbuild 双端打包（两个入口路径不随目录调整而变）
 ├── eslint.config.js
 ├── tsconfig.json           # typecheck：src
 ├── tsconfig.build.json     # 只产声明 → lib/types
 ├── tsconfig.tests.json
 ├── vitest.config.ts
 ├── docs/
-│   └── DeepSeek-Harness-Canvas-产品文档.md   # 唯一产品文档，版本号在头部
+│   ├── DeepSeek-Harness-Canvas-产品文档.md   # 功能、MVP、设计决策、修订记录
+│   └── DeepSeek-Harness-Canvas-技术文档.md   # 技术架构
 ├── src/
 │   ├── index.ts            # Host 入口：Config schema + apply
-│   ├── runtime.ts          # CanvasRuntime：画布 / 取材链 / 排布
-│   ├── card-runtime.ts     # CardRuntime：产物读写 / 注入 / 导出 / 发布
 │   ├── contract.ts         # 双端共享的严格 wire 契约（唯一真源）
-│   ├── typert.ts           # Host Typert manifest
 │   ├── types.ts            # 双端共享类型
 │   ├── domain.ts           # 画布持久化领域声明（defineDomain）
-│   ├── tools.ts            # 14 个 canvas_* 工具注册
-│   ├── prompt.ts           # 卡片会话的 prompt 注入段落
+│   ├── typert.ts           # Host Typert manifest
 │   ├── capabilities.ts     # 部署能力探测（可选席位按能力降级）
+│   ├── host/               # 宿主运行时：装配与两个 Remote 服务
+│   │   ├── canvas-runtime.ts   # CanvasRuntime：画布 / 取材链 / 排布
+│   │   ├── card-runtime.ts     # CardRuntime：产物读写 / 注入 / 导出 / 发布
+│   │   ├── tools.ts            # 14 个 canvas_* 工具注册
+│   │   └── prompt.ts           # 卡片会话的 prompt 注入段落
 │   ├── core/               # 纯逻辑层，不依赖 Cordis
-│   │   ├── ids.ts              # 存储键的定宽转义
-│   │   ├── kind-registry.ts    # 形态注册表
-│   │   ├── artifact-io.ts      # 文件读写的唯一出口（沙箱策略在此定夺）
-│   │   ├── source-store.ts     # 取材边存储
-│   │   ├── file-reference.ts   # 连线底层：宿主 @file 语法的逐字节复刻
-│   │   ├── session-manager.ts  # 卡片会话生命周期与归属
-│   │   ├── session-log.ts      # 读会话事件日志（冷会话照读）
-│   │   ├── model-routing.ts    # 卡片会话的模型来源
-│   │   ├── agent-preset.ts     # 卡片会话的工具来源
-│   │   ├── board.ts            # 排布策略
-│   │   └── workspace.ts        # 画布即工作区（登记与挂账）
+│   │   ├── canvas/             # 画布模型
+│   │   │   ├── ids.ts              # 存储键的定宽转义
+│   │   │   ├── board.ts            # 排布策略
+│   │   │   ├── source-store.ts     # 取材边存储
+│   │   │   └── workspace.ts        # 画布即工作区（登记与挂账）
+│   │   ├── artifact/           # 产物：认定 / 读写 / 页面 / 引用
+│   │   │   ├── kind-registry.ts    # 形态注册表
+│   │   │   ├── artifact-io.ts      # 文件读写的唯一出口（沙箱策略在此定夺）
+│   │   │   ├── webapp.ts           # 应用脚手架 + 预览里的链接闸门
+│   │   │   ├── preview-picker.ts   # 预览里的元素探针（注入页面的那段脚本 + 纯函数）
+│   │   │   └── file-reference.ts   # 连线底层：宿主 @file 语法的逐字节复刻
+│   │   └── session/            # 卡片会话：绑定 / 日志 / 模型 / 工具
+│   │       ├── session-manager.ts  # 卡片会话生命周期与归属
+│   │       ├── session-log.ts      # 读会话事件日志（冷会话照读）
+│   │       ├── model-routing.ts    # 卡片会话的模型来源
+│   │       └── agent-preset.ts     # 卡片会话的工具来源
 │   └── client/
 │       ├── index.tsx           # Client 入口：席位注册 + Remote mount
-│       ├── bridge.ts           # Remote 调用的类型化适配层
-│       ├── canvas-view.tsx     # 无限画布正文（指针 / 键盘 / 落笔建卡）
-│       ├── source-edges.tsx    # 取材线几何
-│       ├── card-tile.tsx       # 卡片（含流光层）
-│       ├── card-overlay.tsx    # 选中态控制带
-│       ├── artifact-view.tsx   # 按形态分派的查看器
-│       ├── canvas-nav.tsx      # 左栏画布包裹（Portal 挂载）
-│       ├── canvas-menu.tsx     # 画布行的操作菜单与删除确认（宿主原语）
-│       ├── row-actions.ts      # 那一行该给出哪几个动作（纯策略）
-│       ├── open-folder.ts      # 走宿主「在应用中打开」把目录交给文件管理器
-│       ├── material-notice.ts  # 取材提交后画布底部那句话（纯策略）
-│       ├── canvas-panels.tsx   # 主面板 / 侧栏席位
-│       ├── tool-view.tsx       # canvas_* 的实时工具卡片
-│       ├── shortcuts.ts        # 键位真源 + 说明表
-│       └── locales.ts · styles.ts
-└── tests/                  # 20 个 spec
+│       ├── wire/               # 通道层：与宿主通话的全部出口
+│       │   ├── bridge.ts           # Remote 调用的类型化适配层
+│       │   ├── remote.ts           # Client Remote 贡献 + 类型化 namespace
+│       │   ├── address.ts          # 读宿主的资源地址语法（不另发明一套）
+│       │   ├── model-memory.ts     # 按节点类型记住用户上次选的模型
+│       │   └── session-read.ts     # 从会话域推卡片的脸（订阅，不镜像）
+│       ├── canvas/             # 画布面
+│       │   ├── canvas-view.tsx     # 无限画布正文（指针 / 键盘 / 落笔建卡）
+│       │   ├── source-edges.tsx    # 取材线几何
+│       │   ├── card-tile.tsx       # 卡片（含流光层）
+│       │   ├── card-face.tsx       # 卡面描述（画布 tab 与形态 tab 共用）
+│       │   ├── card-overlay.tsx    # 选中态控制带
+│       │   ├── canvas-nav.tsx      # 左栏画布包裹（Portal 挂载）
+│       │   ├── canvas-menu.tsx     # 画布行的操作菜单与删除确认（宿主原语）
+│       │   ├── row-actions.ts      # 那一行该给出哪几个动作（纯策略）
+│       │   ├── open-folder.ts      # 走宿主「在应用中打开」把目录交给文件管理器
+│       │   ├── project-catalog.ts  # 活动画布清单（面板与左栏共用，不轮询）
+│       │   ├── canvas-panels.tsx   # 主面板 / 侧栏席位
+│       │   ├── canvas-tab.ts       # 右栏 tab 类型（工作台页 + 每形态一个认领）
+│       │   ├── folder-picker.tsx   # 新建画布时挑目录
+│       │   └── material-notice.ts  # 取材提交后画布底部那句话（纯策略）
+|       ├── artifact/           # 产物面
+│       │   ├── registry.ts         # 预览注册表：kind → 预览器（只剩这一件事）
+│       │   ├── artifact-view.tsx   # 全屏弹窗外壳（读产物 / 分派 / 骨架 / Esc 与关闭裁决）
+│       │   ├── chrome.tsx          # 交给预览器的壳：头部·条带·遮罩三个插槽 + 两条登记通道
+│       │   ├── chrome-stack.ts     # 「这一下谁收」的顺位（纯）
+│       │   ├── use-artifact-payload.ts  # 打开时读一次产物（读回来的 payload 整窗共享）
+│       │   ├── viewers/            # 每种形态一个子文件，注册项与组件同处
+│       │   │   ├── types.ts            # 公共契约：ViewerId / ViewerProps / 注册项
+│       │   │   ├── markdown.ts         # 渲染（纯） · markdown-viewer.tsx
+│       │   │   ├── media-viewer.tsx    # 图片与视频
+│       │   │   ├── deck-viewer.tsx     # 沙箱 iframe + 链接闸门 + 元素选择（自己那套）
+│       │   │   ├── delimited.ts        # 切行状态机（纯） · data-viewer.tsx
+│       │   │   └── text-viewer.tsx     # 兜底
+│       │   ├── editing/            # markdown / 纯文本的编辑面
+│       │   │   ├── use-text-editing.ts     # 状态机（hook）：草稿 / 自动保存 / 写被拒
+│       │   │   ├── editable-text.tsx       # 头部控件 + 条带 + 编辑框（两个文本预览器共用）
+│       │   │   ├── writable.ts            # 这份 payload 能不能整篇写回（纯）
+│       │   │   ├── mode.ts                 # 预览↔编辑的方向键（纯）
+│       │   │   └── autosave.ts             # 节律 / 退避 / 写被拒的形状（纯）
+│       │   ├── element-pick/       # 元素选择 F3.14：开关 · 选中圈 · 提示词框 · 交给会话
+│       │   ├── artifact-tab.tsx    # 形态 tab：认领地址后画出卡面
+│       │   └── tool-view.tsx       # canvas_* 的实时工具卡片
+│       └── ui/                 # 底座：文案 / 样式 / 席位 / 键位
+│           ├── locales.ts
+│           ├── styles.ts
+│           ├── seats.ts            # 借用别包的席位：运行时只要一个字符串键
+│           └── shortcuts.ts        # 键位真源 + 说明表（印出来的都按得动）
+└── tests/                  # 21 个 spec，镜像 src 的分层
+    ├── contract.spec.ts        # 协议基座（镜像 src/ 根）
+    ├── core/                   # core.spec.ts 跨三域，另有 canvas/ artifact/ session/
+    ├── host/                   # prompt · tools
+    └── client/                 # wire/ canvas/ artifact/ ui/
 ```
 
 ---

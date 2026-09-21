@@ -21,13 +21,13 @@ import type { ClientContext, ISessions, SessionId } from '@deepseek-ai/dsh-clien
 import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
-import { DSH_CANVAS_REMOTE, type CanvasFace, type CardFace } from './remote.ts'
-import { NS, en, zh } from './locales.ts'
-import { CanvasBridge } from './bridge.ts'
-import { adoptStyles } from './styles.ts'
-import { registerCanvasTabs } from './canvas-tab.ts'
-import { registerCanvasPanels } from './canvas-panels.tsx'
-import { registerToolViews } from './tool-view.tsx'
+import { DSH_CANVAS_REMOTE, type CanvasFace, type CardFace } from './wire/remote.ts'
+import { NS, en, zh } from './ui/locales.ts'
+import { CanvasBridge } from './wire/bridge.ts'
+import { adoptStyles } from './ui/styles.ts'
+import { registerCanvasTabs } from './canvas/canvas-tab.ts'
+import { registerCanvasPanels } from './canvas/canvas-panels.tsx'
+import { registerToolViews } from './artifact/tool-view.tsx'
 
 /** Required browser services: the Remote gateway, copy, sessions, layout, and both sidebar halves. */
 export const inject = ['slots', 'layout', 'remote', 'locale', 'sessions', 'sidebarRight', 'sidebarRightTabs', 'uiWorkspace']
