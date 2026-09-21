@@ -22,13 +22,18 @@
  * 1. **探针默认是死的**。它注入每一份 HTML 预览，但不接到父窗口的 `enable`
  *    之前一个像素都不画、一条消息都不发——预览里的页面是用户在看的页面，探针
  *    不许改变它的样子。
- * 2. **开了模式，页面就是只读的**。参照物是浏览器调试工具的元素选择：指向哪儿圈哪儿，
- *    但页面一动不动。这件事要**逐层兑现**，缺一层就漏——一层盖满视口的透明层接住鼠标
- *    （页面元素从此收不到悬停、按下与点击，元素自己声明的 `cursor` 与 `title` 也就无从
- *    生效），捕获期把指针事件族吞掉（页面挂在 `document` / `window` 上的**委托**处理器
- *    否则仍会收到从那一层冒上来的事件），arming 时把页面原有的焦点请出去、之后也不让新
- *    焦点落进来。**滚轮是唯一的例外**：它得留给页面，否则下半页的元素选不到——代价是
- *    页面自己的内层滚动容器在选择模式里滚不动（整块被盖住），见技术文档那一节的取舍。
+ * 2. **开了模式，页面就是只读的**；**一笔选定、框开着的时候，页面连动都不动**。参照物
+ *    是浏览器调试工具的元素选择：指向哪儿圈哪儿，但页面一动不动。这件事要**逐层兑现**，
+ *    缺一层就漏——一层盖满视口的透明层接住鼠标（页面元素从此收不到悬停、按下与点击，
+ *    元素自己声明的 `cursor` 与 `title` 也就无从生效），捕获期把指针族、鼠标族连同
+ *    `mousemove` 一起吞掉（页面挂在 `document` / `window` 上的**委托**处理器否则仍会收到
+ *    从那一层冒上来的事件），进模式时把页面原有的焦点请出去、之后也不让新焦点落进来。
+ *
+ *    这三件事按**三个态**分（{@link PICK_HOLD}）：正在挑（`aim`）时滚轮留给页面——不放行
+ *    则下半页的元素根本够不着；而一笔已定、框开着（`hold`）时页面**连滚都不许滚**，滚轮
+ *    拦下、滚动位置也钉住（拖滚动条与键盘滚动都没有事件可拦，只有位置能作准）。十字光标
+ *    只属于 `aim`：框开了之后这一笔已经落定，光标交还平常的样子，页面也不该再因为鼠标
+ *    而动一下。
  * 3. **回话当不可信内容读**。{@link readsPick} 逐字段校验并**重建**对象，长度
  *    一律收敛到上限；页面自己伪造一条「选中了某元素」也不能把任意字符串塞进
  *    用户的提示词里。
@@ -59,6 +64,15 @@ export const PICK_ENABLE = 'enable'
 /** 父窗口 → 帧：收起探针。 */
 export const PICK_DISABLE = 'disable'
 
+/**
+ * 父窗口 → 帧：这一笔已经选定，框开着 —— 页面继续只读，但**不再跟随、也不许再动**。
+ *
+ * 三态而不是两态，因为「正在挑」与「挑完了、框还开着」是两件事：前者页面得能滚（不然
+ * 下半页的元素根本够不着），后者是一张正在被看的图 —— 用户此刻在框里写要求，页面在底下
+ * 挪一下，圈着的位置就不再是他在说的那个元素了。
+ */
+export const PICK_HOLD = 'hold'
+
 /** 父窗口 → 帧那条报文（以及它自己）的消息种类。 */
 export const PICK_ORDER_KIND = 'picker'
 
@@ -87,6 +101,33 @@ export interface PickRect {
   readonly top: number
   readonly width: number
   readonly height: number
+}
+
+/**
+ * Whether the frame has moved since it was measured.
+ *
+ * The held outline and the prompt box are drawn against the frame's own box, and
+ * that box is **a live quantity, not a snapshot**: anything that lands above the
+ * frame in the viewer's column — a notice of ours, a truncation warning, the
+ * window being resized — pushes or shrinks it, while the overlay keeps the
+ * coordinates it was born with. So the viewer re-measures and asks this question
+ * before spending a render.
+ *
+ * The threshold is half a pixel rather than exact equality: sub-pixel jitter from
+ * font metrics and zoom would otherwise re-anchor on every layout pass.
+ *
+ * @param before - the box measured earlier.
+ * @param after - the box measured now.
+ * @returns `true` when any edge moved further than half a pixel.
+ */
+export function frameMoved(before: PickRect, after: PickRect): boolean {
+  const moved = (a: number, b: number): boolean => Math.abs(a - b) > 0.5
+  return (
+    moved(before.left, after.left) ||
+    moved(before.top, after.top) ||
+    moved(before.width, after.width) ||
+    moved(before.height, after.height)
+  )
 }
 
 /** 帧对「鼠标底下是谁」的完整回答。 */
@@ -119,6 +160,21 @@ export interface PickOrder {
  */
 export function pickOrder(action: string): PickOrder {
   return { channel: PREVIEW_CHANNEL, kind: PICK_ORDER_KIND, action }
+}
+
+/**
+ * 这一帧现在该听哪一条命令。
+ *
+ * 纯函数并且单独摆出来，是因为三个态的名字只在这一处出现：**框开着压过正在挑**（框开着
+ * 的时候页面是冻的），两者都没有时探针是死的。帧那边把这条报文当**幂等的目标态**读，
+ * 所以调用方每次变化都重发一遍同一句话是安全的。
+ *
+ * @param armed - 工具按钮按下了（正在挑元素）。
+ * @param holding - 手里攥着一笔（提示词框开着）。
+ */
+export function pickMode(armed: boolean, holding: boolean): string {
+  if (holding) return PICK_HOLD
+  return armed ? PICK_ENABLE : PICK_DISABLE
 }
 
 /** Cap a string at a character budget, without touching the tail. */
@@ -325,16 +381,18 @@ import { PREVIEW_CHANNEL } from './webapp.ts'
  * than by reading (`tests/preview-picker.spec.ts` runs this string with those
  * three handed in).
  *
- * Behaviour, in one breath: dormant until the parent says `enable`; then it
+ * Behaviour, in one breath: dormant until the parent names a state; then it
  * raises a transparent, pointer-catching veil over the whole viewport — the page
  * goes read-only (no hover, no element cursor, no title tooltip, no selection,
  * no focus, no pointer event of any kind reaches it) — tracks the element under
  * the cursor through open shadow roots by hit-testing *past* that veil, draws an
  * overlay box and a label chip of its own, swallows the presses and the click so
  * the page does not act on them (a click here selects, it does not activate),
- * reports the element to the parent, and disarms itself — the veil and the
- * overlay then go away, because the viewer now draws the held outline on its own
- * side of the boundary.
+ * reports the element to the parent, and **holds**: the veil stays up while the
+ * viewer's own outline and prompt box are open, so the page cannot move under a
+ * selection the user is still describing. The overlay goes away with the aim
+ * state — from `hold` on, the outline is drawn by the viewer, on its own side of
+ * the boundary, which is the only way it and the prompt box always agree.
  */
 export const PREVIEW_PICKER_SOURCE = `(function () {
   var CHANNEL = '${PREVIEW_CHANNEL}'
@@ -343,11 +401,21 @@ export const PREVIEW_PICKER_SOURCE = `(function () {
   var PICK = '${PICK_KIND}'
   var ESCAPE = '${PICK_ESCAPE_KIND}'
   var MARK = '${PREVIEW_PICKER_MARK}'
-  var armed = false
+  // 三个态：死的、正在挑（页面能滚）、一笔已定框开着（页面连滚都不许滚）。
+  var OFF = 'off'
+  var AIM = 'aim'
+  var HOLD = '${PICK_HOLD}'
+  var mode = OFF
   var hovered = null
   var veil = null
   var box = null
   var chip = null
+  // 「框开着」那一刻的滚动位置：拖滚动条与键盘滚动都拦不到事件，只有把它钉回原处。
+  var pinned = null
+
+  function live() {
+    return mode !== OFF
+  }
 
   function post(data) {
     try { parent.postMessage(data, '*') } catch (error) {}
@@ -529,12 +597,27 @@ export const PREVIEW_PICKER_SOURCE = `(function () {
     if (active.blur) active.blur()
   }
 
-  function setArmed(next) {
-    if (next === armed) return
-    armed = next
-    if (!armed) {
+  function pinScroll() {
+    pinned = { x: window.pageXOffset || 0, y: window.pageYOffset || 0 }
+  }
+
+  // 位置钉住：滚轮那条下面拦得住，拖滚动条与键盘滚动没有事件可拦 —— 只有位置能作准。
+  // 钉的是**进入这个态那一刻**的位置，用户正是照着那一刻的画面选中的元素。
+  function holdScroll() {
+    if (mode !== HOLD || pinned === null) return
+    var x = window.pageXOffset || 0
+    var y = window.pageYOffset || 0
+    if (x === pinned.x && y === pinned.y) return
+    window.scrollTo(pinned.x, pinned.y)
+  }
+
+  function setMode(next) {
+    if (next === mode) return
+    mode = next
+    hovered = null
+    pinned = null
+    if (!live()) {
       hide()
-      hovered = null
       return
     }
     ensureNodes()
@@ -543,31 +626,38 @@ export const PREVIEW_PICKER_SOURCE = `(function () {
     box.style.display = 'none'
     chip.style.display = 'none'
     veil.style.display = 'block'
+    // 十字只说「现在可以挑」：一笔选定之后这一笔已经落定，光标交还平常的样子。
+    veil.style.cursor = mode === AIM ? 'crosshair' : 'default'
     // 开模式之前点过的那个输入框还握着焦点，当场请出去。
     dropFocus()
+    if (mode === HOLD) pinScroll()
   }
 
   window.addEventListener('message', function (event) {
     if (event.source !== window.parent) return
     var data = event.data
     if (!data || data.channel !== CHANNEL || data.kind !== ORDER) return
-    setArmed(data.action === 'enable')
+    if (data.action === '${PICK_HOLD}') setMode(HOLD)
+    else setMode(data.action === '${PICK_ENABLE}' ? AIM : OFF)
   }, false)
 
   window.addEventListener('mousemove', function (event) {
-    if (!armed) return
+    if (!live()) return
+    // 跟随只在 aim 里；但**吞下去**是三个态都要做的事 —— 挂在 document 上的委托 mousemove
+    // 否则照样会收到从只读层冒上来的这一发。
     event.stopPropagation()
+    if (mode !== AIM) return
     track(event.clientX, event.clientY)
   }, true)
 
   function swallow(event) {
-    if (!armed) return
+    if (!live()) return
     event.preventDefault()
     event.stopPropagation()
   }
 
   function swallowOnly(event) {
-    if (armed) event.stopPropagation()
+    if (live()) event.stopPropagation()
   }
 
   // 只读要**两层**才兑现，缺一层就漏：只读层挡住的只是页面元素（悬停、光标、点击都到不了
@@ -576,7 +666,7 @@ export const PREVIEW_PICKER_SOURCE = `(function () {
   // pointerdown 调 preventDefault 会连带压掉后续的兼容鼠标事件，而我们的选择正靠 click）；
   // 鼠标那一族挡下并且吞掉默认动作（焦点、选区、拖放、右键菜单都从这里断）。表里没有 click
   // （那是选择）也没有 mousemove（那是跟随），两者各有自己的监听；**更没有 wheel** ——
-  // 滚动是「看」，页面还得能滚。
+  // 滚轮的账要分两个态算，见下面那一条。
   var BLOCK = [
     'pointermove', 'pointerdown', 'pointerup', 'pointerover', 'pointerout',
     'pointerenter', 'pointerleave', 'pointercancel'
@@ -592,30 +682,44 @@ export const PREVIEW_PICKER_SOURCE = `(function () {
     window.addEventListener(DEAD[dead], swallow, true)
   }
 
+  // 滚轮**分两档**：正在挑的时候留给页面（不放行则下半页的元素根本够不着 —— 代价是页面
+  // 自己的内层滚动容器在这期间滚不动，整块被只读层盖住）；而一笔选定、框开着的时候，页面
+  // 是被看的那张图，一下都不许动。这一条必须显式写 passive:false —— 浏览器对 window 上的
+  // wheel 监听默认是 passive 的，不写就等于 preventDefault 空转、页面照样滚。
+  window.addEventListener('wheel', function (event) {
+    if (mode !== HOLD) return
+    event.preventDefault()
+    event.stopPropagation()
+  }, { passive: false })
+  window.addEventListener('scroll', holdScroll, false)
+
   // 焦点也别想落进来：Tab 键、页面自己的 focus() 都当场请出去。这个监听常驻，模式关着的时候
   // 它一个指头都不动。
   document.addEventListener('focusin', function (event) {
-    if (!armed) return
+    if (!live()) return
     var node = event.target
     if (node && node.blur) node.blur()
   }, true)
 
   window.addEventListener('click', function (event) {
-    if (!armed) return
+    if (!live()) return
     event.preventDefault()
     event.stopPropagation()
+    // 框开着的那一笔已经定了：这一击既不到页面上，也不再改选择。
+    if (mode !== AIM) return
     var node = hovered
     if (!node) node = elementAt(event.clientX, event.clientY)
     if (!node) return
-    setArmed(false)
     post({ channel: CHANNEL, kind: PICK, target: describe(node) })
+    // 自己先进 hold：父窗口那边要等这一发回话才把框摆出来，这中间页面不该闪一下「活的」。
+    setMode(HOLD)
   }, true)
 
   window.addEventListener('keydown', function (event) {
-    if (!armed || event.key !== 'Escape') return
+    if (!live() || event.key !== 'Escape') return
     event.preventDefault()
     event.stopPropagation()
-    setArmed(false)
+    setMode(OFF)
     post({ channel: CHANNEL, kind: ESCAPE })
   }, true)
 })()`

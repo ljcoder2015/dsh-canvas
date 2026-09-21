@@ -153,7 +153,8 @@ export function ArtifactModal(props: {
               ×
             </button>
           </div>
-          {/* 条带插槽：回话、写失败、放弃确认——都只在某些形态下存在。 */}
+          {/* 条带插槽：写失败、放弃确认——都只在某些形态下存在。（元素选择的回话不走这里：
+              它浮在帧上，因为一出现就要给一个已经画好的圈当邻居。） */}
           <div className="dsh-canvas-slot" ref={shell.bannerRef} />
           {body}
         </div>

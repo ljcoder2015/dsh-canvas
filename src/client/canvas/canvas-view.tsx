@@ -1406,6 +1406,9 @@ export function CanvasBoard(props: CanvasBoardProps) {
 
         {viewing !== undefined && projectId !== '' ? (
           <ArtifactModal
+            // 换卡即换一棵树：弹窗里那些状态（元素选择手里攥着的那一笔、编辑面的草稿）都
+            // 是**这张卡的**，不能随着一次重新渲染漂到另一张卡上。
+            key={`${projectId}/${viewing.cardId}`}
             projectId={projectId}
             cardId={viewing.cardId}
             bridge={bridge}

@@ -284,18 +284,29 @@ body[data-ds-dark-theme] .dsh-canvas-root{
    弹窗这层由这里画（它才拿得到画布主题）。两层的颜色同源——都是 breeze。 */
 .dsh-canvas-picktool[data-on=true]{background:var(--dsh-breeze);color:var(--dsh-card)}
 .dsh-canvas-picktool[data-on=true]:hover{background:var(--dsh-breeze);color:var(--dsh-card);filter:brightness(1.06)}
-/* 「正在选元素」这条与链接说明同款，但带一道左侧实色：它是**一个还开着的模式**，
-   不是在报一件事——不区分的话，用户会以为刚才那一下出了什么毛病。
-   它是**浮在帧上的**（absolute + 不接指针）：这条提示的生命周期以「一次选择」为界，
-   回话一到就随模式一起消失；排在流里等于在用户单击的那一刻把帧顶上去一整条，而圈的
-   位置在那之前就量好了。提示条不该挪动页面。 */
-.dsh-canvas-frame-note.is-pick{position:absolute;left:0;right:0;top:0;z-index:1;pointer-events:none;
-  border-left:3px solid var(--dsh-breeze);padding-left:13px}
-.dsh-canvas-viewer-picked{flex:none;display:flex;align-items:center;gap:8px;padding:8px 16px;
-  border-bottom:1px solid var(--dsh-hairline);font:12px/18px var(--dsh-font);color:var(--dsh-breeze)}
+/* 元素选择那两条提示（「正在选元素」与它的回话）都**浮在帧上、不占排版位**，共用这一层。
+   不占位是判据，不是省地方：圈与提示词框拿帧的位置当锚，而锚是这一笔出生那一刻量好的
+   ——提示条只要排进流里，出现或消失的那一瞬就会把帧顶走一整条，圈与框整个错开（发送后
+   回话冒出来、选中区偏掉，就是这个）。层本身不接指针；里面要给按钮的（回话的 ×）自己
+   开回来。左侧那道实色与链接说明区分：这两条说的是**我们**正在做的这件事，链接那条说的
+   是页面自己的事。 */
+.dsh-canvas-frame-notestack{position:absolute;left:0;right:0;top:0;z-index:1;pointer-events:none;
+  display:flex;flex-direction:column}
+.dsh-canvas-frame-note.is-pick{border-left:3px solid var(--dsh-breeze);padding-left:13px}
+/* 元素选择的回话：发出去是一件事、产物真的变了是另一件事，两句话都说出来。它带一个能点的
+   ×，所以这一条把指针开回来——占住的只是帧顶上这一条，与它从前排在流里时占的那一条同高。 */
+.dsh-canvas-viewer-picked{pointer-events:auto;flex:none;display:flex;align-items:center;gap:8px;
+  padding:8px 16px 8px 13px;border-bottom:1px solid var(--dsh-hairline);
+  border-left:3px solid var(--dsh-breeze);background:var(--dsh-slot);
+  font:12px/18px var(--dsh-font);color:var(--dsh-breeze)}
 /* 选中的那一圈：探针收起自己的高亮之后由这里一直画着。fixed 与帧的视口坐标同源，
    pointer-events:none 保证它永远不抢页面的鼠标。标贴用 --dsh-card 当字色——亮色下是
-   白字压在 breeze 上、暗色下是深字压在浅蓝上，两套都读得清。 */
+   白字压在 breeze 上、暗色下是深字压在浅蓝上，两套都读得清。
+
+   改动跑起来时圈里会多一层 .dsh-canvas-shimmer（就是卡片上那道流光，连同它的令牌与
+   keyframes 一起复用，见上面 is-working 那一段）：**动作只有一套语义，光在动 = 正在产出**，
+   这里说的正是页面里那一段在改。它在圈内裁切（那一层自己 overflow:hidden），所以光带扫的
+   是**选中的那个区域**，不会溢出到页面别处。 */
 .dsh-canvas-pickhold{position:fixed;z-index:1;box-sizing:border-box;pointer-events:none;
   border:1px solid var(--dsh-breeze);border-radius:2px;box-shadow:0 0 0 3px var(--dsh-sheen)}
 .dsh-canvas-pickhold-tag{position:absolute;left:-1px;top:-19px;max-width:240px;overflow:hidden;

@@ -145,6 +145,9 @@ export const zh = {
   'canvas.pick.send': '发送修改',
   'canvas.pick.sending': '发送中…',
   'canvas.pick.sent': '已把这条要求发给这张卡的会话。产物改好后这里会自动刷新——在那之前，预览还是旧的那一份。',
+  'canvas.pick.waiting': '等产物…',
+  'canvas.pick.waitingHint': '改动正在跑：这一圈上的光扫到停下就是改完了，框会自己收起。',
+  'canvas.pick.repick': '先关掉提示词框，再重新选元素',
   'canvas.pick.updated': '产物已更新。',
   'canvas.pick.failed': '发送失败：{message}',
 
@@ -343,6 +346,9 @@ export const en = {
   'canvas.pick.send': 'Send',
   'canvas.pick.sending': 'Sending…',
   'canvas.pick.sent': 'Handed this request to the card\'s conversation. The preview reloads itself once the artifact is rewritten — until then it is still the old one.',
+  'canvas.pick.waiting': 'Waiting…',
+  'canvas.pick.waitingHint': 'The change is running: the light sweeping that outline stops when it lands, and the box closes itself.',
+  'canvas.pick.repick': 'Close the prompt box before picking another element',
   'canvas.pick.updated': 'The artifact is updated.',
   'canvas.pick.failed': 'Could not send: {message}',
 

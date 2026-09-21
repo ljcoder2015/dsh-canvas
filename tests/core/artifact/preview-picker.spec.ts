@@ -19,6 +19,7 @@ import {
   PICK_DISABLE,
   PICK_ENABLE,
   PICK_ESCAPE_KIND,
+  PICK_HOLD,
   PICK_KIND,
   PICK_ORDER_KIND,
   PICK_SNIPPET_CAP,
@@ -27,8 +28,10 @@ import {
   PREVIEW_PICKER_SOURCE,
   buildEditPrompt,
   fenceFor,
+  frameMoved,
   injectPreviewPicker,
   isPickEscape,
+  pickMode,
   pickOrder,
   placePickBox,
   readsPick,
@@ -177,6 +180,10 @@ interface Harness {
   overlay(role: string): FakeElement
   /** Whether it created that node at all. */
   hasOverlay(role: string): boolean
+  /** 页面自己滚到哪儿（相当于用户拖滚动条、按键盘：探针收不到事件，只看得到位置）。 */
+  scrollPageTo(x: number, y: number): void
+  /** 探针要求页面回到哪里（`window.scrollTo` 的实参，按调用次序）。 */
+  readonly pullBacks: number[][]
 }
 
 /** 把一发事件交给某个监听表，并报出探针对它做了什么。 */
@@ -215,6 +222,10 @@ function runProbe(options: { legacy?: boolean } = {}): Harness {
   const posted: unknown[] = []
   let active: FakeElement | null = null
   let probe: ((x: number, y: number) => FakeElement | FakeElement[] | null) | null = null
+  /** 页面自己的滚动位置，以及探针要求回滚到哪儿的记录。 */
+  let scrollX = 0
+  let scrollY = 0
+  const pullBacks: number[][] = []
 
   /** 命中测试的答案，一律按「自上而下一串」给（浏览器就是这么答的）。 */
   const hits = (x: number, y: number): FakeElement[] => {
@@ -259,6 +270,20 @@ function runProbe(options: { legacy?: boolean } = {}): Harness {
     addEventListener: (type: string, handler: (event: Record<string, unknown>) => void): void => {
       listeners.set(type, handler)
     },
+    // 页面自己的滚动位置：探针读这两个（`pageXOffset` / `pageYOffset`），要把它钉回原处时
+    // 走 `scrollTo`。真浏览器里拖滚动条与按键盘滚动**不给页面任何可拦的事件**，所以这里
+    // 模拟「用户滚了」也是直接改位置。
+    get pageXOffset(): number {
+      return scrollX
+    },
+    get pageYOffset(): number {
+      return scrollY
+    },
+    scrollTo: (x: number, y: number): void => {
+      scrollX = x
+      scrollY = y
+      pullBacks.push([x, y])
+    },
   }
   // The probe is a plain script: these three are its entire outside world.
   const install = new Function('window', 'document', 'parent', PREVIEW_PICKER_SOURCE)
@@ -296,6 +321,11 @@ function runProbe(options: { legacy?: boolean } = {}): Harness {
     hasOverlay(role: string): boolean {
       return find(role) !== undefined
     },
+    scrollPageTo(x: number, y: number): void {
+      scrollX = x
+      scrollY = y
+    },
+    pullBacks,
   }
 }
 
@@ -400,7 +430,7 @@ describe('元素探针：使能后的跟随与回话', () => {
     ])
   })
 
-  it('一击即收：回话之后不再跟随，也不再吞掉别的东西', () => {
+  it('一击之后不再跟随，但页面也没交还出去（这一笔还没了结）', () => {
     const probe = runProbe()
     const { hero } = fixture()
     probe.hitTest(() => hero)
@@ -408,12 +438,17 @@ describe('元素探针：使能后的跟随与回话', () => {
     probe.fire('mousemove', { clientX: 50, clientY: 70 })
     probe.fire('click', { clientX: 50, clientY: 70 })
 
+    // 跟随用的高亮框收起：从这一刻起，圈由父窗口画（它才和提示词框同一套坐标）。
     expect(probe.overlay('box').style.display).toBe('none')
-    // 只读层一并收回：一击之后页面重新归它自己。
-    expect(probe.overlay('veil').style.display).toBe('none')
+    // 只读层**留着**：一笔选定、框开着，页面是被看的那张图，此刻还没交还。
+    expect(probe.overlay('veil').style.display).toBe('block')
+    // 十字只说「现在可以挑」，这一笔已经落定，光标交还平常的样子。
+    expect(probe.overlay('veil').style.cursor).toBe('default')
+
+    // 再点也不产生第二笔，而这一击照样到不了页面上。
     probe.hitTest(() => null)
     const after = probe.fire('click', { clientX: 50, clientY: 70 })
-    expect(after.prevented).toBe(false)
+    expect(after.prevented).toBe(true)
     expect(probe.posted).toHaveLength(1)
   })
 
@@ -533,8 +568,8 @@ describe('元素探针：开了模式，页面就是只读的', () => {
     // 选择与跟随各有自己的监听，不在这张表里。
     expect(probe.listens('click')).toBe(true)
     expect(probe.listens('mousemove')).toBe(true)
-    // 滚轮不在拦下的名单里：滚动是「看」，页面还得能滚。
-    expect(probe.listens('wheel')).toBe(false)
+    // 滚轮也有自己的监听，但拦不拦要看在哪一态（下面那一组逐态验）。
+    expect(probe.listens('wheel')).toBe(true)
   })
 
   it('焦点进不了页面：开模式时请走已有的，之后也不让新的落进来', () => {
@@ -561,6 +596,99 @@ describe('元素探针：开了模式，页面就是只读的', () => {
     const probe = runProbe()
     arm(probe)
     expect(probe.overlays.map((node) => node.getAttribute(PREVIEW_PICKER_MARK))).toEqual(['veil', 'box', 'label'])
+  })
+})
+
+describe('pickMode：三个态的名字只在一处出现', () => {
+  it('框开着压过正在挑，两者都没有时探针是死的', () => {
+    expect(pickMode(true, true)).toBe(PICK_HOLD)
+    expect(pickMode(false, true)).toBe(PICK_HOLD)
+    expect(pickMode(true, false)).toBe(PICK_ENABLE)
+    expect(pickMode(false, false)).toBe(PICK_DISABLE)
+  })
+})
+
+describe('元素探针：一笔选定、框还开着，页面连动都不动', () => {
+  /**
+   * 使能 → 单击选中一个元素。
+   *
+   * 探针在回话之后**自己**就进了 hold，不等父窗口那一发：父窗口收到回话才把框摆出来，
+   * 这中间页面不该闪一下「活的」。
+   */
+  function pickOn(node: FakeElement): Harness {
+    const probe = runProbe()
+    probe.hitTest(() => node)
+    arm(probe)
+    probe.fire('mousemove', { clientX: 50, clientY: 70 })
+    probe.fire('click', { clientX: 50, clientY: 70 })
+    return probe
+  }
+
+  it('只读层留着、十字换回平常的样子、跟随停住（但鼠标照样吞掉）', () => {
+    const { hero } = fixture()
+    const probe = pickOn(hero)
+    expect(probe.overlay('veil').style.display).toBe('block')
+    expect(probe.overlay('veil').style.cursor).toBe('default')
+
+    // 再划过去：高亮不再跟着走 —— 但这一发仍要吞掉，否则挂在 document 上的**委托**
+    // mousemove 照样收得到它。
+    const moved = probe.fire('mousemove', { clientX: 300, clientY: 400 })
+    expect(moved.stopped).toBe(true)
+    expect(probe.overlay('box').style.display).toBe('none')
+  })
+
+  it('滚轮在这一态被拦下，另外两态各自照旧', () => {
+    const { hero } = fixture()
+    const probe = pickOn(hero)
+    const held = probe.fire('wheel', { deltaY: 300 })
+    expect([held.prevented, held.stopped]).toEqual([true, true])
+
+    // 回到「正在挑」：滚轮留给页面 —— 不放行则下半页的元素根本够不着。
+    probe.send({ channel: PREVIEW_CHANNEL, kind: PICK_ORDER_KIND, action: PICK_ENABLE })
+    expect(probe.fire('wheel', { deltaY: 300 }).prevented).toBe(false)
+
+    // 关掉之后更不该管。
+    probe.send({ channel: PREVIEW_CHANNEL, kind: PICK_ORDER_KIND, action: PICK_DISABLE })
+    expect(probe.fire('wheel', { deltaY: 300 }).prevented).toBe(false)
+  })
+
+  it('拖滚动条与键盘滚动也动不了：位置钉回选中那一刻', () => {
+    const { hero } = fixture()
+    const probe = runProbe()
+    probe.hitTest(() => hero)
+    arm(probe)
+    // 用户先滚到能看见元素的地方，再点它。
+    probe.scrollPageTo(0, 120)
+    probe.fire('click', { clientX: 50, clientY: 70 })
+    expect(probe.pullBacks).toEqual([])
+
+    // 拖滚动条 / 按 PageDown：探针收不到任何可拦的事件，只有位置能作准。
+    probe.scrollPageTo(0, 500)
+    probe.fire('scroll', {})
+    expect(probe.pullBacks).toEqual([[0, 120]])
+
+    // 回到「正在挑」之后不再钉：用户得能滚着找下一个元素。
+    probe.send({ channel: PREVIEW_CHANNEL, kind: PICK_ORDER_KIND, action: PICK_ENABLE })
+    probe.scrollPageTo(0, 640)
+    probe.fire('scroll', {})
+    expect(probe.pullBacks).toEqual([[0, 120]])
+    expect(probe.overlay('veil').style.cursor).toBe('crosshair')
+  })
+
+  it('父窗口直接发 hold 也认（重开的预览会这么补一句），关掉才收回只读层', () => {
+    const probe = runProbe()
+    const { hero } = fixture()
+    probe.hitTest(() => hero)
+    arm(probe)
+    // 一帧页面刚重载过：探针是死的，父窗口把「这一笔还开着」补给它。
+    probe.send({ channel: PREVIEW_CHANNEL, kind: PICK_ORDER_KIND, action: PICK_HOLD })
+    expect(probe.overlay('veil').style.display).toBe('block')
+    expect(probe.overlay('veil').style.cursor).toBe('default')
+    expect(probe.fire('wheel', { deltaY: 10 }).prevented).toBe(true)
+
+    probe.send({ channel: PREVIEW_CHANNEL, kind: PICK_ORDER_KIND, action: PICK_DISABLE })
+    expect(probe.overlay('veil').style.display).toBe('none')
+    expect(probe.fire('wheel', { deltaY: 10 }).prevented).toBe(false)
   })
 })
 
@@ -775,5 +903,34 @@ describe('提示词框落在哪：纯几何', () => {
     const at = placePickBox({ target: { left: 10.4, top: 20.6, width: 30.2, height: 40.8 }, frame, area, size })
     expect(Number.isInteger(at.left)).toBe(true)
     expect(Number.isInteger(at.top)).toBe(true)
+  })
+})
+
+describe('帧挪窝了没有：这一笔的锚是活的量，不是快照', () => {
+  const at = { left: 280, top: 51, width: 1320, height: 949 }
+
+  it('一模一样时不算挪', () => {
+    expect(frameMoved(at, { ...at })).toBe(false)
+  })
+
+  it('亚像素抖动不算挪（否则每次排版都白重锚一次）', () => {
+    expect(frameMoved(at, { left: at.left + 0.4, top: at.top - 0.4, width: at.width, height: at.height })).toBe(false)
+  })
+
+  it('整整半像素也还不算（边界是「大于半像素」）', () => {
+    expect(frameMoved(at, { ...at, top: at.top + 0.5 })).toBe(false)
+  })
+
+  it('被上方的东西顶下去一条：算挪', () => {
+    // 实测的形状：回话冒出来之后帧 top 51 → 94、height 949 → 906。
+    expect(frameMoved(at, { ...at, top: 94, height: 906 })).toBe(true)
+  })
+
+  it('只被压扁、位置没动：也算挪（高亮与框都是按帧画的）', () => {
+    expect(frameMoved(at, { ...at, height: at.height - 43 })).toBe(true)
+  })
+
+  it('只往左挪一像素也算', () => {
+    expect(frameMoved(at, { ...at, left: at.left - 1 })).toBe(true)
   })
 })

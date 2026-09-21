@@ -25,22 +25,27 @@
  * The same channel carries the element picker (F3.14), and it is checked the
  * same way — but the two directions are not symmetrical. The **host injects**
  * the probe into the page's text (`injectPreviewPicker`), and the viewer only
- * ever asks the frame to arm or disarm it; the page cannot arm itself, and a
- * message from any window other than this frame's is dropped. What comes back
- * is read through `readsPick`, which rebuilds the payload from validated fields
- * rather than trusting the page's object.
+ * ever names the state it wants the frame to be in (aiming / holding a pick /
+ * dormant); the page cannot arm itself, and a message from any window other
+ * than this frame's is dropped. What comes back is read through `readsPick`,
+ * which rebuilds the payload from validated fields rather than trusting the
+ * page's object.
  *
  * 元素选择的另外半边（工具按钮、选中圈、提示词框、交给会话）也由**这个文件**叫起来
  * （`useElementPick`），因为「有没有一个能对话的页面帧」这个问题只有拿着 iframe 的一方
- * 答得出：帧就是它画的。按钮挂进头部插槽、回话挂进条带插槽、圈与框挂进遮罩层插槽——
- * 弹窗外壳不认识它们，也不需要认识。
+ * 答得出：帧就是它画的。按钮挂进头部插槽、圈与框挂进遮罩层插槽——弹窗外壳不认识它们，
+ * 也不需要认识。
+ *
+ * 而**回话不走任何插槽**：它浮在帧区自己那一层（`.dsh-canvas-frame-notestack`），因为
+ * 它一出现就在给一个已经画好的圈当邻居——排进流里（曾经挂在条带插槽）会把帧顶走一整条，
+ * 圈与框立刻从元素上错开。同理，帧的矩形在这一笔活着的时候要**持续重报**（`onMoved`），
+ * 它是锚，而锚不能是快照。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isHtmlKind } from '../../../core/artifact/kind-registry.ts'
 import {
-  PICK_DISABLE,
-  PICK_ENABLE,
   isPickEscape,
+  pickMode,
   pickOrder,
   readsPick,
 } from '../../../core/artifact/preview-picker.ts'
@@ -58,6 +63,8 @@ export function DeckViewer({ view, t }: ViewerProps) {
   const [blocked, setBlocked] = useState('')
   const channel = pick.channel
   const armed = channel.armed
+  /** 手里攥着一笔（框开着）：这一笔决定帧在哪个态——只读并且**冻住**。 */
+  const holding = pick.holding
   /**
    * The latest pick channel, held rather than depended on.
    *
@@ -69,6 +76,43 @@ export function DeckViewer({ view, t }: ViewerProps) {
   useEffect(() => {
     channelRef.current = channel
   })
+  /** 帧此刻在父页面里的矩形，报给握着这一笔的那一方当锚（见下面那两处注释）。 */
+  const reportFrame = useCallback((): void => {
+    const node = frame.current
+    if (node === null) return
+    const box = node.getBoundingClientRect()
+    channelRef.current.onMoved({ left: box.left, top: box.top, width: box.width, height: box.height })
+  }, [])
+  /**
+   * 手里攥着一笔的时候，帧的矩形是**活的量，不是快照**。
+   *
+   * 圈与提示词框拿这个矩形当锚，而帧所在的那一栏是弹窗的最后一个可伸缩行：**任何**排到它
+   * 上方的东西（我们的回话、截断提示、窗口被缩放、画布被拉动）都会把它整个挪走或压扁，
+   * 覆盖层自己不会知道。所以每次提交量一遍——我们自己的界面变了，就是这一次提交。
+   *
+   * `useLayoutEffect` 是这里的关键：量到新位置到重渲染之间不能让浏览器画一帧，否则圈会
+   * 先错开一下再跳回去。代价是一次 `getBoundingClientRect`，而且只在握着一笔时才量。
+   */
+  useLayoutEffect(() => {
+    if (holding) reportFrame()
+  })
+  /**
+   * 上面那一遍只盖得住**我们自己**引起的排版变化。另外两条路得挂监听：窗口缩放（帧整块
+   * 换尺寸）与帧自己的大小变化（子元素撑开、被上方的东西压扁）。两者都在手里有东西可锚
+   * 的时候才挂着。
+   */
+  useEffect(() => {
+    if (!holding) return undefined
+    const node = frame.current
+    if (node === null) return undefined
+    const observer = new ResizeObserver(reportFrame)
+    observer.observe(node)
+    window.addEventListener('resize', reportFrame)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', reportFrame)
+    }
+  }, [holding, reportFrame])
   // A re-read (an edit saved, the card's file written again) replaces the text
   // and reloads the frame; the note belongs to the page that is gone.
   useEffect(() => {
@@ -83,16 +127,19 @@ export function DeckViewer({ view, t }: ViewerProps) {
   /**
    * Tell the frame what to be.
    *
-   * Run on every text change as well as on `armed`: a reloaded frame starts
-   * dormant (the probe is injected into each page as inert), so a viewer that
-   * was armed when the artifact was rewritten has to re-arm the page it just
-   * received. The message is idempotent on the frame's side.
+   * Three states, not two (`pickMode`): aiming, or holding a pick (the box is
+   * open — the page stays read-only *and* frozen), or dormant. The order is a
+   * target state rather than a toggle, and it is re-sent on every text change as
+   * well as on those two flags: a reloaded frame starts dormant (the probe is
+   * injected into each page as inert), so a viewer that was armed when the
+   * artifact was rewritten has to re-arm the page it just received. The message
+   * is idempotent on the frame's side.
    */
   const tell = useCallback((): void => {
     const target = frame.current?.contentWindow
     if (target === null || target === undefined) return
-    target.postMessage(pickOrder(armed ? PICK_ENABLE : PICK_DISABLE), '*')
-  }, [armed])
+    target.postMessage(pickOrder(pickMode(armed, holding)), '*')
+  }, [armed, holding])
   useEffect(() => {
     tell()
   }, [tell, view.text])
@@ -134,32 +181,18 @@ export function DeckViewer({ view, t }: ViewerProps) {
             className="dsh-canvas-chipbtn dsh-canvas-picktool"
             data-on={armed ? 'true' : 'false'}
             aria-pressed={armed}
-            title={t('canvas.pick.tool')}
+            // 手里攥着一笔时按不动：重新选会把「改这一段」这句话连同圈一起顶掉，而它可能
+            // 正跑着。要放手有框上的 × 与 Esc，两条路都比按这个按钮更明确。
+            disabled={holding}
+            title={holding ? t('canvas.pick.repick') : t('canvas.pick.tool')}
             onClick={pick.toggle}
           >
             {t('canvas.pick.tool')}
           </button>
         ) : null}
       </Slot>
-      <Slot at="banner">
-        {pick.notice === '' ? null : (
-          // 元素选择的回话：发出去是一件事、产物真的变了是另一件事，两句话都说出来，
-          // 否则用户关掉框之后无从知道刚才那一下有没有发生。
-          <div className="dsh-canvas-viewer-picked">
-            <span className="dsh-canvas-viewer-notetext">{pick.notice}</span>
-            <span className="dsh-canvas-spacer" />
-            <button
-              className="dsh-canvas-chipbtn"
-              onClick={pick.dismissNotice}
-              aria-label={t('canvas.action.collapse')}
-            >
-              ×
-            </button>
-          </div>
-        )}
-      </Slot>
       {/* 帧区是**一个定位上下文**：提示条要么排在流里（链接闸门那条，它说的是页面自己
-          的事）、要么浮在上面（选择模式那条），两者的区别见下面那处注释。 */}
+          的事）、要么浮在上面（元素选择那两条）。浮着的那两条见下面那处注释。 */}
       <div className="dsh-canvas-frame-area">
         {blocked === '' ? null : (
           <div className="dsh-canvas-frame-note">
@@ -173,20 +206,38 @@ export function DeckViewer({ view, t }: ViewerProps) {
             </button>
           </div>
         )}
-        {armed ? (
-          // 探针在页面里画的是「鼠标底下是谁」，这句话说的是「接下来会发生什么」——
-          // 用户按下按钮之后如果只在页面里看到一个十字光标，没人告诉他这一击不会
-          // 真的按到那个按钮上。
-          //
-          // **它浮在帧上，不占排版位**（`.dsh-canvas-frame-note.is-pick` 是 absolute）：
-          // 这条提示只在选择模式下活着，而一次选择结束（回话一到）模式就关了，于是它
-          // 会**在单击的同一刻消失**。若它排在流里，那一瞬帧会被顶上 35px，而高亮框与
-          // 提示词框用的是回话那一刻量到的帧坐标——圈出来的位置会比用户点的元素低一整条
-          // 提示条的高度。页面不该因为我们的提示条而挪动，这是同一条判据。
-          <div className="dsh-canvas-frame-note is-pick">
-            <span className="dsh-canvas-frame-notetext">{t('canvas.pick.armed')}</span>
-          </div>
-        ) : null}
+        {/* 元素选择的两条提示，**都浮在帧上，不占排版位**（`.dsh-canvas-frame-notestack`）。
+            不占位不是省地方，是这条判据：圈与提示词框拿帧的位置当锚，而它们是在这一笔出生
+            那一刻量好的——提示条只要排进流里，就会在出现/消失的那一瞬把帧顶走一整条，圈
+            与框便整个错开（用户报的就是这个：发送后回话冒出来，选中区偏了）。
+
+            两条互斥（回话只在模式关着时存在，模式一开回话就被清掉），排在同一个浮层里只是
+            为了它们万一同时在场也有先来后到。 */}
+        <div className="dsh-canvas-frame-notestack">
+          {armed ? (
+            // 探针在页面里画的是「鼠标底下是谁」，这句话说的是「接下来会发生什么」——
+            // 用户按下按钮之后如果只在页面里看到一个十字光标，没人告诉他这一击不会
+            // 真的按到那个按钮上。
+            <div className="dsh-canvas-frame-note is-pick">
+              <span className="dsh-canvas-frame-notetext">{t('canvas.pick.armed')}</span>
+            </div>
+          ) : null}
+          {pick.notice === '' ? null : (
+            // 元素选择的回话：发出去是一件事、产物真的变了是另一件事，两句话都说出来，
+            // 否则用户关掉框之后无从知道刚才那一下有没有发生。
+            <div className="dsh-canvas-viewer-picked">
+              <span className="dsh-canvas-frame-notetext">{pick.notice}</span>
+              <span className="dsh-canvas-spacer" />
+              <button
+                className="dsh-canvas-chipbtn"
+                onClick={pick.dismissNotice}
+                aria-label={t('canvas.action.collapse')}
+              >
+                ×
+              </button>
+            </div>
+          )}
+        </div>
         <iframe
           ref={frame}
           className="dsh-canvas-frame"
