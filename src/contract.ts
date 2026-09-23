@@ -37,6 +37,8 @@ export const TOOL_NAMES = {
   organizeBoard: 'canvas_organize_board',
   linkSourceOnBoard: 'canvas_link_source_on_board',
   generateImage: 'canvas_generate_image',
+  designRead: 'canvas_design_read',
+  designEdit: 'canvas_design_edit',
   export: 'canvas_export',
   publish: 'canvas_publish',
 } as const
@@ -96,7 +98,7 @@ export const boardCardSchema = z
     kindLabel: z.string(),
     position: pointSchema,
     sessionId: z.string(),
-    present: z.boolean(),
+    missing: z.boolean(),
   })
   .readonly()
 /** One source edge as the board renders it. */
@@ -209,6 +211,81 @@ export const writeResultSchema = z
     before: z.string().nullable(),
   })
   .readonly()
+/** One node of a design document, in its model-facing JSON shape (F2.6, v2 — scene-graph). */
+export const designNodeSchema = z
+  .object({
+    id: z.string(),
+    type: z.string(),
+    parentId: z.string(),
+    name: z.string(),
+    x: z.number(),
+    y: z.number(),
+    width: z.number(),
+    height: z.number(),
+    rotation: z.number(),
+    opacity: z.number(),
+    cornerRadius: z.number(),
+    visible: z.boolean(),
+    /** First visible solid fill as CSS (`#rrggbb` / `#rrggbbaa`); `''` = unpainted. */
+    fill: z.string(),
+    stroke: z.string(),
+    strokeWidth: z.number(),
+    text: z.string(),
+    fontSize: z.number(),
+    fontFamily: z.string(),
+    align: z.enum(['left', 'center', 'right', 'justified']),
+  })
+  .readonly()
+/** A design document as the session tools hand it over (F2.6, v2 — scene-graph snapshot). */
+export const designDocumentSchema = z
+  .object({
+    cardId: cardIdSchema,
+    formatVersion: z.number(),
+    artboards: z.array(z.string()),
+    nodes: z.array(designNodeSchema),
+  })
+  .readonly()
+/** One structured design edit op (F2.6) — see `core/artifact/design/ops.ts`. */
+export const designOpSchema = z
+  .object({
+    kind: z.enum(['upsert', 'setProps', 'move', 'delete', 'reorder']),
+    id: z.string().max(200).optional(),
+    type: z.string().max(40).optional(),
+    parentId: z.string().max(400).optional(),
+    name: z.string().max(400).optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    rotation: z.number().optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    cornerRadius: z.number().optional(),
+    opacity: z.number().min(0).max(1).optional(),
+    fill: z.string().max(9).optional(),
+    stroke: z.string().max(9).optional(),
+    strokeWidth: z.number().optional(),
+    text: z.string().max(20_000).optional(),
+    fontSize: z.number().optional(),
+    fontFamily: z.string().max(200).optional(),
+    align: z.enum(['left', 'center', 'right', 'justified']).optional(),
+    visible: z.boolean().optional(),
+    index: z.number().int().optional(),
+  })
+  .readonly()
+
+/** Outcome of one `canvas_design_edit` batch (F2.6). */
+export const designEditResultSchema = z
+  .object({
+    cardId: cardIdSchema,
+    applied: z.number(),
+    errors: z.array(z.string()),
+    version: z.string(),
+  })
+  .readonly()
+
+/** The design document as it crosses the wire (F2.6). */
+export type DesignDocumentWire = z.infer<typeof designDocumentSchema>
+/** The design edit result as it crosses the wire (F2.6). */
+export type DesignEditResultWire = z.infer<typeof designEditResultSchema>
 /** Structured outcome of an export attempt (F10.1). */
 export const exportResultSchema = z
   .object({
@@ -284,6 +361,7 @@ const P = {
   intentImage: json('image', 'image', 'dsh-canvas#IntentImage', z.string().max(4_000_000)),
   prompt: json('prompt', 'prompt', 'dsh-canvas#PromptText', z.string().trim().min(1).max(32_000)),
   version: json('version', 'version', 'dsh-canvas#FsVersion', z.string().min(1).max(200)),
+  designOps: json('ops', 'ops', 'dsh-canvas#DesignOps', z.array(designOpSchema).min(1).max(200)),
   style: json('style', 'style', 'dsh-canvas#StyleProfile', styleProfileSchema),
 }
 
@@ -305,6 +383,8 @@ const R = {
   summaryList: resultOf('dsh-canvas#CardSummaryList', z.array(cardSummarySchema)),
   artifact: resultOf('dsh-canvas#ArtifactView', artifactViewSchema),
   write: resultOf('dsh-canvas#WriteResult', writeResultSchema),
+  designDocument: resultOf('dsh-canvas#DesignDocument', designDocumentSchema),
+  designEdit: resultOf('dsh-canvas#DesignEditResult', designEditResultSchema),
   export: resultOf('dsh-canvas#ExportResult', exportResultSchema),
   session: resultOf('dsh-canvas#SessionBinding', sessionBindingSchema),
   lastPrompt: resultOf('dsh-canvas#LastPrompt', lastPromptSchema),
@@ -408,8 +488,24 @@ export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.name, P.position], cancellation: signal, result: R.card,
   },
   {
+    id: 'dsh-canvas#card/scaffold_design', service: 'card', namespace: 'card', method: 'scaffoldDesign',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.name, P.position], cancellation: signal, result: R.card,
+  },
+  {
+    id: 'dsh-canvas#card/read_design', service: 'card', namespace: 'card', method: 'readDesign',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.designDocument,
+  },
+  {
+    id: 'dsh-canvas#card/edit_design', service: 'card', namespace: 'card', method: 'editDesign',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.designOps], cancellation: signal, result: R.designEdit,
+  },
+  {
     id: 'dsh-canvas#card/remove_card', service: 'card', namespace: 'card', method: 'removeCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.boolean,
+  },
+  {
+    id: 'dsh-canvas#card/remove_missing_cards', service: 'card', namespace: 'card', method: 'removeMissingCards',
+    invocation: { kind: 'direct' }, parameters: [P.projectId], cancellation: signal, result: R.count,
   },
   {
     id: 'dsh-canvas#card/read_summary', service: 'card', namespace: 'card', method: 'readSummary',
@@ -494,6 +590,13 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'canvas/source-invalid': { readonly downstream: string; readonly upstream: string; readonly reason: string }
     /** The directory cannot serve as a project root. */
     'canvas/root-unusable': { readonly path: string; readonly reason: string }
+    /**
+     * The canvas folder cannot be read right now, so nothing about its cards can
+     * be decided. Raised by the bulk cleanup (F1.11): with the root unreadable
+     * every card would look absent, and unseating them all is not a conclusion
+     * this plugin is willing to draw from a probe that failed.
+     */
+    'canvas/root-unavailable': { readonly projectId: string; readonly root: string }
     /** The artifact's kind has no implementation for the requested operation. */
     'card/unsupported': { readonly kind: string; readonly operation: string }
     /** The card has no bound session yet. */

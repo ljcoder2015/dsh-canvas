@@ -318,6 +318,44 @@ export function buildEditPrompt(input: { file: string; target: PickTarget; reque
   return lines.join('\n')
 }
 
+/** What {@link splitEditPrompt} cuts a written edit prompt into. */
+export interface EditPromptSplit {
+  /**
+   * The locator half: everything {@link buildEditPrompt} writes before the
+   * user's request, the trailing `改动要求：` marker included.
+   */
+  head: string
+  /** The request the user typed (or is about to type) after the marker. */
+  request: string
+}
+
+/**
+ * Cut a written edit prompt into its locator block and the user's request.
+ *
+ * The prompt box displays the locator as **one packed element block** and lets
+ * the user edit only the request — a display change, never a prompt change. The
+ * cut is therefore not a text heuristic: the head is rebuilt by calling
+ * {@link buildEditPrompt} with an empty request and matched as a **prefix** of
+ * the written text. That is exact by construction — the head is whatever this
+ * module would have written for the same pick — and a draft that no longer
+ * starts with it (something edited the raw text beyond the shape) comes back
+ * `undefined`, the caller's cue to fall back to plain editing rather than to
+ * guess where the request begins.
+ *
+ * @param input.file - the card id the prompt was built with.
+ * @param input.target - the pick the prompt was built with.
+ * @param input.text - the draft as written (locator and request together).
+ */
+export function splitEditPrompt(input: {
+  file: string
+  target: PickTarget
+  text: string
+}): EditPromptSplit | undefined {
+  const head = buildEditPrompt({ file: input.file, target: input.target, request: '' })
+  if (!input.text.startsWith(head)) return undefined
+  return { head, request: input.text.slice(head.length) }
+}
+
 /** What {@link placePickBox} needs to know. */
 export interface PickBoxInput {
   /** The picked element's box, in the frame's viewport. */

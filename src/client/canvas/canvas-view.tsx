@@ -110,19 +110,19 @@ interface DockSpec {
    * `card.scaffoldWebapp`，文件夹名由 host 按磁盘撞名情况落定。
    */
   readonly webapp?: boolean
+  /**
+   * 设计节点（F2.6）：产物是场景图快照（.design v2），文本 seed 装不下，创建走
+   * `card.scaffoldDesign`——host 写入一份含空白画板的 `.design` 文件，
+   * 名字同样由 host 按磁盘撞名情况落定。
+   */
+  readonly design?: boolean
 }
 
 /** The dock's creation options, in menu order. */
 const DOCK_SPECS: readonly DockSpec[] = [
   { label: 'canvas.dock.text', extension: 'md', kind: 'markdown', seed: '# 未命名\n' },
   { label: 'canvas.dock.webapp', extension: 'webapp', kind: 'webapp', webapp: true },
-  { label: 'canvas.dock.image', extension: 'png', kind: 'image' },
-  {
-    label: 'canvas.dock.vector',
-    extension: 'svg',
-    kind: 'image',
-    seed: '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"></svg>',
-  },
+  { label: 'canvas.dock.design', extension: 'design', kind: 'design', design: true },
 ]
 
 /** 一个还不存在的卡片 id：以扩展名为后缀，撞名就加序号——绝不覆盖已有产物的席位。 */
@@ -297,6 +297,8 @@ export function CanvasBoard(props: CanvasBoardProps) {
   const [pointer, setPointer] = useState<Point>({ x: 0, y: 0 })
   const [panning, setPanning] = useState(false)
   const [removal, setRemoval] = useState<string | undefined>()
+  /** 缩放条上「清理失效卡片」的确认条开着（F1.11）；与单张移除的确认条互斥。 */
+  const [pruning, setPruning] = useState(false)
   const [picker, setPicker] = useState(false)
   /** 底部 dock 上开着的那一张浮层：新建卡片，或快捷键说明；undefined = 都关着。 */
   const [dockMenu, setDockMenu] = useState<'add' | 'keys' | undefined>(undefined)
@@ -325,7 +327,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
    * 同一个弹窗，直接落在编辑面上。
    */
   const [viewing, setViewing] = useState<{ cardId: string; edit: boolean } | undefined>(undefined)
-  /** Digests of each card's declared material chain, keyed by card id. */
+  /** Digests of each card's material — its direct upstreams, one hop — keyed by card id. */
   const [materials, setMaterials] = useState<Record<string, CardSummary[]>>({})
 
   const surfaceRef = useRef<HTMLDivElement | null>(null)
@@ -473,11 +475,22 @@ export function CanvasBoard(props: CanvasBoardProps) {
   // ── derived ───────────────────────────────────────────────────────────────
 
   const statusOf = useCallback(
-    (card: BoardCard) => cardStateOf(summaryOf(sessions, card.sessionId), card.present),
+    (card: BoardCard) => cardStateOf(summaryOf(sessions, card.sessionId), card.missing),
     [sessions],
   )
 
   const selectedCard = cards.find((card) => card.id === selected)
+  /**
+   * 板上产物**确实丢了**的卡片数（F1.11），也就是那颗「清理失效卡片」会清掉的张数。
+   *
+   * 判据由 host 给（`BoardCard.missing`），不是「现在读不到这个文件」：产物还没写的空座位、
+   * 以及探针答不上来的卡，都不算在内——按钮上的数字和点下去真正会少掉的张数必须是同一个集合，
+   * 否则用户只会在「说 3 张、走了 2 张」里失去信任。
+   *
+   * 只在有人值时出现一颗按钮，所以空板上没有任何多余按钮；数字直接写在按钮上，是因为
+   * 「有几张」正是决定要不要清的理由。
+   */
+  const missingCount = cards.filter((card) => card.missing).length
   // The selection cluster (pill + composer) follows the drag in flight, not the
   // last committed seat: `dragging` carries the live position — the same signal
   // the source edges use — so the whole cluster moves with the card per frame.
@@ -656,6 +669,13 @@ export function CanvasBoard(props: CanvasBoardProps) {
   const spawnFromSpec = useCallback(
     async (spec: DockSpec, position: Point): Promise<BoardCard> => {
       if (spec.webapp === true) return bridge.scaffoldWebapp(projectId, freeAppFolder(cards), position)
+      if (spec.design === true) {
+        // The local preview name only has to be *probably* free — the host
+        // settles the real name against the disk, and the returned card id
+        // wins for anything downstream (linking included).
+        const name = freeCardId(cards, 'design').replace(/\.design$/, '')
+        return bridge.scaffoldDesign(projectId, name, position)
+      }
       const cardId = freeCardId(cards, spec.extension)
       const card = await bridge.createCard(projectId, cardId, spec.kind, position)
       if (spec.seed !== undefined) await bridge.writeText(projectId, cardId, spec.seed)
@@ -697,6 +717,32 @@ export function CanvasBoard(props: CanvasBoardProps) {
     },
     [bridge, projectId, run],
   )
+
+  /**
+   * 一次清掉板上产物**确实丢了**的卡片（F1.11）。
+   *
+   * 卡片是**故意比文件活得久**的（座位可能还没有产物，缺文件也是真实状态，F3.5），所以
+   * 清理绝不自作主张：文件会在切分支时回来，而拿掉一张卡会连带忘掉它的对话绑定与取材
+   * 关系。这里补的只是「一次做完」——十几张幽灵卡一张一张走选中面板，最后只会把人逼到
+   * 去删整张画布。
+   *
+   * 清完报一句实数：host 只清「证明得了不存在」的那些，读不到的会留下来，所以报出的
+   * 张数可能少于按钮上的数字——那就照实说，别让用户以为按了没反应。
+   */
+  const pruneMissing = useCallback(() => {
+    if (projectId === '') return
+    const promised = missingCount
+    setSelected(undefined)
+    setPruning(false)
+    void run(async () => {
+      const removed = await bridge.removeMissingCards(projectId)
+      setNotice(
+        removed < promised
+          ? t('canvas.prune.partial', { removed, skipped: promised - removed })
+          : t('canvas.prune.done', { count: removed }),
+      )
+    })
+  }, [bridge, missingCount, projectId, run, t])
 
   const openCardSession = useCallback(
     (card: BoardCard) => {
@@ -778,10 +824,11 @@ export function CanvasBoard(props: CanvasBoardProps) {
    * is already declared) and push its digest into the live session in the same
    * gesture, so the next turn sees it without a tool call.
    *
-   * "Already declared" is asked of the board's **direct edges**, not of the
-   * digest list: that list also carries indirect upstreams, and treating one of
-   * those as already-linked silently skipped the link — picking a card from ⊕
-   * would push its digest but draw no line.
+   * "Already declared" is asked of the board's **direct edges** rather than of
+   * the digest list: the edge is the thing this is about to create, and the
+   * board's edge list is its authority. (Asking the digest list is what v1.20
+   * had to fix — back then that list also carried indirect upstreams, so picking
+   * a card from ⊕ pushed its digest but drew no line.)
    */
   const addMaterial = useCallback(
     (card: BoardCard, sourceCardId: string) => {
@@ -822,9 +869,9 @@ export function CanvasBoard(props: CanvasBoardProps) {
   /**
    * 选中卡片的取材 chips：一条 chip 就是一条边。
    *
-   * `readSources` 连**间接**上游一并返回（那是 agent 沿着链要读的东西），但间接上游
-   * 是更上面某张卡的关系，删无可删——所以 chips 只列画布报出来的**直接边**，各自去
-   * 摘要表里配一条 tooltip。这样「chip 上的删除按钮」永远有确定的对象。
+   * chips 只列画布报出来的**直接边**：一条 chip 就是一条边，右上角那枚删除按钮
+   * 必须有确定的删除对象，而边才是存储里的东西。摘要表只用来配 tooltip——取不到就
+   * 是空的，不影响这一枚 chip 该不该在。
    */
   const selectionMaterials: readonly MaterialRef[] = useMemo(() => {
     if (selectionCard === undefined) return []
@@ -1281,7 +1328,10 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 onChat={() => openCardSession(selectionCard)}
                 onManualEdit={() => setViewing({ cardId: selectionCard.id, edit: true })}
                 onExport={() => exportCard(selectionCard)}
-                onRemove={() => setRemoval(selectionCard.id)}
+                onRemove={() => {
+                  setPruning(false)
+                  setRemoval(selectionCard.id)
+                }}
                 onAddMaterial={(sourceId) => addMaterial(selectionCard, sourceId)}
                 onReferenceMaterials={() => referenceMaterials(selectionCard)}
                 onDropMaterial={dropMaterial}
@@ -1329,6 +1379,18 @@ export function CanvasBoard(props: CanvasBoardProps) {
           >
             {t('canvas.board.arrange')}
           </button>
+          {missingCount === 0 ? null : (
+            <button
+              className="dsh-canvas-chipbtn"
+              onClick={() => {
+                setRemoval(undefined)
+                setPruning(true)
+              }}
+              title={t('canvas.board.prune.hint')}
+            >
+              {t('canvas.board.prune', { count: missingCount })}
+            </button>
+          )}
         </div>
 
         {project === undefined && !picker ? (
@@ -1399,6 +1461,20 @@ export function CanvasBoard(props: CanvasBoardProps) {
               {t('canvas.action.confirm')}
             </button>
             <button className="dsh-canvas-chipbtn" onClick={() => setRemoval(undefined)}>
+              {t('canvas.action.cancel')}
+            </button>
+          </div>
+        )}
+
+        {!pruning ? null : (
+          <div className="dsh-canvas-toolbar is-horizontal" style={{ left: '50%', top: '12px', transform: 'translateX(-50%)', zIndex: 6 }}>
+            <span className="dsh-canvas-card-meta" style={{ padding: '0 8px' }}>
+              {t('canvas.prune.title', { count: missingCount })}
+            </span>
+            <button className="dsh-canvas-chipbtn" data-primary="true" onClick={pruneMissing}>
+              {t('canvas.action.confirm')}
+            </button>
+            <button className="dsh-canvas-chipbtn" onClick={() => setPruning(false)}>
               {t('canvas.action.cancel')}
             </button>
           </div>

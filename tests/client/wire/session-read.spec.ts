@@ -90,20 +90,20 @@ describe('latestLine', () => {
 describe('cardStateOf', () => {
   const row = (fields: Partial<SessionSummary>): SessionSummary => fields as SessionSummary
 
-  it('lets a missing artifact outrank every session state', () => {
-    expect(cardStateOf(row({ running: true }), false)).toBe('missing')
+  it('lets an artifact proven gone outrank every session state', () => {
+    expect(cardStateOf(row({ running: true }), true)).toBe('missing')
   })
 
   it('reads a bound session that is running as running', () => {
-    expect(cardStateOf(row({ running: true }), true)).toBe('running')
+    expect(cardStateOf(row({ running: true }), false)).toBe('running')
   })
 
   it('reads a finished or pending session as notified', () => {
-    expect(cardStateOf(row({ running: false, completed: true }), true)).toBe('notified')
+    expect(cardStateOf(row({ running: false, completed: true }), false)).toBe('notified')
   })
 
   it('reads a card with no session as idle', () => {
-    expect(cardStateOf(undefined, true)).toBe('idle')
+    expect(cardStateOf(undefined, false)).toBe('idle')
   })
 })
 

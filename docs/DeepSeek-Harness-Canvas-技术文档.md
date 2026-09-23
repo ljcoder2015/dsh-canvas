@@ -1,7 +1,7 @@
 # DeepSeek Harness 通用创作画布插件 · 技术文档
 
-**版本**：v1.45
-**最近更新**：2026-09-21
+**版本**：v1.47
+**最近更新**：2026-09-23
 **状态**：技术架构已按 [`dsh-plugin-template`](https://github.com/bugmaker2/dsh-plugin-template) 与 DeepSeek Harness 子系统文档（`docs/cookbook/*`、`docs/subsystems/*`）校准，并在真机跑通
 **产品文档**：[`DeepSeek-Harness-Canvas-产品文档.md`](./DeepSeek-Harness-Canvas-产品文档.md)——功能点清单（F1.1–F10.4）、MVP 范围、设计决策记录、修订记录都在那边
 **定位**：这个双端插件的完整技术设计。底座的形态约束、源码分层、跨端契约、Host 与 Client 两侧的职责边界、数据落点、构建与安装，各占一章
@@ -48,12 +48,14 @@ dsh-canvas/
 │   ├── host/                 # 宿主运行时：装配 + 两个 Remote 服务
 │   │   ├── canvas-runtime.ts     # CanvasRuntime：画布/取材链/排布（Remote 服务）
 │   │   ├── card-runtime.ts       # CardRuntime：卡片产物读写/注入/导出/发布
-│   │   ├── tools.ts              # canvas_* 工具注册（defineTool × 14）
-│   │   └── prompt.ts             # 卡片会话的 prompt 注入段落
+│   │   ├── tools.ts              # canvas_* 工具注册（defineTool × 16）
+│   │   ├── prompt.ts             # 卡片会话的 prompt 注入段落
+│   │   └── board-file.ts         # 板面投影的读写（接 ctx.fs + 从域的表组装）
 │   ├── core/                 # 纯逻辑层，不依赖 Cordis
 │   │   ├── canvas/               # 画布模型
-│   │   │   ├── ids.ts                # 存储键的定宽转义
+│   │   │   ├── ids.ts                # 存储键的定宽转义 + 路径摘要身份
 │   │   │   ├── board.ts              # 排布策略
+│   │   │   ├── board-file.ts         # 板面文件：格式/编解码 + 身份与导入决策（纯）
 │   │   │   ├── source-store.ts       # 取材边存储
 │   │   │   └── workspace.ts          # 画布即工作区（登记与挂账）
 │   │   ├── artifact/             # 产物：认定 / 读写 / 页面 / 引用
@@ -292,8 +294,10 @@ it('host 与 client 共用同一份 descriptor 列表', () => {
 
 | 模块 | 职责 | 归属 |
 |------|------|------|
-| `CanvasRuntime`（namespace `canvas`） | 画布座次、取材边增删查、上游链排布、归纳收纳、便签创建、**当前画布记账**（v1.31：`setActiveProject` 写领域全局 `activeProjectId`，画布级工具据此取项目） | `src/host/canvas-runtime.ts` |
-| `CardRuntime`（namespace `card`） | 卡片产物摘要读取、上游（取材来源）读取、跨卡片注入、导出、发布、生图、**上游产物的文件引用提交**（v1.37：`referenceFiles`） | `src/host/card-runtime.ts` |
+| `CanvasRuntime`（namespace `canvas`） | 画布座次、取材边增删查、上游链排布、归纳收纳、便签创建、**当前画布记账**（v1.31：`setActiveProject` 写领域全局 `activeProjectId`，画布级工具据此取项目）、**绑定目录时的身份判定与板面导入**（v1.47：`createProject` 先读目录里的板面文件决定「这是哪张画布」，再按 `planSeats/planEdges/planNotes` 补齐板面；每个改动板面的方法末尾写回投影） | `src/host/canvas-runtime.ts` |
+| `CardRuntime`（namespace `card`） | 卡片产物摘要读取、上游（取材来源）读取、跨卡片注入、导出、发布、生图、**上游产物的文件引用提交**（v1.37：`referenceFiles`）、**上下卡与批量清理**（v1.47：`removeCard` / `removeMissingCards` 共用一条 `unseat` 级联——先释放会话、再删它的边、最后删座位，顺序反了会留下删不掉的悬空线。批量清理只清**证明得了不存在**的卡：`presenceOf` 三态里 `unknown` 一律留下，`seatedEmpty` 的空座位留下，项目根自己探不到时整体拒绝——那时「所有卡都缺」既可能是真的、也可能是探针坏了，这里分辨不出，清空画布该走 `removeProject`） | `src/host/card-runtime.ts` |
+| `board-file`（纯） | 板面文件的格式、编解码与两个决策：`planIdentity`（新画布 / 复用 / 搬家 / 复制四态）、`planSeats/planEdges/planNotes`（打开目录时该补哪些卡片、边、便利贴）。全部对普通数据的纯函数，于是每条规则都能在容器外测 | `src/core/canvas/board-file.ts` |
+| `board-file`（宿主） | 把上面那份格式接到 `ctx.fs` seam（沙箱策略与写前 waterfall 照旧生效），并从 `projects/cards/sources/notes` 表组装投影；**内容未变则跳过写**，**读不懂的文件绝不覆盖**，写失败只记日志 | `src/host/board-file.ts` |
 | `kind-registry` | 文件证据 → 形态认定（纯函数：扩展名 + 内容嗅探） | `src/core/artifact/kind-registry.ts` |
 | `source-store` | 取材边的增删查与自动对账，落在存储领域之上 | `src/core/canvas/source-store.ts` |
 | `file-reference` | **连线的底层**（v1.37）：Harness 自己的 `@file` mention 语法的逐字节复刻——`formatFileMention`（普通路径 / 带空白加引号 / 目录尾斜杠 / 引号不闭合 / 控制字符与双引号拒绝）、`nameFileReferences`（保序、去重、把写不出来的路径报进 `skipped`）、`nameWithoutProbe`（不探测 I/O 时一律文件形态——`site`/`webapp` 卡是**文件**不是目录）与引用块渲染；零依赖、不 import harness 包 | `src/core/artifact/file-reference.ts` |
@@ -334,15 +338,15 @@ export const inject = ['tools']
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'canvas_read_sources',
-    description: '读取当前卡片所有上游（取材来源）产物的摘要。',
-    parameters: { depth: { type: 'number' } },
+    description: '读取当前卡片取材来源（直接上游产物）的摘要。',
+    parameters: {},                                    // 无参数：取材只取上一级，层数不是调用方可选的东西（v1.46 撤掉形同虚设的 depth）
     output: {
       schema: { type: 'array' },                       // 规范 JSON 值
       render: (_args, value) => [{ type: 'text', text: renderSummaries(value) }],
     },
-    async execute(args, exec) {
+    async execute(_args, exec) {
       // exec 携带调用身份与 signal；args 已按 schema 校验
-      return await readUpstreamSources(ctx, exec.agent, args.depth)
+      return await readUpstreamSources(ctx, exec.agent)
     },
   }))
 }
@@ -374,9 +378,11 @@ export function apply(ctx: Context): void {
 2. **preset 在任何 agent 创建之前解析并预校验**（`resolve()` 取部署默认，`standingKeyFor()` 验组装）。失败**故意不被吞掉**：一个 preset 坏掉的部署同样给不了卡片会话写盘能力，诚实的答复是"那条配置坏了"，而不是开出一条默默干不了活的会话。
 3. **无 roster 的部署是 no-op 而非失败**：裸 harness、单测这类环境没有 `agentPresets` 服务，此时模型面向的工具行本来就留在宿主组装里、全局层人人可见，没有可加入的东西。服务按名结构读取（`ctx.get('agentPresets')`），同一份 bundle 同时跑在有 roster 与无 roster 两种部署下。
 
-**卡片元信息注入系统提示词**：用 `ctx.systemPrompt.section()` / `.context()` / `.variable()` 在卡片会话的作用域内注册段落与动态上下文（路径、形态、项目风格档案、上游取材来源摘要），作用域内条目遮蔽全局同名条目；一次性提醒走 `agent.inject({ content, source: { kind: 'plugin', plugin: 'dsh-canvas' } })`——它追加的是持久化上下文，下一次模型请求即可见，但**不会唤醒空闲 agent**。
+**卡片元信息注入系统提示词**：用 `ctx.systemPrompt.section()` / `.context()` / `.variable()` 在卡片会话的作用域内注册段落与动态上下文（路径、形态、项目风格档案、上游取材来源摘要、**改动归属**——一次改动落到本卡产物而不是另起一张卡，F3.17），作用域内条目遮蔽全局同名条目；一次性提醒走 `agent.inject({ content, source: { kind: 'plugin', plugin: 'dsh-canvas' } })`——它追加的是持久化上下文，下一次模型请求即可见，但**不会唤醒空闲 agent**。
 
-**连线的底层 = 文件引用**（v1.37，替换掉 v1.35 的会话引用这一版）：一条取材边的两端确实都是会话（每张卡片一个，§2.3），但**边指向的东西是文件**，而这份文件**不一定是任何会话的产出**：节点可以**手动新建**（从来没有哪次会话生成过它），也可以是**对某次会话产物的二次编辑**（内容早已不等于那次会话的记录）。把「会话」当作「产物」的代理，等于预设「这份产物 = 某次会话的输出、且此后没人动过」——这个预设一破，模型拿到的就是**另一样东西**（过程记录、或者旧版本），而边明明指着那个文件。**文件引用把这个代理环节整个去掉**：名字直接指向磁盘上那一份，谁写的、怎么来的都不影响它指得对。所以插件交给新会话的是**名字**，不是内容，也不是快照。这份名字的语法**属于 Harness**：`@` token ＋ 工作区相对路径，带空白就 `@"…"`，目录带尾斜杠，`@deepseek-ai/dsh-file-reference-local` 在这条会话有 `read` 工具时装上这份引导（每张卡片会话都有 `read`，见上「卡片会话的工具从哪里来」）。插件**自造一套新词汇只会更差**：模型得为一个插件多学一种写法，而宿主 UI 与其它插件的 `@` 提示又各说各话。所以 `src/core/artifact/file-reference.ts` 把宿主那套语法**逐字节复刻**（零依赖、**不 import harness 包**——同一份 bundle 要跑在从未组合 file-reference 包的部署上），执行落在 Host 的 `CardRuntime.referenceFiles`：走这条卡的**间接**上游链 → 逐个 `probe`（只为判「是文件还是目录」与「写没写盘」）→ `nameFileReferences` 保序去重并分出 `skipped` → `referenceMessage` 以 `source.kind:'plugin'` 注入（**绝不是 `kind:'user'`**：是画布在给文件命名，不是在替用户说话）→ 返回 `{ cardId, files[], skipped[] }`。**名字必须真的解析得到**：卡片 id 就是工作区相对路径（产物落在 `<画布根>/<cardId>`，正好是会话 cwd）——这条既有事实是整个通道成立的前提，也是 §3.5 F5.4 那条「卡片是文件不是目录」的来处。**每轮提示里的取材块同源但更克制**：它**同步组装、不许 I/O**，所以走 `nameWithoutProbe()`（一律文件形态、不带由 kind 推出来的尾斜杠），只报**有哪些材料**，正文一个字都不带——从缓存里端出来的摘要没人负责失效，而上游随时可以被一次普通的文件编辑改写。**摘要通道照旧并存**（`canvas_read_sources` / `canvas_inject_card` / F5.7 `pull`）：它要的是「立刻把材料摆到眼前」，这件事引用做不到。
+**连线的底层 = 文件引用**（v1.37，替换掉 v1.35 的会话引用这一版）：一条取材边的两端确实都是会话（每张卡片一个，§2.3），但**边指向的东西是文件**，而这份文件**不一定是任何会话的产出**：节点可以**手动新建**（从来没有哪次会话生成过它），也可以是**对某次会话产物的二次编辑**（内容早已不等于那次会话的记录）。把「会话」当作「产物」的代理，等于预设「这份产物 = 某次会话的输出、且此后没人动过」——这个预设一破，模型拿到的就是**另一样东西**（过程记录、或者旧版本），而边明明指着那个文件。**文件引用把这个代理环节整个去掉**：名字直接指向磁盘上那一份，谁写的、怎么来的都不影响它指得对。所以插件交给新会话的是**名字**，不是内容，也不是快照。这份名字的语法**属于 Harness**：`@` token ＋ 工作区相对路径，带空白就 `@"…"`，目录带尾斜杠，`@deepseek-ai/dsh-file-reference-local` 在这条会话有 `read` 工具时装上这份引导（每张卡片会话都有 `read`，见上「卡片会话的工具从哪里来」）。插件**自造一套新词汇只会更差**：模型得为一个插件多学一种写法，而宿主 UI 与其它插件的 `@` 提示又各说各话。所以 `src/core/artifact/file-reference.ts` 把宿主那套语法**逐字节复刻**（零依赖、**不 import harness 包**——同一份 bundle 要跑在从未组合 file-reference 包的部署上），执行落在 Host 的 `CardRuntime.referenceFiles`：走这条卡的**直接**上游（上一级，**不做穿透引用**）→ 逐个 `probe`（只为判「是文件还是目录」与「写没写盘」）→ `nameFileReferences` 保序去重并分出 `skipped` → `referenceMessage` 以 `source.kind:'plugin'` 注入（**绝不是 `kind:'user'`**：是画布在给文件命名，不是在替用户说话）→ 返回 `{ cardId, files[], skipped[] }`。**名字必须真的解析得到**：卡片 id 就是工作区相对路径（产物落在 `<画布根>/<cardId>`，正好是会话 cwd）——这条既有事实是整个通道成立的前提，也是 §3.5 F5.4 那条「卡片是文件不是目录」的来处。**每轮提示里的取材块同源但更克制**：它**同步组装、不许 I/O**，所以走 `nameWithoutProbe()`（一律文件形态、不带由 kind 推出来的尾斜杠），只报**有哪些材料**，正文一个字都不带——从缓存里端出来的摘要没人负责失效，而上游随时可以被一次普通的文件编辑改写。**摘要通道照旧并存**（`canvas_read_sources` / `canvas_inject_card` / F5.7 `pull`）：它要的是「立刻把材料摆到眼前」，这件事引用做不到。
+
+**取材深度分两种问法，答法不同**（v1.46）：`transitiveUpstreams`（`src/core/canvas/source-store.ts`）回答的是**图**的问题——「这张卡在谁的下游」，用于看形状的两处（F4.7 取材链面板 / `canvas_get_sources`、F4.6 按链排布），停在一级就是谎报画布的形状；`materialUpstreams`（同文件）回答的是**上下文**的问题——「这条会话可以读什么」，答案恒为**一级**。三条通道（每轮提示里的取材块、`canvas_read_sources` 的摘要、`canvas_reference_files` 的名字）全部走后者，**不做穿透引用**。理由是链要**折**不要**摊**：产物应当已经把上游材料消化进自己那一份，把祖父的产物塞进孙子的提示词，花的是上下文、拆的是画布自己画出来的那条流水线——而且「本产物建立在它之上」这句话，隔一层就不成立了。真要看更远的，`canvas_get_sources` 报全链、`canvas_read_card` 读其中任一份，属于**明确去取**，不是默认送到。配置项 `sourceDepth` 自此只作用于图的那一侧。
 
 ## 六、数据模型与持久化
 
@@ -387,36 +393,49 @@ export function apply(ctx: Context): void {
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 
-const cardRecord = z.object({                        // 记录 schema 用 zod 写，消费方类型由 z.infer 得到
-  position: z.object({ x: z.number(), y: z.number() }),
+const point = z.object({ x: z.number(), y: z.number() })   // 记录 schema 用 zod 写，消费方类型由 z.infer 得到
+const projectRecord = z.object({                          // 一张画布：名字、根目录、**它自己的**视图与风格
+  name: z.string(),
+  root: z.string(),
+  viewport: z.object({ x: z.number(), y: z.number(), zoom: z.number().positive() }),
+  style: z.object({ palette: z.array(z.string()), font: z.string(), tone: z.string() }),
+  createdAt: z.number(),
+})
+const cardRecord = z.object({                             // 一张卡片：座次 + 形态 + 绑定的会话
+  project: z.string(),                                    // 记录自带 project，键与记录都要说得清自己属于谁
   kind: z.string(),
+  position: point,
   sessionId: z.string(),
+  updatedAt: z.number(),
+  seatedEmpty: z.boolean().optional(),                    // v1.47：这个座位**生来就没有产物**（F1.11）
 })
-const sourceRecord = z.object({                      // 一条取材边：下游 ← 上游
-  downstream: z.string(),                            // 取材方 cardId
-  upstream: z.string(),                              // 被取材方 cardId
-  origin: z.enum(['manual', 'reconciled']),          // 手动连线 or 自动对账生成
+const sourceRecord = z.object({                           // 一条取材边：下游 ← 上游
+  project: z.string(),
+  downstream: z.string(),                                 // 取材方 cardId
+  upstream: z.string(),                                   // 被取材方 cardId
+  origin: z.enum(['manual', 'reconciled']),               // 手动连线 or 自动对账生成
 })
-const noteRecord = z.object({ text: z.string(), author: z.string() })
+const noteRecord = z.object({ project: z.string(), text: z.string(), author: z.string(), position: point, createdAt: z.number() })
 
 export const CANVAS_DOMAIN = defineDomain({
   name: 'dsh_canvas',                                // 单元名只允许 [a-z][a-z0-9_]*，故用下划线而非包名的连字符
   version: 1,
   layout: 'per-record',                              // 卡片/取材边记录大而稀疏，逐条成文档、逐条校验版本
-  global: {                                          // 画布单例：视图状态 + 项目风格档案
-    schema: z.object({
-      viewport: z.object({ x: z.number(), y: z.number(), zoom: z.number() }),
-      style: z.object({ palette: z.array(z.string()), font: z.string(), tone: z.string() }),
-    }),
+  global: {                                          // 画布单例：**只有「用户在看哪张画布」**
+    schema: z.object({ activeProjectId: z.string(), viewport: z.object({ /* … */ }), style: z.object({ /* … */ }) }),
     initial: DEFAULT_CANVAS_GLOBAL,
   },
   tables: {
-    cards: domainTable<CardId, z.infer<typeof cardRecord>>(cardRecord),        // cardId → 座次/形态/会话
-    sources: domainTable<SourceId, z.infer<typeof sourceRecord>>(sourceRecord), // 取材边
-    notes: domainTable<NoteId, z.infer<typeof noteRecord>>(noteRecord),        // 共享便利贴
+    projects: domainTable<string, z.infer<typeof projectRecord>>(projectRecord), // projectId → 名字/根目录/视图/风格
+    cards: domainTable<string, z.infer<typeof cardRecord>>(cardRecord),          // projectId-cardId → 座次/形态/会话
+    sources: domainTable<string, z.infer<typeof sourceRecord>>(sourceRecord),    // 取材边
+    notes: domainTable<string, z.infer<typeof noteRecord>>(noteRecord),          // 共享便利贴
+    intents: domainTable<string, z.infer<typeof intentRecord>>(intentRecord),    // 排队中的结构化编辑意图
   },
 })
 ```
+
+> 一处与初版的差别值得点明：视图与风格是**逐项目**的（表里那份 `projectRecord`），全局单例只留「当前打开的是哪张画布」——初版只设了单画布，而板上要并排摆好几张。
 
 | 特性 | 结论 |
 |------|------|
@@ -427,7 +446,7 @@ export const CANVAS_DOMAIN = defineDomain({
 | 记录所有权 | 返回的是存储对象本身，**不得就地修改**，一律经 `put`/`update` 整体替换 |
 | 后端 | 由部署侧路由决定（`json` 后端整文件重发布、`sqlite` 后端逐行存储），产品包不触碰后端 |
 
-文件侧的数据模型相应简化（取材不再随卡片走）：
+文件侧的数据模型相应简化（取材不再随卡片走，而是随**板面投影**走，见下一小节）：
 
 ```typescript
 interface Card {
@@ -452,6 +471,49 @@ interface KindEntry {
   publishable: boolean
 }
 ```
+
+### 板面文件：随目录走的投影（F1.9 / F1.10，v1.47）
+
+存储域让「本机怎么读写」这件事一个字节都不用操心，但它把画布放在了**部署里**而不是**目录里**，于是「画布＝这个文件夹」这句话有两个反例：目录改名即换一张画布（身份是路径摘要），换台机器即空板。补的那一半不取代存储域，而是给它加一份**投影**：
+
+```
+<root>/.dsh-canvas/board.json           # 点前缀目录，scanProject 跳过 ⇒ 永远不会被当成产物
+{ "format": "dsh-canvas-board", "version": 1,
+  "id": "dsh-flow-1wjec4f",             # 这张画布是谁：改名/搬家/换机器都靠它认回来
+  "name": "dsh-flow", "style": { … },
+  "cards":   [ { "id": "app/index.html", "position": { "x": 48, "y": 170 } },
+               { "id": "untitled.md", "position": { "x": 336, "y": 170 }, "empty": true } ],  # empty：座位生来没有产物（F1.11）
+  "sources": [ { "downstream": "deck.html", "upstream": "brief.md", "origin": "manual" } ],
+  "notes":   [ { "id": "note-…", "text": "…", "position": { … }, "createdAt": 1 } ] }
+```
+
+| 问题 | 结论 |
+|------|------|
+| 谁是真源 | 存储域。读取、命中测试、排序都走它；投影可以慢一拍，也可以整体失败（目录只读、沙箱拦下、盘满）。**写投影失败不让用户的拖拽失败**，只记一行日志 |
+| 什么时候写 | 改动板面的每个方法末尾（`moveCard`/`arrange`/`linkSource`/`unlinkSource`/`reconcile`/`createNote`/`removeNote`/`setStyle`/`createCard`/`removeCard`…）。组装文本与上次写过的逐字节比对，**没变就不写**——拖回原位、排布没改动的不惊动文件监视器，也不留空 diff |
+| 什么时候读 | 只在绑定目录时（`createProject`）。读不懂（JSON 坏了、`format` 不对、版本不认识）就当**没有**，并且**再也不覆盖它**——手改到一半的文件或更新格式写的文件，被旧投影盖掉就是数据丢失 |
+| 身份怎么判 | `planIdentity` 四态：文件里有 id ⇒ 用它；没有 ⇒ 退回 `projectIdOf(root)`（老画布因此零迁移）。记录存在且根目录就是这里 ⇒ **reuse**；记录指的旧路径已不存在 ⇒ **move**（改名/搬家，记录就地把 root 改过来）；旧路径还在 ⇒ **copy**（拷出来的一份），铸一个新 id 并改写它的板面文件，否则两个文件夹共用一个板面 |
+| 板面怎么导入 | `planSeats`：**已落座的卡片保留存储域里的座位**（那是本机更新的状态，陈旧的投影不能把它拖回去），缺的卡片按文件里的座位补，文件没提过的文件按「最右一张右边一步」落座。`planEdges` 把每条边过一遍 `validateEdge`（自环/重复/成环/端点不在板上丢掉），`planNotes` 按 id 去重。卡片条目上的 `empty: true`（只在为真时写）随座位交回 `createProject`，于是「这个座位生来没有产物」这条豁免（F1.11）也过得去机器 |
+| 什么不跟着走 | `sessionId`（换台机器就是另一个会话，带过去只会假装有对话）、视图状态、排队中的意图。划线处是**属性归谁**：作品的关系与布局走，本机态留下 |
+| 删除画布呢 | 只删本机记录，**不碰目录里的板面文件**：重新绑定即从文件恢复。忘记与恢复互为逆操作 |
+| 已知边界 | 快照是**整份覆盖**，没有逐条合并，所以同一份目录不该被两个部署同时编辑（产品文档 §六 已把实时协作划在界外）。拷贝出去的那一份**只继承布局与关系**，不继承会话 |
+
+### 探针三态：什么时候才可以说一张卡「失效」（F1.11，v1.47）
+
+板上「缺产物」看起来是一件事，实际是三件，而**批量操作只许碰其中一件**。`probe` 返回布尔，把所有失败都折进 `present: false`——画板面够用（说不清就先别下结论），但拿它去决定「把这张卡从板上拿掉」就是把「读不到」当成了「不存在」。于是另有 `ArtifactIo.presenceOf()`：
+
+| 态 | 怎么来的 | 能做什么 |
+|----|----------|----------|
+| `present` | 目标解析成功、`stat` 有结果（目录也算） | 什么都不用做 |
+| `absent` | 目标解析成功、`stat` 明确返回 `undefined`（协议原文：`undefined` 即不存在） | **唯一可以据此清卡的态** |
+| `unknown` | `ctx.fs.resolve` 抛错（路径不可表示、沙箱把它映射到别处），或 `stat` 抛错（`FS_PERMISSION_DENIED` / `FS_SANDBOX_DENIED` / `FS_IO_ERROR`） | **一律留下**，写一行日志说跳过了哪几张 |
+
+再叠两条：
+
+- **空座位不是幽灵。** 座位允许先于产物存在（客户端 `spawnFromSpec` 是先落座再写种子、位图要等一次生成、`canvas_create_on_board` 可以由 Agent 给一个还没写的路径落座）。这类卡记 `seatedEmpty: true`，`missingOf(presence, seatedEmpty)` 于是把它们排除在外；**观察者是 `readBoard`**——因为产物也可能是模型用自己的文件工具写出来的，只有探针能看见填写这件事。这也顺手让 `readBoard` 从「每张卡都读一段正文」变成纯 `stat`。
+- **根自己探不到就整体拒绝。** 那时每张卡都像缺了，而「目录真没了」与「路径解析坏了」在这里分辨不出；一次点击清空整块画板不是可以从一个失败的探针里推出的结论，所以抛 `canvas/root-unavailable`，请用户改用「移除画布」。
+
+落点：判据抽成纯模块 `core/canvas/cleanup.ts` 的 `planCleanup(cards)`（`{ remove, unknown }`，容器内可测），host 只负责采集事实与执行级联删除。**变淡（F3.5）、计数、清理三者共用 `BoardCard.missing` 这一个判据**——按钮上的数字与点下去真正会少掉的卡必须是同一个集合，否则用户只会在「说 3 张、走了 2 张」里失去信任。
 
 ## 七、形态注册表落在哪个席位
 
@@ -520,7 +582,7 @@ ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
 
 ### 控制带的尺寸（F3.11 右下角那颗把手）
 
-控制带（`card-overlay.tsx`）能拖大，尺寸落在两处：整条带的宽写在内联 `width` 上、输入框的高写在 `textarea` 上。**带子的高从来不自己定**——它是「材料行 + 输入框 + 底栏」三行自然长出来的，所以放大能改的只有「输入框多占多少」；字号、行高、内边距、圆角一个都不动——放大态（⤢）走的是同一个 `ComposerBody` 与同一个输入框，变的只是外壳给它的余地（`data-fullscreen` 那两条 flex 规则），没有另一套更大的字。于是「放大之后还是同一副样子」是结构给的，不是靠人守的。
+控制带（`card-overlay.tsx`）能拖大，尺寸落在两处：整条带的宽写在内联 `width` 上、输入框的高写在输入框自己的根上（v1.48 起正文是 `contenteditable`、不再是 `textarea`，见下一节）。**带子的高从来不自己定**——它是「材料行 + 输入框 + 底栏」三行自然长出来的，所以放大能改的只有「输入框多占多少」；字号、行高、内边距、圆角一个都不动——放大态（⤢）走的是同一个 `ComposerBody` 与同一个输入框，变的只是外壳给它的余地（`data-fullscreen` 那两条 flex 规则），没有另一套更大的字。于是「放大之后还是同一副样子」是结构给的，不是靠人守的。
 
 算术全在 `composer-size.ts`（纯模块、不碰宿主原语，单测直接读它）：起笔时按 `getBoundingClientRect` 量一次当下多大，那就是**起点**（所以第一下不跳）；之后每一个指针位移都先除 `zoom`——带子坐在 `scale(zoom)` 的层里，不除的话把画布放到 200% 再拖就是鼠标的两倍快。上下限在那里收口，下限是「装得下自己」而不是「刚才多大」，所以拖大过还拖得回默认。
 
@@ -531,6 +593,29 @@ ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
 **放大态（右上角那颗 ⤢）不是另一副界面，是同一条控制带换了个壳**：那三行由同一个 `ComposerBody`（`card-overlay.tsx` 导出）画出来，卡片下方那条带子与放大后的弹窗都只是它的外壳——所以「放大之后布局与缩小态一致」不是靠两处对齐出来的，而是**根本没有第二套布局**。连输入框的高矮之别也走 `data-fullscreen` 这个属性而不是另一个类：三行的 class 序列在两种尺寸下逐字相同，真机探针直接比它（探针里那条「class 序列与行内一字不差」）。
 
 **两处按钮各管各的壳**，所以各站各的地盘：行内带子右上角那颗是〔放大〕（⤢，`canvas.composer.enlarge`，`corner` prop 可选——**只有行内传**），弹窗**头部右上角**那颗是〔缩小〕（⤡，`canvas.composer.shrink`）。底层的〔缩小〕因此站到 `.dsh-canvas-dialog-head` 里去（`.dsh-canvas-promptmodal-shrink`：`margin-left:auto` 推右沿、`flex:none` 防被长标题挤扁、上下 `-4px` 把 26px 的胶囊塞进头部那一行，头部高度因此不变），而不是混进那三行——**材料行与行内逐项相同，一颗多余的按钮都没有**，探针里「放大态那三行里不再有那颗 ⤢」和「缩小那颗整颗落在头部里、在内容区之上」两条判据盯着这件事。弹窗底部那枚重复的「收起」也已删掉：退出去走头部那颗、Esc 或点遮罩。前一个版本里放大态另有一套 13px/21px 的字号（`.is-modal`），那正是「放大之后不像同一个东西」的根源，已撤。
+
+### 提示词输入面：contenteditable 与原子引用标签（F3.18，v1.48）
+
+正文（`client/ui/prompt-input.tsx`）是 `contenteditable`，`@文件` 记号画成 `contenteditable="false"` 的原子标签。三件东西分三层放：**纯解析**在 `core/artifact/prompt-blocks.ts`（零依赖、node 单测直接覆盖——类型表、坐标语法、原子切分都在这儿）；**DOM 层**在 `client/ui/prompt-dom.ts`（只碰 DOM、不碰 React、不做任何决定）；**决定**在组件里（删哪一段、插什么字，都按值算出新值再连同光标一起写回）。DOM 层只在有 DOM 的地方成立，node 单测够不到，判据在 `.workbuddy/repro/prompt-refs/`（真组件 + 真样式 + 真浏览器：21 项 + 两条反证，`gen.cjs` 生成、`check.cjs` 判，退出码非 0 即红）。
+
+上一版是「透明 textarea + 同度量镜像层」：显示改得到、值改不到，但**画不出一枚真正的标签**——镜像只能重绘同一串字符，插不进图标、显不了缩略图，而一件事只有真做成原子节点才谈得上原子。换成 contenteditable 的代价是一条要自己守的边界：**内容就是值**。守在三处：
+
+| 组 | 函数 | 规矩 |
+|---|---|---|
+| 写 | `writeAtoms` | 值 → 内容。**唯一的写入口**（别处一律不许碰它的 childNodes），且只在外面的值或事实真变了时才写——判据是组件里的 `markRef`（值 + 事实的键，键比**内容**不比对象身份：调用方每次渲染都新造一个对象，按身份比就会每渲染重画一遍、打字打到一半光标被拽走）。用户自己敲的字 DOM 已经是对的，重写一次就把光标与输入法一起打断；这也是它在中文输入法下安全的原因——合成期间 `change` 照发、DOM 一动不动 |
+| 读 | `serializeHost` | 内容 → 值。标签吐回**它自己那串字符**（`@a.ts` / `@"my brief.md"` / `@img.png <point>420 380</point>`），**不是从路径重新拼的一份**——宿主记号有三种形态，从 `filePath` 反推不出用户写的是哪一种，重新拼一次就可能把发出去的提示词改掉一个字节。这条「拼回去逐字节等于原文」由单测（纯函数）与复现页（真 DOM，十六种记号形态）两头钉住 |
+| 坐标 | `caretFlat` / `domPosition` / `setCaret` | 光标是「在第几个字符」，不是 DOM 的位置：**一枚标签占的字符数＝它 token 的长度**，与序列化逐字对齐——「界面上的位置」与「值里的位置」因此从一开始就是同一个坐标。删除、粘贴、落光标全部先换算成扁平偏移、改完再换回 DOM 位置；换算的规则只有一份（`lengthOf` 与 `flatten` 必须说同一句话，两处对不齐光标就从字底下错开） |
+
+四条交互判据从这里长出来：**标签整体删除**（Backspace / Delete 在标签边界上删的是一枚引用——按值算完 `preventDefault`，不赌浏览器在 `contenteditable=false` 边界上的默认行为；标签正后方的下一次删除走浏览器默认、只少一个字，这条对照也在判据里）、**标签内部不可编辑**（非可编辑节点里没有光标）、**复制 / 剪切按原文**（标签在剪贴板里还原成 `@路径`——按画出来的样子复制，粘回去就少一截）、**粘贴只取纯文本**（富文本带进来的那棵 DOM 正是这条边界最容易被撕开的地方；拖放同理）。
+
+**多模态的类型按扩展名定**（`referenceTypeOf`，判据只有一份、写在路径里——调用方手上的卡片可能已经离开画布，扩展名却还在，两处也就不会各说各话）：`code` / `image` / `video` / `audio` 指一份**文件**；`mark` / `region` 指一张图上的**一个点或一个框**，坐标归一化到 0–999（`markText` 是构造那一半、`promptAtoms` 是解析那一半，两边共用同一份语法）。紧跟在文件记号后面的 `<point>` / `<bbox>` 并进**同一枚**标签——「这张图上的这个点」是一件事，不是两件；并完它照样只剩一个字符区间，所以原子删除、复制、序列化三条路一个字都不用改。**标签写文件名，不写序号**：本插件的锚点就是路径（模型照 `read` 自己去取那一份），视觉内容不走第二条通道——参考文档里「图片另走一路、文本里留 `@图片1`」属于另一家的接线方式，不取。缩略图**只在真取得到时**才画：控制带分批读产物 data URL（一批 4 枚、只取图片——视频的整段片子拿来当一枚小图是拿几十 MB 换几十个像素），取不到退回类型图标，**缩略图是锦上添花，不是引用的前提**。
+
+**两处真问题，都是判据抓的**（修复前对照留档 `prompt-refs-before.log`）：
+
+- **事实变富时光标会被端走**（实测 `16 → 0`）。缩略图回来那一刻 `refs` 变了、值没变，`writeAtoms` 仍要重画一次——而它换的是整棵子树，选区连着它那个容器节点一起没了，浏览器只好把光标扔回开头。修法是**先量后画**：只换事实的那一路，先把选区量下来，画完原样还回去——还的是**一整个选区**，不只是折叠的光标（用户可能正选着半句话）；值也变了的那一路（回填、切卡、清空）不还，光标照旧放到末尾。
+- **20px 的缩略图会压掉标签的发丝边**。标签那一行是 18px（内边距 2+2、行高 14），20px 的图在 14px 的内容盒里上下各探出 1px，而那圈发丝边是画在盒子**外面**的 `box-shadow`——探出来的 1px 正好把它压掉一段（「标签的边缺了个口」，后代盖住祖先描边那一族）。缩略图因此与标签**同高**（18px），上下 `-2px` 的外边距把高差吃进内容盒（flex 容器的自动高按**外尺寸**取最大，负外边距于是真能把高差吃掉）。判据里有一条反证专门把 20px 那次注回去、看上下各 1px 的越界重现——这条尺子才有牙。
+
+**行高是判据**：一枚标签（含缩略图）不许把正文那一行撑开，否则插进一句话中间就把整段的行距改了。量法是 `scrollHeight`，而且要先把皮肤类上的 `min-height` 按下去——不按的话读数被钉在 54px 上，两条当然相等，判据成了摆设；以「图标那一枚」与「缩略图那一枚」互为对照，各配一条反证。两处落点（控制带与元素选择的提示词框）是同一个组件，判据里两处都量。
 
 ### 预览帧与元素选择探针
 
@@ -647,7 +732,8 @@ Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在�
 | Host 工具 | `ctx.tools.register('canvas_read_card', {...})` | `ctx.tools.register(defineTool({ name, description, parameters, output, execute }))`，需要 `inject: ['tools']` | 工具定义补 `output.schema` + `render`；名字须落在 `^[a-zA-Z0-9_-]+$`（§3.6） |
 | 跨卡片调用 | Agent 直接持有 `canvas.getCard()` | 双端一律经 Typert Remote：契约 → Host manifest → Client 贡献 | 每个方法一条 descriptor，三处引用同一数组 |
 | 页面/预览 | 自造 `preview(path) => Component` | 右栏 tab 类型注册表 + 资源地址认领 | 形态注册表一半落到宿主已有席位 |
-| 取材存储 | 自建「画布元数据文件」 | `defineDomain` + `ctx.storageDomain.open()`，`domain/changed` 通知 | 不需要自造持久化与变更广播 |
+| 取材存储 | 自建「画布元数据文件」 | `defineDomain` + `ctx.storageDomain.open()`，`domain/changed` 通知 | 不需要自造持久化与变更广播。**v1.47 把「自建元数据文件」以另一种身份请了回来**：目录里那份 `.dsh-canvas/board.json` 是**投影不是真源**（见 §6），它存在的理由是跨机器/跨目录的可迁移性，而不是想自己管持久化——写链、校验、变更通知仍全在存储域那边 |
+| 画布身份 | 「项目」由路径决定（隐含：目录不会动） | 身份写在**目录自己身上**（板面文件里的 `id`），绑定目录时先读它再决定是哪张画布（`planIdentity` 四态） | 改名不再等于新建一张画布，老画布零迁移（没有文件就退回路径摘要），复制出去的那份自动获得新身份 |
 | 会话创建 | 「创建卡片时自动创建独立会话」 | `ctx.sessions.create()` 归调用方 fiber；**不落盘**，必须经 agent 生命周期事务 | P0 的会话绑定需先打通 agent 工厂，工作量重估 |
 | 会话隔离 | 靠 system prompt 约定 | 工具注册作用域 + `restrict` / `schemas(scope)` 的可见性过滤 | 隔离可被结构性保证，不必靠提示词 |
 | 取材注入 | `agent.inject()` 抽象调用 | `agent.inject({ content, source: { kind: 'plugin', plugin } })`，追加持久化上下文但**不唤醒空闲 agent** | 响应策略（F5.7）需自行决定用 `inject` 还是直接发起轮次 |

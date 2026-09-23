@@ -29,9 +29,12 @@
  * edge are the same thing, so removing a chip removes exactly the relationship
  * it stands for.
  */
-import { useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { MutableRefObject, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { formatFileMention } from '../../core/artifact/file-reference.ts'
 import { isDirectTextKind } from '../../core/artifact/kind-registry.ts'
+import { referenceTypeOf, scanFileMentions } from '../../core/artifact/prompt-blocks.ts'
+import type { ReferenceFacts, ReferenceType } from '../../core/artifact/prompt-blocks.ts'
 import type { BoardCard, CardSummary } from '../../types.ts'
 import type { CanvasBridge, CatalogModel, ModelCatalog } from '../wire/bridge.ts'
 import {
@@ -43,16 +46,93 @@ import {
   type ModelSelectionView,
 } from '../wire/model-memory.ts'
 import type { Translate } from '../ui/locales.ts'
+import { PromptInput } from '../ui/prompt-input.tsx'
+import type { PromptInputHandle } from '../ui/prompt-input.tsx'
 import { composerSizeOf, resizedComposerSize, type ComposerSize } from './composer-size.ts'
+
+/** `@` 候选最多摆几枚：提示词框是个小地方，够挑就行，翻找交给继续打字。 */
+const REFERENCE_LIMIT = 8
+
+/**
+ * 菜单里的一枚候选——它就是提示词里那枚 `@路径` 的由来。
+ *
+ * `mention` 里那串字**已经过宿主记号语法的安检**（`formatFileMention`）：带不动的路径
+ * （含引号或控制字符）宁可不出现，也不插一枚读不出来的引用进去。
+ */
+interface ReferenceOption {
+  /** 工作区相对路径（卡片 id 就是它）。 */
+  path: string
+  mention: string
+  /** 显示名：路径最后一段（与取材 chips 同一套写法）。 */
+  label: string
+  /** 引用类型——按扩展名定（`referenceTypeOf`），决定标签的长相。 */
+  type: ReferenceType
+  /** 这张卡已经取材的来源，还是画布上别的卡片。 */
+  fromMaterial: boolean
+}
+
+/** 类型的中文名，给候选行右侧那枚小注用（与标签自己的长相是同一件事）。 */
+const REFERENCE_TYPE_LABEL = {
+  code: 'canvas.ref.type.code',
+  image: 'canvas.ref.type.image',
+  video: 'canvas.ref.type.video',
+  audio: 'canvas.ref.type.audio',
+  mark: 'canvas.ref.type.mark',
+  region: 'canvas.ref.type.region',
+} as const
+
+/**
+ * `@` 能引用哪些东西：**这张卡已有的取材来源在前**（它们的关系是板上画着的），画布其余
+ * 卡片在后。两处去重、按查询过滤，再截到上限。
+ *
+ * 与 ⊕ 菜单同一份数据、同一个念头：能引用的是**文件**，而卡片 id 就是它在工作区里的路径。
+ * 区别只在动作——⊕ 是替本卡会话把上游的路径报一遍，这里是往提示词里插一枚引用。
+ */
+function referenceOptions(
+  materials: readonly MaterialRef[],
+  others: readonly BoardCard[],
+  query: string,
+): ReferenceOption[] {
+  const seen = new Set<string>()
+  const all: ReferenceOption[] = []
+  const add = (path: string, fromMaterial: boolean): void => {
+    if (seen.has(path)) return
+    seen.add(path)
+    const mention = formatFileMention({ path, kind: 'file' })
+    if (mention === undefined) return
+    all.push({
+      path,
+      mention,
+      label: path.split('/').pop() ?? path,
+      type: referenceTypeOf(path),
+      fromMaterial,
+    })
+  }
+  for (const entry of materials) add(entry.cardId, true)
+  for (const other of others) add(other.id, false)
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return all.slice(0, REFERENCE_LIMIT)
+  return all.filter((option) => option.mention.toLowerCase().includes(needle)).slice(0, REFERENCE_LIMIT)
+}
+
+/**
+ * 一次最多取几枚缩略图。
+ *
+ * 缩略图走的是读产物那条通道（媒体是**整份** data URL，插件这条线上没有流、也没有资源
+ * 地址），所以它不能敞开取：一张 4 MB 的 PNG 过来就是 5 MB 的 base64。给看得见的那几枚
+ * 取（草稿里已引用的 + 菜单候选），一批几枚，取不到就退回图标——**缩略图是锦上添花，
+ * 不是引用的前提**。
+ */
+const THUMBNAIL_BATCH = 4
 
 /**
  * One declared material edge of the selected card, as its chip renders it.
  *
- * A chip is an edge, and only an edge: `readSources` also walks indirect
- * upstreams for the agent's benefit, but those are relationships of some card
- * further up the chain — there would be nothing to delete from this one. So the
- * strip lists exactly the direct edges the board reports, and joins each to its
- * digest for the tooltip.
+ * A chip is an edge, and only an edge: the strip lists exactly the direct edges
+ * the board reports, so every chip's delete button has an edge of its own to
+ * remove, and each is joined to its digest for the tooltip. (The digests are a
+ * convenience — one that could not be read leaves the tooltip empty, not the
+ * chip missing.)
  */
 export interface MaterialRef {
   /** Storage id of the edge — the handle `unlinkSource` takes. */
@@ -420,8 +500,13 @@ export interface ComposerBodyProps {
   fullscreen?: boolean
   /** 行内拖出来的输入框高（画布单位）；没拖过就没有。 */
   inputHeight?: number
-  /** 行内态用它量「现在多大」——把手起笔那一下要拿输入框的高当起点。 */
-  inputRef?: RefObject<HTMLTextAreaElement>
+  /**
+   * 交给调用方的一只把手：量输入框的高（把手起笔那一下要拿它当起点）。
+   *
+   * 它也是这一侧插引用要用的那只——`PromptInput` 把「量高、摆光标、插一枚引用」三件事
+   * 收成一个 handle，正文换成 `contenteditable` 之后调用方本来也不该再拿 `textarea` 的 ref。
+   */
+  inputRef?: MutableRefObject<PromptInputHandle | null>
   /** 右下角那颗把手——**只有行内有**：弹窗的大小由外壳说了算，不给拖。 */
   grip?: ReactNode
 }
@@ -432,6 +517,84 @@ export function ComposerBody(props: ComposerBodyProps) {
     onAddMaterial, onReferenceMaterials, onDropMaterial, corner, fullscreen, inputHeight, inputRef, grip,
   } = props
   const [menu, setMenu] = useState(false)
+  /** 输入框里光标前那半枚 `@查询`；`null` = 没在打引用。菜单开不开就看它。 */
+  const [query, setQuery] = useState<string | null>(null)
+  /** 候选里高亮到第几枚（键盘上下键走）。 */
+  const [picked, setPicked] = useState(0)
+  /** 输入框那只把手。调用方给了槽位就用它，没给（放大态）就自己揣一只。 */
+  const own = useRef<PromptInputHandle | null>(null)
+  const slot = inputRef ?? own
+  const options = useMemo(
+    () => (query === null ? [] : referenceOptions(materials, others, query)),
+    [materials, others, query],
+  )
+  /** 高亮那一枚；候选变短时收回界内，免得越界。 */
+  const at = options.length === 0 ? 0 : Math.min(picked, options.length - 1)
+  /**
+   * 已经取回来的缩略图，按路径记着。
+   *
+   * 按路径而不是按卡片：同一张图被两张卡引用时就只取一次，而引用它的那句话在哪张卡上
+   * 都一样该看见它。
+   */
+  const [thumbs, setThumbs] = useState<Record<string, string>>({})
+  const pendingThumbs = useRef(new Set<string>())
+  /**
+   * 该给谁取缩略图：**草稿里已经引用的**（用户正在看的那几枚标签）+ **菜单候选里的**。
+   *
+   * 只挑图片：视频的 data URL 是整段片子，取来当 20px 的小图是拿几十 MB 换几十个像素，
+   * 不值——它照样有自己的类型图标。
+   */
+  const wantedKey = useMemo(() => {
+    const paths = new Set<string>()
+    for (const segment of scanFileMentions(draft)) {
+      if (segment.kind === 'file' && referenceTypeOf(segment.path) === 'image') paths.add(segment.path)
+    }
+    for (const option of options) {
+      if (option.type === 'image') paths.add(option.path)
+    }
+    return [...paths].join('\n')
+  }, [draft, options])
+
+  useEffect(() => {
+    const missing = (wantedKey === '' ? [] : wantedKey.split('\n'))
+      .filter((path) => thumbs[path] === undefined && !pendingThumbs.current.has(path))
+      .slice(0, THUMBNAIL_BATCH)
+    if (missing.length === 0) return undefined
+    let cancelled = false
+    for (const path of missing) pendingThumbs.current.add(path)
+    void (async () => {
+      const loaded: [string, string][] = []
+      for (const path of missing) {
+        try {
+          const view = await bridge.readArtifact(card.project, path)
+          if (view.dataUrl !== '') loaded.push([path, view.dataUrl])
+        } catch {
+          // 读不到就没有缩略图（图标照样画）：它是锦上添花，不是引用的前提。
+        } finally {
+          pendingThumbs.current.delete(path)
+        }
+      }
+      if (cancelled || loaded.length === 0) return
+      setThumbs((now) => ({ ...now, ...Object.fromEntries(loaded) }))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [bridge, card.project, thumbs, wantedKey])
+
+  /** 交给输入框的「文件之外的事实」：今天只有缩略图这一项（行号还没有哪个界面知道）。 */
+  const refs = useMemo<Record<string, ReferenceFacts>>(() => {
+    const facts: Record<string, ReferenceFacts> = {}
+    for (const [path, url] of Object.entries(thumbs)) facts[path] = { thumbnail: url }
+    return facts
+  }, [thumbs])
+  /** 选中一枚：插进输入框（插完查询那半枚已被顶掉），菜单收起。 */
+  const choose = (option: ReferenceOption | undefined): void => {
+    if (option === undefined) return
+    slot.current?.insertMention(option.mention)
+    setQuery(null)
+    setPicked(0)
+  }
   const canSend = draft.trim() !== ''
   // The memory is keyed by what the card *is*, not by which card it is: that is
   // what lets the next node of the same type start from the last choice.
@@ -506,19 +669,81 @@ export function ComposerBody(props: ComposerBodyProps) {
             {corner.glyph}
           </button>
         )}
+
+        {/* `@` 候选：在输入框里打一个 `@`，光标前那半枚查询就是过滤条件（内容随打字变，
+            所以菜单不用自己收——查询一散它就散了）。候选是**能引用的文件**：这张卡已经
+            取材的上游在前、画布别的卡片在后，与 ⊕ 菜单同一份数据。选中插进去的是一枚
+            **引用标签**，而它落到提示词里的仍只是那串 `@路径`——发出去的逐字不变。 */}
+        {query === null ? null : (
+          <div className="dsh-canvas-menu dsh-canvas-refmenu" role="listbox" aria-label={t('canvas.composer.reference')}>
+            {options.length === 0 ? (
+              <span className="dsh-canvas-composer-menuempty">{t('canvas.composer.noReference')}</span>
+            ) : (
+              options.map((option, index) => (
+                <button
+                  className="dsh-canvas-row"
+                  key={option.mention}
+                  role="option"
+                  aria-selected={index === at}
+                  data-at={index === at ? 'true' : undefined}
+                  title={option.fromMaterial ? t('canvas.composer.referenceMeta') : option.path}
+                  // 按住不夺焦点：这一下点的是候选，光标该留在框里（松开才是选）。
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => choose(option)}
+                >
+                  {thumbs[option.path] === undefined ? null : (
+                    <img className="dsh-canvas-refthumb" src={thumbs[option.path]} alt="" />
+                  )}
+                  {option.label}
+                  <span className="dsh-canvas-row-meta">{t(REFERENCE_TYPE_LABEL[option.type])}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
-      <textarea
+      {/* 输入框是公共件 PromptInput：`@文件` 记号在这里画成一枚引用标签（图标 + 文件名 +
+          可选行号），行内与放大弹窗共用这一个（见 ../ui/prompt-input.tsx）。 */}
+      <PromptInput
         className="dsh-canvas-composer-input"
         data-fullscreen={fullscreen === true ? 'true' : undefined}
-        ref={inputRef}
+        handleRef={slot}
         autoFocus={fullscreen === true}
         data-sized={inputHeight === undefined ? undefined : 'true'}
         style={inputHeight === undefined ? undefined : { height: `${inputHeight}px` }}
         placeholder={t('canvas.composer.placeholder')}
         value={draft}
-        onChange={(event) => onDraftChange(event.target.value)}
+        onChange={onDraftChange}
+        refs={refs}
+        onQueryChange={(next) => {
+          setQuery(next)
+          setPicked(0)
+        }}
         onKeyDown={(event) => {
+          // 菜单开着时方向键与 Enter 归菜单；Esc 只收菜单（这一下不该顺手把弹窗关了），
+          // 输入法正在选字时那一下 Enter 也不算选中。
+          if (query !== null && !event.nativeEvent.isComposing) {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault()
+              if (options.length > 0) {
+                const step = event.key === 'ArrowDown' ? 1 : -1
+                setPicked((now) => (Math.min(now, options.length - 1) + step + options.length) % options.length)
+              }
+              return
+            }
+            if (event.key === 'Enter' || event.key === 'Tab') {
+              event.preventDefault()
+              choose(options[at])
+              return
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              event.stopPropagation()
+              setQuery(null)
+              return
+            }
+          }
           // ⌘/Ctrl + Enter sends; a bare Enter belongs to the text, because a
           // prompt is usually several lines. Same chord in both sizes.
           if (event.key === 'Enter' && !event.shiftKey && (event.metaKey || event.ctrlKey)) {
@@ -566,7 +791,7 @@ export function CardSelection(props: CardSelectionProps) {
   // 塞一次状态），放手才落进记忆——与卡片自己的拖动同一个套路（见 `card-tile.tsx`）。
   const [dragged, setDragged] = useState<ComposerSize | undefined>(undefined)
   const boxRef = useRef<HTMLDivElement | null>(null)
-  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const inputRef = useRef<PromptInputHandle | null>(null)
   const gripDrag = useRef<{ x: number; y: number; start: ComposerSize } | undefined>(undefined)
   const live = dragged ?? size
 
@@ -583,7 +808,7 @@ export function CardSelection(props: CardSelectionProps) {
     event.stopPropagation()
     event.preventDefault()
     const box = boxRef.current?.getBoundingClientRect()
-    const input = inputRef.current?.getBoundingClientRect()
+    const input = inputRef.current?.el?.getBoundingClientRect()
     if (box === undefined || input === undefined) return
     gripDrag.current = {
       x: event.clientX,

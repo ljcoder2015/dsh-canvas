@@ -281,9 +281,24 @@ export class CanvasBridge {
     return unwrap(this.card.scaffoldWebapp(projectId, name, position, this.signal))
   }
 
+  /**
+   * Scaffold a design document and seat its card (设计节点).
+   *
+   * Like the webapp scaffold, the host settles the name against the disk; the
+   * returned card id is the `.design` file actually written.
+   */
+  scaffoldDesign(projectId: string, name: string, position: Point): Promise<BoardCard> {
+    return unwrap(this.card.scaffoldDesign(projectId, name, position, this.signal))
+  }
+
   /** Take a card off the board. The file stays. */
   removeCard(projectId: string, cardId: string): Promise<boolean> {
     return unwrap(this.card.removeCard(projectId, cardId, this.signal))
+  }
+
+  /** Take every card whose artifact is gone off the board. Files stay. */
+  removeMissingCards(projectId: string): Promise<number> {
+    return unwrap(this.card.removeMissingCards(projectId, this.signal))
   }
 
   /** The bounded digest of one artifact. */

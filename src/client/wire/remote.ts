@@ -34,7 +34,7 @@ import type {
   Viewport,
   WriteResult,
 } from '../../types.ts'
-import { DSH_CANVAS_INVOCATIONS } from '../../contract.ts'
+import { DSH_CANVAS_INVOCATIONS, type DesignDocumentWire, type DesignEditResultWire } from '../../contract.ts'
 
 /** What the browser mounts to obtain `ctx.remote.canvas` and `ctx.remote.card`. */
 export const DSH_CANVAS_REMOTE: TypertRemoteContribution = {
@@ -74,7 +74,11 @@ export interface CanvasFace {
 export interface CardFace {
   createCard(projectId: string, cardId: string, kind: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
   scaffoldWebapp(projectId: string, name: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
+  scaffoldDesign(projectId: string, name: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
+  readDesign(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<DesignDocumentWire>>
+  editDesign(projectId: string, cardId: string, ops: unknown[], signal?: AbortSignal): Promise<RemoteResult<DesignEditResultWire>>
   removeCard(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<boolean>>
+  removeMissingCards(projectId: string, signal?: AbortSignal): Promise<RemoteResult<number>>
   readSummary(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary>>
   readArtifact(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<ArtifactView>>
   readSources(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary[]>>
@@ -137,7 +141,11 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 
     'card/createCard': CardFace['createCard']
     'card/scaffoldWebapp': CardFace['scaffoldWebapp']
+    'card/scaffoldDesign': CardFace['scaffoldDesign']
+    'card/readDesign': CardFace['readDesign']
+    'card/editDesign': CardFace['editDesign']
     'card/removeCard': CardFace['removeCard']
+    'card/removeMissingCards': CardFace['removeMissingCards']
     'card/readSummary': CardFace['readSummary']
     'card/readArtifact': CardFace['readArtifact']
     'card/readSources': CardFace['readSources']

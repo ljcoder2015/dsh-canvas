@@ -37,13 +37,30 @@ const projectRecord = z.object({
   createdAt: z.number(),
 })
 
-/** One card: seating, resolved kind, and the bound Agent session (F1.4, F2.2, F3.1). */
+/**
+ * One card: seating, resolved kind, and the bound Agent session (F1.4, F2.2, F3.1).
+ *
+ * `seatedEmpty` records that the seat was created while its artifact did not
+ * exist yet — a state a card is allowed to be in, since a dock spec seeds the
+ * file a moment after seating it and an Agent may seat a card for what it is
+ * about to write. It is what lets "missing artifact" (F3.5) mean *gone* rather
+ * than *not written yet*, and so what keeps a bulk cleanup (F1.11) off a card
+ * that was never anything but a promise.
+ *
+ * Optional on purpose: records written before this field existed are cards
+ * whose history nobody recorded, and `undefined` reads as "not known to be
+ * empty", which leaves them removable. Widening a record schema with an
+ * optional key needs no domain version bump and no migration — every stored
+ * record stays valid (`dsh-storage-domain` refuses the whole domain at open if
+ * one fails its schema, so a *required* key would have locked users out).
+ */
 const cardRecord = z.object({
   project: z.string(),
   kind: z.string(),
   position: point,
   sessionId: z.string(),
   updatedAt: z.number(),
+  seatedEmpty: z.boolean().optional(),
 })
 
 /** One source edge: `downstream` builds on `upstream` (F4.1, F4.3). */

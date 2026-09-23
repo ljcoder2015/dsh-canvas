@@ -21,6 +21,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { CardSummary, ExportFormat, ReferencedFiles, SourceChain } from '../types.ts'
 import { TOOL_NAMES } from '../contract.ts'
+import type { DesignOpInput } from '../core/artifact/design/ops.ts'
 import type { CanvasRuntime } from './canvas-runtime.ts'
 import type { CardRuntime } from './card-runtime.ts'
 import type { SessionManager } from '../core/session/session-manager.ts'
@@ -46,6 +47,54 @@ const SUMMARY_PROPERTIES = {
   outline: { type: 'array', items: { type: 'string' } },
   bytes: { type: 'number' },
   updatedAt: { type: 'number' },
+} as const
+
+/** One design node, as `canvas_design_read` returns and `canvas_design_edit` accepts (F2.6, v2 — scene-graph). */
+const DESIGN_NODE_PROPERTIES = {
+  id: { type: 'string' },
+  type: { type: 'string' },
+  parentId: { type: 'string' },
+  name: { type: 'string' },
+  x: { type: 'number' },
+  y: { type: 'number' },
+  width: { type: 'number' },
+  height: { type: 'number' },
+  rotation: { type: 'number' },
+  opacity: { type: 'number' },
+  cornerRadius: { type: 'number' },
+  visible: { type: 'boolean' },
+  fill: { type: 'string' },
+  stroke: { type: 'string' },
+  strokeWidth: { type: 'number' },
+  text: { type: 'string' },
+  fontSize: { type: 'number' },
+  fontFamily: { type: 'string' },
+  align: { type: 'string' },
+} as const
+
+/** One structured edit op, as the schema declares it. */
+const DESIGN_OP_PROPERTIES = {
+  kind: { type: 'string' },
+  id: { type: 'string' },
+  type: { type: 'string' },
+  parentId: { type: 'string' },
+  name: { type: 'string' },
+  x: { type: 'number' },
+  y: { type: 'number' },
+  rotation: { type: 'number' },
+  width: { type: 'number' },
+  height: { type: 'number' },
+  cornerRadius: { type: 'number' },
+  opacity: { type: 'number' },
+  fill: { type: 'string' },
+  stroke: { type: 'string' },
+  strokeWidth: { type: 'number' },
+  text: { type: 'string' },
+  fontSize: { type: 'number' },
+  fontFamily: { type: 'string' },
+  align: { type: 'string' },
+  visible: { type: 'boolean' },
+  index: { type: 'number' },
 } as const
 
 /** One summary rendered for the model. */
@@ -112,10 +161,8 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.readSources,
       description:
-        '读取当前卡片全部取材来源（上游产物）的摘要，按由近及远排列。改动产物前先调用它，避免与上游脱节。',
-      parameters: {
-        depth: { type: 'integer', description: '解析链的层数；省略则用部署默认值', },
-      },
+        '读取当前卡片取材来源（直接上游产物）的摘要。取材只取上一级：这里不会带回上游的上游，那部分材料应由上游产物自己消化。改动产物前先调用它，避免与上游脱节。',
+      parameters: {},
       output: {
         schema: { type: 'array', items: { type: 'object', properties: SUMMARY_PROPERTIES, additionalProperties: false } },
         render: (_args, value) => {
@@ -222,7 +269,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.referenceFiles,
       description:
-        '把当前卡片的取材来源以「文件引用」交给本会话：注入的是上游产物的 @路径（模型自己用 read 工具按需读取），不是内容副本。想知道上游文件在哪、按需取用时用它；想把上游内容摘要直接拿到上下文里，用 canvas_read_sources 或 canvas_inject_card。',
+        '把当前卡片的取材来源（直接上游产物）以「文件引用」交给本会话：注入的是上游产物的 @路径（模型自己用 read 工具按需读取），不是内容副本。只报上一级，不做穿透引用。想知道上游文件在哪、按需取用时用它；想把上游内容摘要直接拿到上下文里，用 canvas_read_sources 或 canvas_inject_card。',
       parameters: {},
       output: {
         schema: {
@@ -271,6 +318,82 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         const caller = callingCard(exec.agent?.id)
         if (caller === undefined) throw new Error(`${TOOL_NAMES.referenceFiles} 只能在卡片会话内调用。`)
         return deps.card.referenceFiles(caller.project, caller.cardId, exec.signal)
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: TOOL_NAMES.designRead,
+      description:
+        '读取本卡设计文档（.design）的 JSON 结构：画板清单与全部图层的 id、几何、样式。修改设计前必须先读它——canvas_design_edit 的 ops 要引用这里返回的节点 id。',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            cardId: { type: 'string' },
+            formatVersion: { type: 'number' },
+            artboards: { type: 'array', items: { type: 'string' } },
+            nodes: { type: 'array', items: { type: 'object', properties: DESIGN_NODE_PROPERTIES, additionalProperties: false } },
+          },
+          additionalProperties: false,
+        },
+        render: (_args, value) => {
+          const doc = value as { cardId: string; artboards: string[]; nodes: readonly unknown[] }
+          return text(
+            [
+              `设计文档 ${doc.cardId}：${doc.artboards.length} 画板 · ${doc.nodes.length} 图层`,
+              `画板：${doc.artboards.join('、') || '无'}`,
+              JSON.stringify(doc.nodes, null, 1),
+            ].join('\n'),
+          )
+        },
+      },
+      async execute(_args, exec) {
+        const caller = callingCard(exec.agent?.id)
+        if (caller === undefined) throw new Error(`${TOOL_NAMES.designRead} 只能在卡片会话内调用。`)
+        return deps.card.readDesign(caller.project, caller.cardId, exec.signal)
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: TOOL_NAMES.designEdit,
+      description:
+        '对本卡设计文档应用批量结构化编辑 op。kind=upsert 新建（缺 id 自动分配）；setProps 改属性；move 挪位置/换父节点；delete 级联删除子图层；reorder 调整叠放次序（index 省略则移到最上层）。坐标是图层坐标（x/y 为左上角），颜色用 #RRGGBB[AA]。一次给一批 op；全部失败会报错，部分失败时 errors 逐条说明。',
+      parameters: {
+        ops: {
+          type: 'array',
+          required: true,
+          items: { type: 'object', properties: DESIGN_OP_PROPERTIES, additionalProperties: false },
+          description: '编辑 op 列表（1–200 条）',
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            cardId: { type: 'string' },
+            applied: { type: 'number' },
+            errors: { type: 'array', items: { type: 'string' } },
+            version: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+        render: (_args, value) => {
+          const result = value as { cardId: string; applied: number; errors: string[] }
+          const head = `已应用 ${result.applied} 条编辑到 ${result.cardId}。`
+          if (result.errors.length === 0) return text(head)
+          return text([head, `失败 ${result.errors.length} 条：`, ...result.errors].join('\n'))
+        },
+      },
+      async execute(args, exec) {
+        const caller = callingCard(exec.agent?.id)
+        if (caller === undefined) throw new Error(`${TOOL_NAMES.designEdit} 只能在卡片会话内调用。`)
+        const ops = Array.isArray(args.ops) ? (args.ops as DesignOpInput[]) : []
+        return deps.card.editDesign(caller.project, caller.cardId, ops, exec.signal)
       },
     }),
   )
@@ -354,12 +477,12 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.createOnBoard,
       description:
-        '在画布上创建内容：type=note 创建共享便利贴（决策记录），type=card 把项目内的一个产物落成卡片，type=webapp 新建一个应用节点——建文件夹并写入 web components + shadcn 风格的 web 应用脚手架。',
+        '在画布上创建内容：type=note 创建共享便利贴（决策记录），type=card 把项目内的一个产物落成卡片，type=webapp 新建一个应用节点——建文件夹并写入 web components + shadcn 风格的 web 应用脚手架，type=design 新建一个设计节点——写入含空白画板的场景图设计文档（.design v2）。',
       parameters: {
-        type: { type: 'string', enum: ['note', 'card', 'webapp'], description: '创建类型', required: true },
+        type: { type: 'string', enum: ['note', 'card', 'webapp', 'design'], description: '创建类型', required: true },
         content: {
           type: 'string',
-          description: 'note 为便利贴文字；card 为项目内相对路径；webapp 为应用显示名（文件夹名由它生成）',
+          description: 'note 为便利贴文字；card 为项目内相对路径；webapp / design 为显示名（落盘名字由它生成）',
           required: true,
         },
         kind: { type: 'string', description: 'type=card 时的形态 id；省略则按文件证据认定' },
@@ -376,6 +499,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
           const created = value as { type: string; id: string }
           if (created.type === 'note') return text(`已创建便利贴 ${created.id}。`)
           if (created.type === 'webapp') return text(`已创建应用 ${created.id}（入口 index.html，文件夹内含脚手架）。`)
+          if (created.type === 'design') return text(`已创建设计 ${created.id}（.design，含空白画板）。`)
           return text(`已在画布上创建卡片 ${created.id}。`)
         },
       },
@@ -400,6 +524,15 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
             exec.signal,
           )
           return { type: 'webapp', id: card.id }
+        }
+        if (args.type === 'design') {
+          const card = await deps.card.scaffoldDesign(
+            projectId,
+            String(args.content),
+            { x: x ?? 48, y: y ?? 170 },
+            exec.signal,
+          )
+          return { type: 'design', id: card.id }
         }
         const cardId = String(args.content)
         const kind = typeof args.kind === 'string' ? args.kind : 'file'

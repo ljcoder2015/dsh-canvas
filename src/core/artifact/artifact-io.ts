@@ -18,6 +18,7 @@ import type { ArtifactView, CardId, CardSummary, FolderEntry } from '../../types
 import { PROBE_HEAD_LIMIT, digestOf, detectKind, isHtmlKind, kindLabel, outlineOf, type KindProbe } from './kind-registry.ts'
 import { injectPreviewLinkGuard, inlineWebAppAssets, webAppAssetRefs, webappFiles } from './webapp.ts'
 import { injectPreviewPicker } from './preview-picker.ts'
+import { decodeDesignFile, designDigest, encodeDesignFile, type DesignGraph } from './design/document.ts'
 
 /** A classified artifact: the kind plus the facts the board and the digest need. */
 export interface ArtifactFacts {
@@ -40,16 +41,47 @@ export interface ProjectCandidate {
 }
 
 /**
- * Whether a caught value is the seam's own typed error, checked structurally.
+ * How sure a probe is that an artifact is there (F1.11).
  *
- * The host runtime and this bundle may hold different `FsError` classes for
- * the same vocabulary, so `instanceof` cannot be trusted across that
- * boundary; the `FS_` code prefix is the identity `dsh-fs` actually owns.
+ * Three values rather than a boolean because the two failures are not the same
+ * fact: `absent` is the seam *saying* there is no such file, while `unknown` is
+ * the seam being unable to answer at all — a card id that will not resolve, a
+ * `stat` the sandbox or the permissions refused. A board can draw both the same
+ * way, but an operation that takes cards *off* the board must not: it may only
+ * act on what it can prove.
  */
+export type Presence = 'present' | 'absent' | 'unknown'
+
+/**
+ * Whether a card's artifact is provably gone (F3.5 / F1.11).
+ *
+ * `seatedEmpty` is the card's own record of having been seated without an
+ * artifact and never observed with one since — a seat is allowed to exist
+ * before its file does (a dock spec seeds the file a moment later, a bitmap has
+ * no text form until a generation run fills it, an Agent may seat a card for
+ * what it is about to write), so that state is **not** a missing artifact and
+ * must never be swept up as one.
+ */
+export function missingOf(presence: Presence, seatedEmpty: boolean | undefined): boolean {
+  return presence === 'absent' && seatedEmpty !== true
+}
+
+/**
+ * The seam's stable error code (`FS_*`) of a caught value, or `undefined`.
+ *
+ * Checked structurally, never with `instanceof`: the host runtime and this
+ * bundle may hold different `FsError` classes for the same vocabulary, so the
+ * `FS_` code prefix is the identity `dsh-fs` actually owns. Callers branch on
+ * the code, never on the message.
+ */
+export function fsErrorCodeOf(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code
+  return typeof code === 'string' && code.startsWith('FS_') ? code : undefined
+}
+
+/** Whether a caught value is the seam's own typed error (see {@link fsErrorCodeOf}). */
 function isSeamError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false
-  const code = (error as { code?: unknown }).code
-  return typeof code === 'string' && code.startsWith('FS_')
+  return error instanceof Error && fsErrorCodeOf(error) !== undefined
 }
 
 /**
@@ -172,6 +204,34 @@ export class ArtifactIo {
     }
   }
 
+  /**
+   * Whether an artifact is there, without reading a byte of it (F1.11).
+   *
+   * {@link probe} answers "what is this, and what does it say", and pays for
+   * that with a bounded head read and a directory listing; it also folds every
+   * failure into `present: false`. A board paint needs none of that — it needs
+   * "is it there" — and an operation that *removes* cards needs the difference
+   * between "the seam says no" and "the seam could not say", so this returns
+   * the three-valued {@link Presence} instead.
+   */
+  async presenceOf(root: string, cardId: CardId, signal?: AbortSignal): Promise<Presence> {
+    let target: FsTarget
+    try {
+      target = await this.targetOf(root, cardId, signal)
+    } catch {
+      // A card id the seam will not resolve: unrepresentable path, or one the
+      // sandbox maps out of this execution world. Not absence.
+      return 'unknown'
+    }
+    try {
+      return (await this.ctx.fs.stat(target, signal)) === undefined ? 'absent' : 'present'
+    } catch {
+      // Refused or failed rather than answered (`FS_PERMISSION_DENIED`,
+      // `FS_SANDBOX_DENIED`, `FS_IO_ERROR`): we cannot claim it is gone.
+      return 'unknown'
+    }
+  }
+
   /** Classify one card from its evidence. */
   async facts(root: string, cardId: CardId, signal?: AbortSignal): Promise<ArtifactFacts> {
     const probe = await this.probe(root, cardId, signal)
@@ -222,6 +282,28 @@ export class ArtifactIo {
       throw new FsError(`artifact is absent: ${cardId}`, 'FS_NOT_FOUND')
     }
 
+    // A design document's digest comes from the decoded structure, not from
+    // the file's text — the envelope's base64 body is noise to a prompt.
+    if (facts.kind === 'design') {
+      try {
+        const { doc } = await this.readDesign(root, cardId, signal)
+        const { summary, outline } = designDigest(doc, budget)
+        return {
+          cardId,
+          kind: facts.kind,
+          path: facts.displayPath,
+          summary,
+          outline,
+          bytes: facts.bytes,
+          updatedAt: Date.now(),
+        }
+      } catch (error) {
+        if (!isSeamError(error)) throw error
+        // Undecodable content falls through to the generic text digest, which
+        // shows the envelope header at least — honest about being unreadable.
+      }
+    }
+
     let text = ''
     if (!facts.kind.startsWith('image') && facts.kind !== 'video') {
       try {
@@ -260,6 +342,31 @@ export class ArtifactIo {
       const target = await this.ctx.fs.resolve(`${folder}/${file.path}`, { cwd: root, signal })
       await this.ctx.fs.writeText(target, file.content, undefined, signal, this.policyFor(root))
     }
+  }
+
+  /**
+   * Read a design document (设计节点, F2.6).
+   *
+   * The `.design` file is a text envelope — one header line plus a JSON
+   * snapshot of the scene graph — because the workspace seam is text-write-
+   * only; the decode lives in `core/artifact/design/`. Malformed content is
+   * the caller's error to present, so the envelope's own exceptions surface
+   * untouched.
+   */
+  async readDesign(root: string, cardId: CardId, signal?: AbortSignal): Promise<{ doc: DesignGraph; version: FsVersion }> {
+    const { text, version } = await this.readText(root, cardId, signal)
+    return { doc: decodeDesignFile(text), version }
+  }
+
+  /** Write a design document through the same seam and sandbox policy as {@link write}. */
+  async writeDesign(
+    root: string,
+    cardId: CardId,
+    doc: DesignGraph,
+    expected?: { version: FsVersion },
+    signal?: AbortSignal,
+  ): Promise<{ operation: 'create' | 'update'; version: string; before: string | null }> {
+    return this.write(root, cardId, encodeDesignFile(doc), expected, signal)
   }
 
   /** Cap on the local assets one HTML preview inlines. */

@@ -18,7 +18,9 @@ import { SessionManager } from './core/session/session-manager.ts'
 import { ModelRouting, modelFaces } from './core/session/model-routing.ts'
 import { CanvasRuntime } from './host/canvas-runtime.ts'
 import { CardRuntime } from './host/card-runtime.ts'
+import { BoardFile } from './host/board-file.ts'
 import { registerTools } from './host/tools.ts'
+import { registerAssetRoute } from './host/assets.ts'
 import { PLUGIN_ID, registerGlobalPrompt } from './host/prompt.ts'
 import { resolveCapabilities } from './capabilities.ts'
 import { TYPERT_MANIFEST } from './typert.ts'
@@ -38,7 +40,13 @@ export interface Config {
   arrangeGap: number
   /** Character budget of one artifact digest injected into a card session. */
   summaryBudget: number
-  /** How many hops of the source chain `getSources` resolves. */
+  /**
+   * How many hops the **chain view** resolves (F4.7).
+   *
+   * Only the graph view is configurable: what a card may read as material is
+   * one hop by rule (`core/canvas/source-store.ts` `materialUpstreams`), not by
+   * configuration.
+   */
   sourceDepth: number
   /** What happens to a downstream card's session when its material changes (F5.7). */
   upstreamPolicy: UpstreamPolicy
@@ -84,11 +92,20 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
   // controller, so the model policy they normally inherit is read once here and
   // applied to every agent this plugin opens (`core/model-routing.ts`).
   const routing = new ModelRouting(modelFaces(ctx))
+  // 板面文件（F1.9/F1.10）：目录自己带一份可迁移的板面投影。两个 Remote 服务都要写它
+  // （canvas 管座次与关系、card 管上下卡），所以共用一件实例——它自带「内容没变就不写」
+  // 的记忆，分成两件会让同一次改动写两遍。
+  const board = new BoardFile({
+    domain,
+    io,
+    log: (message, error) => ctx.logger(PLUGIN_ID).warn(message, error),
+  })
 
   const canvas = new CanvasRuntime(ctx, {
     domain,
     io,
     sessions,
+    board,
     arrangeGap: resolved.arrangeGap,
     sourceDepth: resolved.sourceDepth,
     pickerRoot: resolved.pickerRoot,
@@ -97,8 +114,8 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
     domain,
     io,
     sessions,
+    board,
     summaryBudget: resolved.summaryBudget,
-    sourceDepth: resolved.sourceDepth,
     upstreamPolicy: resolved.upstreamPolicy,
     routing,
     capabilities: resolveCapabilities(ctx),
@@ -106,6 +123,9 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
 
   registerTools(ctx, { domain, canvas, card, sessions })
   registerGlobalPrompt(ctx)
+  // Runtime assets for the design previewer (CanvasKit WASM, fonts) — a no-op
+  // on deployments without an HTTP surface.
+  registerAssetRoute(ctx)
 
   ctx.effect(() => {
     const dispose = ctx.typert.register(TYPERT_MANIFEST)

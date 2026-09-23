@@ -26,11 +26,14 @@ export type CardState = 'running' | 'notified' | 'idle' | 'missing'
  * because the missing file is the thing the user has to fix.
  *
  * @param summary - the session row, or `undefined` when no session is bound.
- * @param present - whether the bound file currently exists on disk.
+ * @param missing - whether the artifact is *provably gone* (F1.11). Not "the
+ *   file could not be read right now": a seat whose artifact has not been
+ *   written yet, and one no probe could judge, are both ordinary cards — the
+ *   host decides, so the board and the cleanup agree on one set (F1.11).
  * @returns the state to draw.
  */
-export function cardStateOf(summary: SessionSummary | undefined, present: boolean): CardState {
-  if (!present) return 'missing'
+export function cardStateOf(summary: SessionSummary | undefined, missing: boolean): CardState {
+  if (missing) return 'missing'
   if (summary === undefined) return 'idle'
   if (summary.running) return 'running'
   if (summary.pendingInteraction !== undefined || summary.completed === true) return 'notified'

@@ -24,6 +24,7 @@
  */
 import { dataViewer } from './viewers/data-viewer.tsx'
 import { deckViewer } from './viewers/deck-viewer.tsx'
+import { designViewer } from './viewers/design-viewer.tsx'
 import { imageViewer, videoViewer } from './viewers/media-viewer.tsx'
 import { markdownViewer } from './viewers/markdown-viewer.tsx'
 import { textViewer } from './viewers/text-viewer.tsx'
@@ -43,6 +44,7 @@ export const VIEWER_REGISTRY: readonly ViewerRegistration[] = [
   dataViewer,
   videoViewer,
   deckViewer,
+  designViewer,
   textViewer,
 ]
 

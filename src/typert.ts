@@ -45,7 +45,11 @@ const CANVAS_MEMBERS: readonly TypertMemberModel[] = [
 const CARD_MEMBERS: readonly TypertMemberModel[] = [
   member('createCard', 'createCard(projectId, cardId, kind, position, signal?): Promise<BoardCard>', '在画布上新建一张卡片。'),
   member('scaffoldWebapp', 'scaffoldWebapp(projectId, name, position, signal?): Promise<BoardCard>', '新建应用节点：建一个文件夹，写入 web components + shadcn 风格的 web 应用脚手架，并落成卡片。'),
+  member('scaffoldDesign', 'scaffoldDesign(projectId, name, position, signal?): Promise<BoardCard>', '新建设计节点：写入一份含空白画板的场景图设计文档（.design v2），并落成卡片。'),
+  member('readDesign', 'readDesign(projectId, cardId, signal?): Promise<DesignDocument>', '读取设计文档的 JSON 结构（画板与图层树，scene-graph 快照）。'),
+  member('editDesign', 'editDesign(projectId, cardId, ops, signal?): Promise<DesignEditResult>', '对设计文档应用批量结构化编辑 op（upsert/setProps/move/delete/reorder）。'),
   member('removeCard', 'removeCard(projectId, cardId, signal?): Promise<boolean>', '从画布移除卡片（不删除磁盘文件）。'),
+  member('removeMissingCards', 'removeMissingCards(projectId, signal?): Promise<number>', '一次移除板上所有产物已不在磁盘上的卡片，返回移除了几张；不删除磁盘文件。'),
   member('readSummary', 'readSummary(projectId, cardId, signal?): Promise<CardSummary>', '读取一张卡片产物的摘要。'),
   member('readArtifact', 'readArtifact(projectId, cardId, signal?): Promise<ArtifactView>', '读取一张卡片产物的全屏视图载荷（全文或媒体 data URL）。'),
   member('readSources', 'readSources(projectId, cardId, signal?): Promise<CardSummary[]>', '读取一张卡片的全部取材来源摘要。'),

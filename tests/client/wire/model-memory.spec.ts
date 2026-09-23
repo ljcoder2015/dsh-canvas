@@ -44,7 +44,7 @@ function card(kind: string): BoardCard {
     kindLabel: kind,
     position: { x: 0, y: 0 },
     sessionId: 's-1',
-    present: true,
+    missing: false,
   }
 }
 

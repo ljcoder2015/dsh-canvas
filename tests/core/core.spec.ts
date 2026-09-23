@@ -9,6 +9,7 @@ import { CARD_HEIGHT, CARD_WIDTH, arrangeSeats, depthsOf, nextFreeSeat } from '.
 import { projectIdOf, shortDigest, slugify } from '../../src/core/canvas/ids.ts'
 import { BUILTIN_KINDS, HTML_KINDS, detectKind, digestOf, isHtmlKind, kindSupportsExport, outlineOf } from '../../src/core/artifact/kind-registry.ts'
 import {
+  materialUpstreams,
   reconcileEdges,
   referencedPaths,
   sourceIdOf,
@@ -130,6 +131,22 @@ describe('source edges', () => {
     const shallow = transitiveUpstreams('d', edges, 1)
     expect(shallow.direct).toEqual(['c'])
     expect(shallow.indirect).toEqual([])
+  })
+
+  it('keeps material to one hop, however deep the chain behind it runs', () => {
+    // The rule the prompt, the digests and the file references all share: a
+    // card's material is its own edges. `transitiveUpstreams` is the *view*
+    // question and answers differently on the same graph — that difference is
+    // the point, so both are asserted side by side.
+    const edges = [edge('b', 'a'), edge('c', 'b'), edge('d', 'c')]
+    expect(materialUpstreams('d', edges)).toEqual(['c'])
+    expect(transitiveUpstreams('d', edges, 8).indirect).toEqual(['b', 'a'])
+
+    // Several parents are all still one hop, and order follows the edges.
+    const forked = [edge('d', 'c'), edge('d', 'a')]
+    expect(materialUpstreams('d', forked)).toEqual(['c', 'a'])
+
+    expect(materialUpstreams('a', edges)).toEqual([])
   })
 
   it('lists downstream cards from the upstream side', () => {

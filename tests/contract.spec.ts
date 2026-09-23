@@ -37,7 +37,7 @@ describe('dsh-canvas wire contract', () => {
 
   it('names every model-facing tool exactly once and inside the provider charset', () => {
     expect(new Set(TOOL_NAME_LIST).size).toBe(TOOL_NAME_LIST.length)
-    expect(TOOL_NAME_LIST).toHaveLength(14)
+    expect(TOOL_NAME_LIST).toHaveLength(16)
     // The provider validates `tools[].name` against ^[a-zA-Z0-9_-]+$ and
     // answers 400 for anything else, so the canvas namespace is joined with an
     // underscore: a dotted name never reaches the model.
@@ -98,7 +98,7 @@ describe('dsh-canvas wire contract', () => {
           kindLabel: 'Markdown',
           position: { x: 0, y: 0 },
           sessionId: '',
-          present: true,
+          missing: false,
         },
       ],
       sources: [],

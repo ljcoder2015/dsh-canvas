@@ -51,7 +51,7 @@ const CARD: BoardCard = {
   kindLabel: 'Deck',
   position: { x: 0, y: 0 },
   sessionId: '',
-  present: true,
+  missing: false,
 }
 
 /** One board, empty but well-shaped. */
@@ -125,6 +125,35 @@ function harness(options: { activeProject?: string; card?: { project: string; ca
     card: {
       readSummary: async (): Promise<CardSummary> => DIGEST,
       readSources: async (): Promise<CardSummary[]> => [DIGEST],
+      readDesign: async () => ({
+        cardId: 'untitled.design',
+        formatVersion: 2,
+        artboards: ['board-1'],
+        nodes: [
+          {
+            id: 'board-1',
+            type: 'frame',
+            parentId: 'page-1',
+            name: '画板 1',
+            x: 0,
+            y: 0,
+            width: 1024,
+            height: 1024,
+            rotation: 0,
+            opacity: 1,
+            cornerRadius: 0,
+            visible: true,
+            fill: '#ffffff',
+            stroke: '',
+            strokeWidth: 0,
+            text: '',
+            fontSize: 16,
+            fontFamily: '',
+            align: 'left',
+          },
+        ],
+      }),
+      editDesign: async () => ({ cardId: 'untitled.design', applied: 1, errors: [], version: 'v2' }),
       referenceFiles: async (): Promise<ReferencedFiles> => ({
         cardId: 'deck.html',
         skipped: [],
@@ -143,6 +172,7 @@ function harness(options: { activeProject?: string; card?: { project: string; ca
       injectCard: async (): Promise<CardSummary> => DIGEST,
       createCard: async (): Promise<BoardCard> => CARD,
       scaffoldWebapp: async (): Promise<BoardCard> => ({ ...CARD, id: 'site/index.html' }),
+      scaffoldDesign: async (): Promise<BoardCard> => ({ ...CARD, id: 'untitled.design', kind: 'design' }),
       generateImage: async () => ({ ok: true, path: '/tmp/flow-test/hero.png', reason: '' }),
       exportCard: async () => ({ ok: true, path: '/tmp/flow-test/deck.pdf', reason: '' }),
       publishCard: async () => ({ ok: true, path: 'https://deck.example.test', reason: '' }),
@@ -186,6 +216,10 @@ const ARGS: Record<string, unknown> = {
   [TOOL_NAMES.createOnBoard]: { type: 'note', content: '决策：封面用横版' },
   [TOOL_NAMES.linkSourceOnBoard]: { from: 'brief.md', to: 'deck.html' },
   [TOOL_NAMES.generateImage]: { prompt: 'a cover', cardId: 'hero.png' },
+  [TOOL_NAMES.designRead]: {},
+  [TOOL_NAMES.designEdit]: {
+    ops: [{ kind: 'upsert', type: 'rect', x: 10, y: 10, width: 120, height: 80, fill: '#6B4226' }],
+  },
   [TOOL_NAMES.export]: { cardId: 'deck.html', format: 'pdf' },
   [TOOL_NAMES.publish]: { cardId: 'deck.html' },
 }
@@ -216,6 +250,7 @@ describe('canvas tools — declared output', () => {
       { type: 'note', content: '记一笔' },
       { type: 'card', content: 'deck.html' },
       { type: 'webapp', content: '官网' },
+      { type: 'design', content: '海报' },
     ]
     for (const args of branches) {
       const value = await definition.execute(args, exec('cv-1'))

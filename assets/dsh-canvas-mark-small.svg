@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- dsh-canvas 主标记 · 3×3 简化档：64px 以下（favicon、插件图标位等）专用。
+     与画布设计稿「品牌标识板 · 最小使用尺寸」里的小尺寸几何同一份：
+     点阵 r=13 @22% 墨色；产物方块 64 见方 rx=20 主色 #4B3AEE。
+     ≥64px 场合请用 dsh-canvas-mark.svg（完整 5×5 点阵）。侧栏 UI 图标
+     （canvas-nav.tsx 的 Glyph）取的正是这一档的几何，但走 currentColor。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"
+     role="img" aria-label="dsh-canvas">
+  <title>dsh-canvas（小尺寸档）</title>
+  <circle cx="60" cy="60" r="13" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="128" cy="60" r="13" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="196" cy="60" r="13" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="60" cy="128" r="13" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="196" cy="128" r="13" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="60" cy="196" r="13" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="128" cy="196" r="13" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="196" cy="196" r="13" fill="#0F1222" fill-opacity="0.22"/>
+  <rect x="96" y="96" width="64" height="64" rx="20" fill="#4B3AEE"/>
+</svg>

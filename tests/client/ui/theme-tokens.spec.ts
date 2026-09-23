@@ -36,7 +36,9 @@ const dark = declarations(blockAfter(DARK_SELECTOR))
 /** 必须「亮暗两套都在场」的画布专属令牌（宿主没有对应语义）。 */
 const CANVAS_ONLY = [
   '--dsh-surface', '--dsh-card', '--dsh-soft', '--dsh-slot', '--dsh-mid',
-  '--dsh-sunset', '--dsh-dusk', '--dsh-twilight', '--dsh-breeze',
+  '--dsh-sunset', '--dsh-dusk', '--dsh-twilight', '--dsh-breeze', '--dsh-on-accent',
+  '--dsh-field', '--dsh-hl', '--dsh-hl-edge',
+  '--dsh-sunset-solid', '--dsh-on-sunset',
   '--dsh-sheen', '--dsh-sheen-peak',
 ] as const
 
@@ -71,7 +73,12 @@ describe('canvas stylesheet: 两套配色', () => {
     for (const name of CANVAS_ONLY) {
       const l = light.get(name)
       expect(l, `${name} 缺亮色默认值`).toBeTruthy()
-      expect(l!, `${name} 的亮色值应是显式色，而不是宿主令牌引用`).toMatch(/^#[0-9a-fA-F]{3,8}$/)
+      // 显式色，或者**从画布自己的调色板**派生（高亮底取品牌色的淡调那种）。不许出现
+      // var(--dsw-…)：那是「看着像接了宿主令牌、其实是写死的另一档」那类静默事故的入口。
+      expect(l!, `${name} 的亮色值应是显式色或画布内部派生，而不是宿主令牌引用`).toMatch(
+        /^(#[0-9a-fA-F]{3,8}|color-mix\(in srgb, ?var\(--dsh-[a-z0-9-]+\))/,
+      )
+      expect(l!, `${name} 不许引用宿主令牌`).not.toContain('--dsw-')
       expect(dark.has(name), `${name} 缺暗色覆盖`).toBe(true)
       expect(dark.get(name), `${name} 两套不该同值（那等于没切）`).not.toBe(l)
     }
@@ -114,6 +121,37 @@ describe('canvas stylesheet: portal 出画布根的段落不引用拿不到的�
       FORBIDDEN.filter((name) => m[2].includes(`var(${name}`)).map((name) => `${m[1].trim().slice(0, 60)} → ${name}`),
     )
     expect(offenders).toEqual([])
+  })
+})
+
+describe('canvas stylesheet: 强调色实心件上的文字', () => {
+  // 实心件上的字**跟着底走**，一族一对：亮色下 breeze 是中蓝、sunset 那族是亮黄，
+  // 字取白 / 取深棕；暗色下两者都转亮，各自翻成近黑。这件事故去有三种写法（写死
+  // #0A0A0A、借 --dsh-card、写死 #fff），于是亮色下主按钮成了黑字压深橙；后来按钮底
+  // 改亮黄，白字在上面对比度只剩 1.8:1。**加一族底就得在这儿登记一对**——漏登记时
+  // 下面那条会把它当成「借了别的令牌」抓出来。
+  const PAIRS = [
+    { fill: '--dsh-sunset', on: '--dsh-on-accent' },
+    { fill: '--dsh-breeze', on: '--dsh-on-accent' },
+    { fill: '--dsh-sunset-solid', on: '--dsh-on-sunset' },
+  ] as const
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((m) => !m[1].includes('@keyframes'))
+  /** 一条规则里那枚实心底（若它用的底属于上面某一族）。 */
+  const fillOf = (body: string) => PAIRS.find((pair) => body.includes(`background:var(${pair.fill})`))
+  const withColor = rules.filter((m) => fillOf(m[2]) !== undefined && /(?:^|;)\s*color:/.test(m[2]))
+
+  it('确实有带文字的实心强调件（守卫本身不许空转）', () => {
+    expect(withColor.length).toBeGreaterThan(3)
+  })
+
+  it('它们的文字取的是与那一族底配对的那枚令牌', () => {
+    const offenders = withColor
+      .filter((m) => {
+        const pair = fillOf(m[2])
+        return pair === undefined || !m[2].includes(`color:var(${pair.on})`)
+      })
+      .map((m) => m[1].trim().slice(0, 70))
+    expect(offenders, '实心强调底上的文字要与底成对，不许写死也不许借别的令牌').toEqual([])
   })
 })
 

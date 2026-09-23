@@ -30,8 +30,10 @@ import type {
   Viewport,
 } from '../types.ts'
 import type { CanvasDomain } from '../domain.ts'
-import { ArtifactIo } from '../core/artifact/artifact-io.ts'
-import { arrangeSeats, nextFreeSeat, type SeatInput } from '../core/canvas/board.ts'
+import { ArtifactIo, missingOf } from '../core/artifact/artifact-io.ts'
+import type { BoardFile } from './board-file.ts'
+import { arrangeSeats } from '../core/canvas/board.ts'
+import { planEdges, planIdentity, planNotes, planSeats } from '../core/canvas/board-file.ts'
 import { projectIdOf } from '../core/canvas/ids.ts'
 import { cardIdOfKey, cardKeyOf, SessionManager } from '../core/session/session-manager.ts'
 import { kindLabel } from '../core/artifact/kind-registry.ts'
@@ -49,6 +51,8 @@ export interface CanvasRuntimeDeps {
   domain: CanvasDomain
   io: ArtifactIo
   sessions: SessionManager
+  /** The board's portable projection in the bound folder (F1.9/F1.10). */
+  board: BoardFile
   /** Horizontal gap used when arranging, in canvas px. */
   arrangeGap: number
   /** Depth of the chain `getSources` resolves. */
@@ -64,6 +68,8 @@ interface CardRecord {
   position: Point
   sessionId: string
   updatedAt: number
+  /** The seat was created without an artifact; see `core/canvas/cleanup.ts` (F1.11). */
+  seatedEmpty?: boolean | undefined
 }
 
 /** A stored project record. */
@@ -125,6 +131,12 @@ export class CanvasRuntime extends TypertRemoteService {
    * Re-binding an existing root is idempotent: it returns the stored project
    * and only adds cards for artifacts that are not seated yet, so a second
    * "new project" on the same folder never duplicates the board.
+   *
+   * It is also where a directory's *identity* is decided (F1.9) and where a
+   * carried board is imported (F1.10). The folder's own board file, when it has
+   * one, names the canvas; without it the path digest decides, exactly as it
+   * always did — which is why every canvas that already exists keeps its id and
+   * its records, and simply gains the file on its next bind.
    */
   @Remote
   async createProject(name: string, path: string, signal?: AbortSignal): Promise<{ project: Project; discovered: number }> {
@@ -133,51 +145,100 @@ export class CanvasRuntime extends TypertRemoteService {
     const directory = path.trim() === '' ? this.deps.pickerRoot : path
     const scan = await this.deps.io.scanProject(directory, signal)
     const root = await this.deps.io.displayPathOf(directory, '.', signal).catch(() => directory)
-    const id = projectIdOf(root)
 
-    const existing = this.projects.get(id)
-    if (existing === undefined) {
-      await this.projects.put(id, {
-        name: name.trim() === '' ? (root.split('/').pop() ?? 'canvas') : name.trim(),
-        root,
-        viewport: { x: 0, y: 0, zoom: 1 },
-        style: { palette: [], font: '', tone: '' },
-        createdAt: Date.now(),
-      })
-    }
+    const outcome = await this.deps.board.read(root, signal)
+    const carried = outcome.kind === 'parsed' ? outcome.content : undefined
+    const derivedId = projectIdOf(root)
+    const recorded = this.projects.get(carried?.id ?? derivedId)
+    const plan = planIdentity({
+      fileId: carried?.id,
+      derivedId,
+      recorded: recorded !== undefined,
+      recordedRootIsHere: recorded?.root === root,
+      // `move` and `copy` are told apart by one question: is the path the
+      // record names still there? A directory that was renamed leaves nothing
+      // behind, so the record is re-pointed here; a directory that was copied
+      // leaves the original in place, so this one is a second canvas and gets
+      // an id of its own.
+      recordedRootPresent: recorded === undefined ? false : await this.rootPresent(recorded.root, signal),
+      taken: [...this.projects.keys()],
+    })
 
-    const seated = this.cardsOf(id)
-    const known = new Set(seated.map(([key]) => cardIdOfKey(id, key)))
-    const fresh = scan.filter((cardId) => !known.has(cardId))
-    const seats: SeatInput[] = seated.map(([key, record]) => ({
-      id: cardIdOfKey(id, key),
-      position: record.position,
-    }))
+    const existing = this.projects.get(plan.id)
+    // Name and style: the record wins when it is ours (this machine, this
+    // folder) because it may hold a change the file has not caught up with; the
+    // carried file wins for a project this deployment has never had, which is
+    // the import case. Either way a card session's prompt sees the same profile
+    // the folder came with.
+    const carriedName = carried?.name.trim() ?? ''
+    await this.projects.put(plan.id, {
+      name: carriedName !== '' ? carriedName : (existing?.name ?? (name.trim() === '' ? (root.split('/').pop() ?? 'canvas') : name.trim())),
+      root,
+      viewport: existing?.viewport ?? { x: 0, y: 0, zoom: 1 },
+      style: existing?.style ?? carried?.style ?? { palette: [], font: '', tone: '' },
+      createdAt: existing?.createdAt ?? Date.now(),
+    })
 
-    for (const cardId of fresh) {
-      const position = nextFreeSeat(seats, this.deps.arrangeGap)
-      const facts = await this.deps.io.facts(root, cardId, signal)
-      await this.cards.put(cardKeyOf(id, cardId), {
-        project: id,
+    const seated = this.cardsOf(plan.id)
+    const seats = planSeats({
+      seated: seated.map(([key, record]) => ({ id: cardIdOfKey(plan.id, key), position: record.position })),
+      filed: carried?.cards ?? [],
+      scanned: scan,
+      gap: this.deps.arrangeGap,
+    })
+    for (const seat of seats) {
+      const facts = await this.deps.io.facts(root, seat.id, signal)
+      await this.cards.put(cardKeyOf(plan.id, seat.id), {
+        project: plan.id,
         kind: facts.kind,
-        position,
+        position: seat.position,
         sessionId: '',
         updatedAt: Date.now(),
+        // Restored only where the file says so: a card the file lists whose
+        // artifact is simply gone was **never** an empty seat, and marking it
+        // one would make it permanently un-cleanable (F1.11).
+        ...(seat.empty === true ? { seatedEmpty: true } : {}),
       })
-      seats.push({ id: cardId, position })
     }
 
-    const record = this.projects.get(id)
-    const project = this.projectOf(id, record as ProjectRecord)
+    // Relations carried by the folder are restored through the same validation
+    // a hand-drawn link goes through, so a file cannot smuggle in a self-edge,
+    // a duplicate or a cycle.
+    const known = [...seated.map(([key]) => cardIdOfKey(plan.id, key)), ...seats.map((seat) => seat.id)]
+    for (const edge of planEdges({ filed: carried?.sources ?? [], known, existing: this.edgeList(plan.id) })) {
+      await this.sources.put(sourceIdOf(edge.downstream, edge.upstream), {
+        project: plan.id,
+        downstream: edge.downstream,
+        upstream: edge.upstream,
+        origin: edge.origin,
+      })
+    }
+    const takenNotes = [...this.notes.entries()].filter(([, record]) => record.project === plan.id).map(([id]) => id)
+    for (const note of planNotes(carried?.notes ?? [], takenNotes)) {
+      await this.notes.put(note.id, {
+        project: plan.id,
+        text: note.text,
+        author: note.author,
+        position: note.position,
+        createdAt: note.createdAt,
+      })
+    }
+
+    const record = this.projects.get(plan.id)
+    const project = this.projectOf(plan.id, record as ProjectRecord)
+    // 目录自己的那份板面投影（F1.10）：首次绑定在这里把文件补出来，从别处带来的板面在这里
+    // 对账，而被复制的那一份会在此处改写成它自己的新 id —— 否则再打开一次又会认回原画布。
+    await this.deps.board.write(project, signal)
     // 画布即工作区（F1.6）：建画布的同时把这个根目录登记成宿主工作区，并把已经绑过
     // 会话的卡片一并交账——重开一张旧画布，它的对话也就当场从「未分组」挪到这张画布
     // 名下。尽力而为，没有工作区名册的部署里整体是空操作。
     await claimCanvasWorkspace(
       this.ctx,
       { root: project.root, title: project.name },
-      this.cardsOf(id).map(([, card]) => card.sessionId),
+      this.cardsOf(plan.id).map(([, card]) => card.sessionId),
     )
-    return { project, discovered: fresh.length }
+    const scanned = new Set(scan)
+    return { project, discovered: seats.filter((seat) => scanned.has(seat.id)).length }
   }
 
   /** Forget a project. The files on disk are never touched. */
@@ -200,6 +261,8 @@ export class CanvasRuntime extends TypertRemoteService {
     if (removed && this.deps.domain.global.get().activeProjectId === projectId) {
       await this.writeActiveProject('')
     }
+    // 目录里那份板面文件**不删**（F1.10）：它是这张作品自己的东西，不属于这次「从列表里
+    // 拿开」。于是把文件夹重新加成画布，板面就从文件里回来——忘记与恢复互为逆操作。
     return removed
   }
 
@@ -239,7 +302,17 @@ export class CanvasRuntime extends TypertRemoteService {
     const cards = await Promise.all(
       this.cardsOf(projectId).map(async ([key, record]) => {
         const cardId = cardIdOfKey(projectId, key)
-        const probe = await this.deps.io.probe(project.root, cardId, signal)
+        // Presence only, never a head read: painting the board asks "is it
+        // there", and the artifact's own view is the one that reads content.
+        const presence = await this.deps.io.presenceOf(project.root, cardId, signal)
+        if (presence === 'present' && record.seatedEmpty === true) {
+          // The seat has been filled — by a seed write, a generation run, or
+          // the model writing the file with its own tools, which is why the
+          // observer has to be the board read rather than the write path. Once
+          // cleared it never writes again, and the card becomes an ordinary one
+          // that a later deletion may legitimately make missing (F1.11).
+          await this.cards.put(key, { ...record, seatedEmpty: false })
+        }
         return {
           id: cardId,
           project: projectId,
@@ -247,7 +320,7 @@ export class CanvasRuntime extends TypertRemoteService {
           kindLabel: kindLabel(record.kind),
           position: record.position,
           sessionId: record.sessionId,
-          present: probe.present,
+          missing: missingOf(presence, record.seatedEmpty),
         } satisfies BoardCard
       }),
     )
@@ -276,6 +349,7 @@ export class CanvasRuntime extends TypertRemoteService {
     signal?.throwIfAborted()
     const record = this.requireProjectRecord(projectId)
     await this.projects.put(projectId, { ...record, style })
+    await this.persist(projectId, signal)
     return style
   }
 
@@ -288,7 +362,8 @@ export class CanvasRuntime extends TypertRemoteService {
     const record = this.cards.get(key)
     if (record === undefined) throw this.cardNotFound(projectId, cardId)
     await this.cards.put(key, { ...record, position })
-    const probe = await this.deps.io.probe(project.root, cardId, signal)
+    await this.persist(projectId, signal)
+    const presence = await this.deps.io.presenceOf(project.root, cardId, signal)
     return {
       id: cardId,
       project: projectId,
@@ -296,7 +371,7 @@ export class CanvasRuntime extends TypertRemoteService {
       kindLabel: kindLabel(record.kind),
       position,
       sessionId: record.sessionId,
-      present: probe.present,
+      missing: missingOf(presence, record.seatedEmpty),
     }
   }
 
@@ -324,6 +399,7 @@ export class CanvasRuntime extends TypertRemoteService {
       if (record === undefined) continue
       await this.cards.put(key, { ...record, position: seat.position })
     }
+    await this.persist(projectId, signal)
     return this.readBoard(projectId, signal)
   }
 
@@ -352,6 +428,7 @@ export class CanvasRuntime extends TypertRemoteService {
     const id = sourceIdOf(downstream, upstream)
     const record = { project: projectId, downstream, upstream, origin: 'manual' as const }
     await this.sources.put(id, record)
+    await this.persist(projectId, signal)
     return { id, downstream, upstream, origin: record.origin }
   }
 
@@ -364,7 +441,9 @@ export class CanvasRuntime extends TypertRemoteService {
     if (record === undefined || record.project !== projectId) {
       throw new RemoteError('canvas/source-not-found', `no source edge ${sourceId} in ${projectId}`, { projectId, sourceId })
     }
-    return this.sources.delete(sourceId)
+    const removed = await this.sources.delete(sourceId)
+    if (removed) await this.persist(projectId, signal)
+    return removed
   }
 
   /** Resolve one card's source chain (F4.7). */
@@ -432,6 +511,7 @@ export class CanvasRuntime extends TypertRemoteService {
         added.push({ id, downstream: edge.downstream, upstream: edge.upstream, origin: 'reconciled' })
       }
     }
+    if (added.length > 0) await this.persist(projectId, signal)
     return added
   }
 
@@ -451,6 +531,7 @@ export class CanvasRuntime extends TypertRemoteService {
       position,
       createdAt: note.createdAt,
     })
+    await this.persist(projectId, signal)
     return note
   }
 
@@ -461,7 +542,9 @@ export class CanvasRuntime extends TypertRemoteService {
     this.requireProject(projectId)
     const record = this.notes.get(noteId)
     if (record === undefined || record.project !== projectId) return false
-    return this.notes.delete(noteId)
+    const removed = await this.notes.delete(noteId)
+    if (removed) await this.persist(projectId, signal)
+    return removed
   }
 
   // ── internals ───────────────────────────────────────────────────────────
@@ -486,6 +569,31 @@ export class CanvasRuntime extends TypertRemoteService {
       throw new RemoteError('canvas/project-not-found', `no canvas project ${projectId}`, { projectId })
     }
     return record
+  }
+
+  /**
+   * 把这张画布的板面写回目录里的投影（F1.10）。
+   *
+   * 每个改动板面的方法在**写完存储域之后**调它一次，顺序不能反：存储域是真源，投影可以
+   * 慢一拍、也可以整体失败（目录只读、沙箱拦下、盘满了），但绝不能因为投影没写成就让
+   * 用户的一次拖拽失败——那种失败会把「本机没问题」的状态报成错误。
+   */
+  private async persist(projectId: ProjectId, signal?: AbortSignal): Promise<void> {
+    const record = this.projects.get(projectId)
+    if (record === undefined) return
+    await this.deps.board.write(this.projectOf(projectId, record), signal)
+  }
+
+  /** Whether a path still names a directory this deployment can see. */
+  private async rootPresent(root: string, signal?: AbortSignal): Promise<boolean> {
+    try {
+      return (await this.deps.io.probe(root, '.', signal)).present
+    } catch {
+      // Unreadable counts as gone: the question this answers is "does another
+      // canvas still live there", and a path we cannot look at holds no board
+      // we could be stealing the identity from.
+      return false
+    }
   }
 
   /** The stored project, projected for the wire. */

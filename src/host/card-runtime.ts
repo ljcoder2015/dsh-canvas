@@ -33,7 +33,7 @@ import type {
 import type { CanvasDomain } from '../domain.ts'
 import type { CanvasCapabilities } from '../capabilities.ts'
 import type { ArtifactIo } from '../core/artifact/artifact-io.ts'
-import { cardKeyOf, SessionManager, type CardSession } from '../core/session/session-manager.ts'
+import { cardIdOfKey, cardKeyOf, SessionManager, type CardSession } from '../core/session/session-manager.ts'
 import { slugify } from '../core/canvas/ids.ts'
 import { cardPreset, composeCardAgent } from '../core/session/agent-preset.ts'
 import { lastUserPromptOfEvents, sessionQueryFace } from '../core/session/session-log.ts'
@@ -49,8 +49,13 @@ import {
   userPromptMessage,
 } from './prompt.ts'
 import { attachCanvasSession } from '../core/canvas/workspace.ts'
-import { transitiveUpstreams } from '../core/canvas/source-store.ts'
+import { planCleanup, type CleanupCandidate } from '../core/canvas/cleanup.ts'
+import { materialUpstreams } from '../core/canvas/source-store.ts'
+import type { BoardFile } from './board-file.ts'
 import { nameFileReferences, nameWithoutProbe, type FileReferenceTarget } from '../core/artifact/file-reference.ts'
+import { artboardsOf, designNodeToJson, scaffoldDesignDocument, DESIGN_FILE_VERSION } from '../core/artifact/design/document.ts'
+import { applyDesignOps, type DesignOpInput } from '../core/artifact/design/ops.ts'
+import type { DesignDocumentWire } from '../contract.ts'
 import { TOOL_NAMES } from '../contract.ts'
 
 /** What {@link CardRuntime} needs from the plugin's composition root. */
@@ -58,10 +63,10 @@ export interface CardRuntimeDeps {
   domain: CanvasDomain
   io: ArtifactIo
   sessions: SessionManager
+  /** The board's portable projection in the bound folder (F1.9/F1.10). */
+  board: BoardFile
   /** Character budget of one artifact digest. */
   summaryBudget: number
-  /** Depth of the chain used when a card pulls its material. */
-  sourceDepth: number
   /** What happens to a downstream card's session when this card's artifact changes (F5.7). */
   upstreamPolicy: UpstreamPolicy
   /**
@@ -81,6 +86,8 @@ interface CardRecord {
   position: Point
   sessionId: string
   updatedAt: number
+  /** The seat was created without an artifact; see `core/canvas/cleanup.ts` (F1.11). */
+  seatedEmpty?: boolean | undefined
 }
 
 /** Mint an id for a card's brand-new conversation. */
@@ -110,6 +117,11 @@ export class CardRuntime extends TypertRemoteService {
     return this.deps.domain.table('intents')
   }
 
+  /** The seated cards of one project, in storage order. */
+  private cardsOf(projectId: ProjectId): [string, CardRecord][] {
+    return [...this.cards.entries()].filter(([, record]) => record.project === projectId)
+  }
+
   // ── seating ─────────────────────────────────────────────────────────────
 
   /** Seat a new card on the board. Its artifact may be created later. */
@@ -135,7 +147,12 @@ export class CardRuntime extends TypertRemoteService {
       position,
       sessionId: '',
       updatedAt: Date.now(),
+      // A seat is allowed to precede its artifact (F1.11): remember which
+      // seats were born that way, so "missing" can later mean *gone* rather
+      // than *not written yet*.
+      seatedEmpty: !facts.present,
     })
+    await this.persist(projectId, project, signal)
     return {
       id: cardId,
       project: projectId,
@@ -143,7 +160,9 @@ export class CardRuntime extends TypertRemoteService {
       kindLabel: kindLabel(resolved),
       position,
       sessionId: '',
-      present: facts.present,
+      // Never missing: the file is either there, or the seat has just recorded
+      // that it was born without one.
+      missing: false,
     }
   }
 
@@ -151,17 +170,98 @@ export class CardRuntime extends TypertRemoteService {
   @Remote
   async removeCard(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted()
-    this.requireProject(projectId)
+    const project = this.requireProject(projectId)
     const key = cardKeyOf(projectId, cardId)
     if (this.cards.get(key) === undefined) return false
+    await this.unseat(projectId, cardId)
+    await this.persist(projectId, project, signal)
+    return true
+  }
+
+  /**
+   * Unseat every card whose artifact is provably gone (F1.11).
+   *
+   * A card outlives its file by design — a seated card may have no artifact yet,
+   * and a missing one is a real board state (F3.5) rather than a broken record —
+   * so nothing here is automatic and nothing here guesses. Three refusals are
+   * what separate "clear the ghosts" from "empty the board":
+   *
+   * 1. **The folder itself must be there.** If the project root cannot be
+   *    probed, every card would look absent and one call would unseat the whole
+   *    board. That the root is really gone, and that its path no longer
+   *    resolves, are indistinguishable from here — so the honest answer is to
+   *    refuse and let `removeProject` be the way to empty a canvas.
+   * 2. **Only proven absence counts.** A card whose id will not resolve, or
+   *    whose `stat` the sandbox or the permissions refused, reads as `unknown`
+   *    and is left where it is (`planCleanup`): a cleanup may not act on a
+   *    probe that failed to answer.
+   * 3. **Empty seats stay.** A card seated before its artifact exists — seeded a
+   *    moment later, waiting for a generation run, or seated by an Agent for
+   *    what it is about to write — is not a ghost. Removing it would take its
+   *    conversation binding and its edges with it, so it is only ever removable
+   *    one at a time, by the user naming it (`removeCard`).
+   *
+   * Nothing here deletes an artifact.
+   *
+   * @returns how many cards left the board.
+   */
+  @Remote
+  async removeMissingCards(projectId: ProjectId, signal?: AbortSignal): Promise<number> {
+    signal?.throwIfAborted()
+    const project = this.requireProject(projectId)
+    if ((await this.deps.io.presenceOf(project.root, '.', signal)) !== 'present') {
+      throw new RemoteError(
+        'canvas/root-unavailable',
+        `the canvas folder cannot be read right now, so no card can be called missing: ${project.root}`,
+        { projectId, root: project.root },
+      )
+    }
+
+    const candidates: CleanupCandidate[] = []
+    for (const [key, record] of this.cardsOf(projectId)) {
+      const cardId = cardIdOfKey(projectId, key)
+      candidates.push({
+        id: cardId,
+        presence: await this.deps.io.presenceOf(project.root, cardId, signal),
+        empty: record.seatedEmpty === true,
+      })
+    }
+
+    const plan = planCleanup(candidates)
+    for (const cardId of plan.remove) await this.unseat(projectId, cardId)
+    if (plan.unknown.length > 0) {
+      // Not silently: a count that promises more than it removes is only honest
+      // if the cards it skipped are written down somewhere.
+      this.ctx
+        .logger(PLUGIN_ID)
+        .warn(`${plan.unknown.length} 张卡片的产物查不出来（路径解析不了，或被沙箱/权限拒绝），本次已跳过：${plan.unknown.join(', ')}`)
+    }
+    if (plan.remove.length > 0) await this.persist(projectId, project, signal)
+    return plan.remove.length
+  }
+
+  /**
+   * Take one card off the board: its conversation, then its edges, then its seat.
+   *
+   * The order matters at the edges only — a card whose record is gone but whose
+   * edges remain would leave lines pointing at nothing, and an edge whose
+   * endpoint is not seated is exactly what `validateEdge` refuses later, so a
+   * half-done removal would make the leftover lines un-removable through the
+   * normal path.
+   */
+  private async unseat(projectId: ProjectId, cardId: CardId): Promise<void> {
     await this.deps.sessions.release(projectId, cardId)
     for (const [id, record] of [...this.sources.entries()]) {
       if (record.project === projectId && (record.upstream === cardId || record.downstream === cardId)) {
         await this.sources.delete(id)
       }
     }
-    await this.cards.delete(key)
-    return true
+    await this.cards.delete(cardKeyOf(projectId, cardId))
+  }
+
+  /** 把板面写回目录里的投影（F1.10）；失败只记日志，存储域仍是真源。 */
+  private async persist(projectId: ProjectId, project: Project, signal?: AbortSignal): Promise<void> {
+    await this.deps.board.write(project, signal)
   }
 
   /**
@@ -186,6 +286,81 @@ export class CardRuntime extends TypertRemoteService {
     }
     await this.deps.io.writeScaffold(project.root, folder, name, signal)
     return this.createCard(projectId, `${folder}/index.html`, 'webapp', position, signal)
+  }
+
+  /**
+   * Scaffold a design document and seat it as a card (设计节点, F2.6).
+   *
+   * The webapp scaffold's sibling, for a single file instead of a folder: the
+   * name is slugged into `<name>.design` under the project root (numeric
+   * suffix on collision, settled against the disk), the file holds one blank
+   * 1024×1024 artboard, and the card is seated on it. The scaffold is a Host
+   * call rather than a client-side seed because the artifact is a structured
+   * scene-graph snapshot — a text seed cannot produce it, and the model-side
+   * tools read and edit the document through the same structured path.
+   */
+  @Remote
+  async scaffoldDesign(projectId: ProjectId, name: string, position: Point, signal?: AbortSignal): Promise<BoardCard> {
+    signal?.throwIfAborted()
+    const project = this.requireProject(projectId)
+    const base = slugify(name)
+    let file = base
+    for (let n = 2; await this.deps.io.probe(project.root, `${file}.design`, signal).then((probe) => probe.present); n += 1) {
+      file = `${base}-${n}`
+    }
+    const cardId = `${file}.design`
+    await this.deps.io.writeDesign(project.root, cardId, scaffoldDesignDocument(), undefined, signal)
+    return this.createCard(projectId, cardId, 'design', position, signal)
+  }
+
+  /**
+   * Read a design document as model-facing JSON (F2.6 — `canvas_design_read`).
+   *
+   * The whole node list is handed over with its format version, so the model
+   * sees the same structure the viewer renders; artboards are named by id
+   * (the frames directly under a page) and the full layer list follows.
+   */
+  async readDesign(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<DesignDocumentWire> {
+    const project = this.requireProject(projectId)
+    this.requireCard(projectId, cardId)
+    const { doc } = await this.deps.io.readDesign(project.root, cardId, signal)
+    return {
+      cardId,
+      formatVersion: DESIGN_FILE_VERSION,
+      artboards: artboardsOf(doc).map((board) => board.id),
+      nodes: [...doc.nodes.values()].filter((node) => node.id !== doc.rootId).map(designNodeToJson),
+    }
+  }
+
+  /**
+   * Apply structured edit ops to a design document (F2.6 — `canvas_design_edit`).
+   *
+   * The version guard is the same freshness contract as {@link editText}: the
+   * ops apply to the document the caller read, and a concurrent change is a
+   * `card/stale-version` refusal rather than a silent lost update.
+   */
+  async editDesign(
+    projectId: ProjectId,
+    cardId: CardId,
+    ops: readonly DesignOpInput[],
+    signal?: AbortSignal,
+  ): Promise<{ cardId: CardId; applied: number; errors: string[]; version: string }> {
+    const project = this.requireProject(projectId)
+    const record = this.requireCard(projectId, cardId)
+    const { doc, version } = await this.deps.io.readDesign(project.root, cardId, signal)
+    const result = applyDesignOps(doc, ops)
+    if (result.errors.length > 0 && result.applied === 0) {
+      // Nothing in the batch landed; fail loudly so the model re-reads instead
+      // of believing the edit succeeded.
+      throw new RemoteError('card/unsupported', `design ops 全部失败：${result.errors.join('；')}`, {
+        kind: record.kind,
+        operation: 'design-edit',
+      })
+    }
+    const outcome = await this.deps.io.writeDesign(project.root, cardId, doc, { version }, signal)
+    await this.touch(projectId, cardId, record)
+    await this.notifyDownstream(project, cardId)
+    return { cardId, applied: result.applied, errors: result.errors, version: outcome.version }
   }
 
   // ── digests ─────────────────────────────────────────────────────────────
@@ -216,20 +391,21 @@ export class CardRuntime extends TypertRemoteService {
   }
 
   /**
-   * Digests of every artifact this card sources from, nearest first.
+   * Digests of every artifact this card sources from.
    *
-   * Indirect upstreams are included on purpose: a card three hops from the
-   * brief still needs to know what the brief said, and making the model walk
-   * the chain itself wastes a turn and often loses a hop.
+   * One hop only — this answer *is* the card's material, and material is what
+   * its own edges declare ({@link materialUpstreams} carries the reasoning).
+   * The chain further up is a fact about the board, not about this card's
+   * inputs: `canvas_get_sources` reports it when the model wants the shape of
+   * the graph, and the digest of a grandparent is one `canvas_read_card` away
+   * if some instruction really calls for it.
    */
   @Remote
   async readSources(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<CardSummary[]> {
     signal?.throwIfAborted()
     const project = this.requireProject(projectId)
     this.requireCard(projectId, cardId)
-    const edges = this.edgesOf(projectId)
-    const { direct, indirect } = transitiveUpstreams(cardId, edges, this.deps.sourceDepth)
-    const order = [...direct, ...indirect]
+    const order = materialUpstreams(cardId, this.edgesOf(projectId))
     const summaries: CardSummary[] = []
     for (const upstream of order) {
       if (this.cards.get(cardKeyOf(projectId, upstream)) === undefined) continue
@@ -296,10 +472,11 @@ export class CardRuntime extends TypertRemoteService {
    * cannot carry (a quote or a control character in the path), so a board that
    * could not name something says so instead of quietly dropping it.
    *
-   * The chain is walked from this card, indirect upstreams included, for the
-   * same reason {@link readSources} includes them: a card three hops from the
-   * brief still needs the brief, and making the model walk the chain itself
-   * would cost a turn per hop.
+   * The chain is **not** walked: what gets named is this card's own material,
+   * one hop ({@link materialUpstreams}). Naming an ancestor would hand the model
+   * files its own upstream already absorbed, and a reference is a claim about
+   * what this artifact builds on — the deeper a chain gets, the less true that
+   * claim is about any hop past the first.
    */
   @Remote
   async referenceFiles(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<ReferencedFiles> {
@@ -779,11 +956,10 @@ export class CardRuntime extends TypertRemoteService {
   }
 
   /**
-   * The upstream artifacts of one card, nearest first, as reference targets.
+   * The upstream artifacts of one card, as reference targets.
    *
-   * Indirect upstreams are included for the same reason {@link readSources}
-   * includes them: a card three hops from the brief still needs the brief, and
-   * making the model walk the chain itself wastes a turn per hop.
+   * One hop, by {@link materialUpstreams}: the files named here are the ones
+   * this artifact is declared to build on, and nothing beyond them.
    *
    * Each upstream is *probed* rather than assumed: whether it is a directory
    * decides the mention's shape (a directory keeps a trailing slash), and a card
@@ -797,9 +973,8 @@ export class CardRuntime extends TypertRemoteService {
     cardId: CardId,
     signal?: AbortSignal,
   ): Promise<FileReferenceTarget[]> {
-    const { direct, indirect } = transitiveUpstreams(cardId, this.edgesOf(project.id), this.deps.sourceDepth)
     const targets: FileReferenceTarget[] = []
-    for (const upstream of [...direct, ...indirect]) {
+    for (const upstream of materialUpstreams(cardId, this.edgesOf(project.id))) {
       const kind = this.cards.get(cardKeyOf(project.id, upstream))?.kind ?? 'text'
       let directory = false
       let present = false
@@ -862,11 +1037,16 @@ export class CardRuntime extends TypertRemoteService {
     })
   }
 
-  /** The material block, rendered from the card's current chain. */
+  /** The material block, rendered from the card's own edges. */
   private materialText(projectId: ProjectId, cardId: CardId): string {
     const project = this.projects.get(projectId)
     if (project === undefined) return ''
-    const { direct, indirect } = transitiveUpstreams(cardId, this.edgesOf(projectId), this.deps.sourceDepth)
+    // One hop (`materialUpstreams`): the block names what *this* artifact is
+    // declared to build on, not what the board happens to sit downstream of. A
+    // chain resolved transitively here would put a grandparent's file in every
+    // grandchild's prompt — the products in between exist precisely to have
+    // absorbed it.
+    //
     // Resolved synchronously against cached facts, so this block carries *names*
     // and never file bodies: the card id is the workspace-relative path, which
     // is exactly what the harness's `@file` grammar denotes, and the material
@@ -874,7 +1054,7 @@ export class CardRuntime extends TypertRemoteService {
     // have to be cached — and nothing invalidates such a cache, so a card whose
     // upstream was rewritten by an ordinary file edit would keep feeding the
     // prompt a stale summary.
-    const lines = [...direct, ...indirect].map((upstream) => {
+    const lines = materialUpstreams(cardId, this.edgesOf(projectId)).map((upstream) => {
       const record = this.cards.get(cardKeyOf(projectId, upstream))
       // `nameWithoutProbe` and not the kind: this block is assembled without
       // I/O, and a `site`/`webapp` card is a *file* even though its kind is a

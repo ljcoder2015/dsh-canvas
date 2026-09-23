@@ -46,6 +46,20 @@ const CARD_SECTION_ORDER = 2955
 const UPSTREAM_CONTEXT_ORDER = 130
 
 /**
+ * The design preset: what a design card's conversation knows without asking
+ * (F3.16). Board sizes come first because "什么尺寸" is the first decision
+ * every design instruction implies, then the layer discipline that keeps a
+ * document navigable — semantic names, text as text — and finally the
+ * edit-loop etiquette: read before writing, batch the ops.
+ */
+const DESIGN_PRESET = [
+  'Board-size menu (use viewBox-like nodes on an artboard of these sizes unless the user says otherwise):',
+  '手机屏 375×812（@2x 导出 750×1624）、官网首屏 1440×900、海报 1242×1660、社交方图 1080×1080、幻灯片 1920×1080、横幅 1920×600.',
+  'Layer discipline: name every layer in plain language (name), group by function — artboards are frames (parentId \'\'), child layers live inside; text stays type `text` with its string in `text`, never flattened; keep one frame per board and no stray root nodes.',
+  'Edit loop: `canvas_design_read` first (ops must reference real node ids), then one `canvas_design_edit` batch of upsert/setProps/move/delete/reorder — small batches, geometry in layer coordinates (x/y is the top-left), colors as #RRGGBB[AA].',
+].join(' ')
+
+/**
  * Register the canvas tool guidance globally.
  *
  * Deliberately states the cards-only precondition in the tool's own words
@@ -80,7 +94,7 @@ export interface CardScopeInput {
   kind: string
   /** Human label of that kind. */
   kindLabel: string
-  /** Formatted source-chain block, resolved when the context is assembled. */
+  /** Formatted material block — the card's direct upstreams, one hop (F5.8). */
   material: () => string
 }
 
@@ -102,17 +116,22 @@ export function installCardScope(agentCtx: Context, input: CardScopeInput): void
       `Conversation for the canvas card \`${cardId}\` (kind: ${kindLabel} / \`${kind}\`) in project **${project.name}**.`,
       '',
       `- The artifact is the file \`${cardId}\`, relative to the project root \`${project.root}\`. Its absolute path is available as the \`canvas_card_path\` variable.`,
-      '- Write the artifact by editing that file with the ordinary file tools. The canvas re-reads it from disk whenever the board is read, so no export or publish step is needed for the card to be up to date.',
-      '- Producing a *new* artifact rather than editing this one is a different card. Say so and let the user create it, instead of overwriting this card\'s artifact.',
+      kind === 'design'
+        ? `- This is a **design** card: the artifact is a scene-graph design document (.design, v2). Do not edit the file with text tools — read the document with \`${TOOL_NAMES.designRead}\` and change it with \`${TOOL_NAMES.designEdit}\` batches. ${DESIGN_PRESET}`
+        : '- Write the artifact by editing that file with the ordinary file tools. The canvas re-reads it from disk whenever the board is read, so no export or publish step is needed for the card to be up to date.',
+      `- **A change belongs to this artifact.** This conversation has exactly one product — the file above — so a turn that asks for a change means rewriting *that* file. "再改一下 / 换成… / 加上… / 调一下" is a revision of what is already here, not a new artifact: work in place. (Where the artifact is the entry file of a site or an app, its sibling files are this same artifact and are edited as such — the line that must not be crossed is starting a *second* deliverable: no \`-v2\` / \`-copy\` / alternate file left for the user to pick between, and no seating another card (\`${TOOL_NAMES.createOnBoard}\`) for a change to this one.) A multi-turn conversation is meant to converge on one artifact that gets better; a new file per turn scatters the thread the user is holding, and the board ends up showing two cards where they asked for one thing fixed.`,
+      '- Creating a card is the user\'s move, not yours: cards are seated on the board by them (dragging out a node, or asking for one), and a conversation never creates one as a side effect of wanting to write something. So the one case where another card is the right answer is when the user asks for a *separate* deliverable outright — then say so in words and let them create it, rather than forking silently or overwriting this artifact with something that is not it.',
       project.style.tone.trim() === '' ? '' : `- Tone of voice for this project: ${project.style.tone}.`,
       project.style.font.trim() === '' ? '' : `- Type family for this project: ${project.style.font}.`,
       project.style.palette.length === 0 ? '' : `- Palette for this project: ${project.style.palette.join(', ')}.`,
       '',
       '### Material this artifact sources from',
       '',
-      'The block below names the artifacts this one is declared to source from (取材), as workspace-relative paths — which is exactly what the `@file` grammar denotes. Read any of them with the ordinary file tools: they are references, not content, and nothing has been copied into this conversation on your behalf.',
+      'The block below names the artifacts this one is declared to source from (取材) — **one hop**: the material it builds on directly, as workspace-relative paths, which is exactly what the `@file` grammar denotes. Read any of them with the ordinary file tools: they are references, not content, and nothing has been copied into this conversation on your behalf.',
       '',
-      `When a name is not enough — you want the material in front of you without spending a read — \`${TOOL_NAMES.readSources}\` returns a digest of every upstream, \`${TOOL_NAMES.readCard}\` returns one, and \`${TOOL_NAMES.injectCard}\` pushes one into this conversation. \`${TOOL_NAMES.referenceFiles}\` re-states the upstream files as \`@\` tokens, which is what to call after a long exchange has pushed the block out of sight.`,
+      'Nothing further up the chain is listed, on purpose. Those artifacts are upstream of *your* upstream, and the product in between is expected to have absorbed them — so work from what is named here, and from that artifact\'s own content, rather than guessing at its ancestors. If an instruction really reaches past them, `canvas_get_sources` names the whole chain, and `canvas_read_card` reads any one artifact on it.',
+      '',
+      `When a name is not enough — you want the material in front of you without spending a read — \`${TOOL_NAMES.readSources}\` returns a digest of every upstream listed above, \`${TOOL_NAMES.readCard}\` returns one artifact, and \`${TOOL_NAMES.injectCard}\` pushes one into this conversation. \`${TOOL_NAMES.referenceFiles}\` re-states the upstream files as \`@\` tokens, which is what to call after a long exchange has pushed the block out of sight.`,
     ]
       .filter((line) => line !== '')
       .join('\n'),

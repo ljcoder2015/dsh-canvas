@@ -52,6 +52,26 @@ export function downstreamsOf(cardId: CardId, sources: Iterable<Source>): CardId
 }
 
 /**
+ * The upstreams that constitute one card's **material** — its own edges' other
+ * ends, one hop, never the chain behind them.
+ *
+ * This is the one place the material channel's depth is decided, and it is
+ * deliberately not the same rule as {@link transitiveUpstreams}: that one
+ * answers "what is this card downstream of" for a *view* of the graph (F4.7,
+ * chain layout), and a view that stops at one hop would be lying about the
+ * shape of the board. Material is the opposite question — what may this
+ * conversation read — and there the answer is one hop, because the chain is
+ * meant to be **folded, not flattened**: a product is supposed to have absorbed
+ * its parent's material, so a grandparent arriving in a grandchild's prompt
+ * would spend context contradicting the pipeline the board draws. A card that
+ * truly wants something further up asks for it through a tool
+ * (`canvas_get_sources` names the whole chain), not by having it pre-copied.
+ */
+export function materialUpstreams(cardId: CardId, sources: Iterable<Source>): CardId[] {
+  return upstreamsOf(cardId, sources)
+}
+
+/**
  * Walk the upstream chain transitively (F4.7).
  *
  * Breadth-first from the card, so `indirect` comes back nearest-first, which is

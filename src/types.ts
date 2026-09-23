@@ -108,8 +108,18 @@ export interface BoardCard {
   kindLabel: string
   position: Point
   sessionId: SessionId
-  /** Whether the bound file currently exists on disk. */
-  present: boolean
+  /**
+   * Whether the artifact is **provably gone** (F3.5 / F1.11): the probe
+   * resolved the path and the seam reported no such file, and the seat was not
+   * one that was born without an artifact.
+   *
+   * Deliberately not "the file is not readable right now". A seat whose
+   * artifact has never been written — a card seeded a moment ago, a bitmap
+   * waiting for a generation run — and a card the seam simply could not judge
+   * are both *not* missing, so the card is drawn as an ordinary card rather
+   * than accused of something nobody knows.
+   */
+  missing: boolean
 }
 
 /** One source edge as the board renders it. */

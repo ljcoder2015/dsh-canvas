@@ -48,7 +48,13 @@ export function panelIdOf(projectId: string): string {
 const ANCHOR = 'dsh-canvas-nav-anchor'
 
 /**
- * 画布图形：一块板 + 一道折线。
+ * 画布图形：点阵画布 + 落位的那一件产物。
+ *
+ * 几何取自品牌标记的 3×3 简化档（`assets/dsh-canvas-mark-small.svg`，64px
+ * 以下专用）：外圈八颗淡点是画布的「面」，中央实心圆角方块是落在画布上的
+ * 产物。整枚只用 `currentColor`——侧栏图标跟宿主主题走，品牌主色（#4B3AEE）
+ * 留给大尺寸的品牌场合；点的 0.4 透明度是 16px 的可读性下限，比品牌规范里的
+ * 0.22 略重，属 UI 小尺寸的故意偏离。
  *
  * 画布区那一行与包裹里的画布行共用同一枚图标（视觉上它们说的是同一件事），
  * `mark` 是给画布区那枚的钩子类。
@@ -59,17 +65,23 @@ export function Glyph(props: { size: number; active: boolean; mark?: string }) {
       width={props.size}
       height={props.size}
       viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
+      fill="currentColor"
       // 选中态由宿主的行底色（或包裹里画布行的底色）表达，图形只做实心/虚心之分。
       opacity={props.active ? 1 : 0.8}
       className={props.mark}
       aria-hidden="true"
-      strokeWidth="1.3"
-      strokeLinejoin="round"
     >
-      <rect x="1.9" y="2.9" width="12.2" height="10.2" rx="1.6" />
-      <path d="M3.6 11.4l3-2.6 2.4 1.9 2.2-1.7 1.9 1.5" />
+      <g opacity={0.4}>
+        <circle cx="3.75" cy="3.75" r="0.9" />
+        <circle cx="8" cy="3.75" r="0.9" />
+        <circle cx="12.25" cy="3.75" r="0.9" />
+        <circle cx="3.75" cy="8" r="0.9" />
+        <circle cx="12.25" cy="8" r="0.9" />
+        <circle cx="3.75" cy="12.25" r="0.9" />
+        <circle cx="8" cy="12.25" r="0.9" />
+        <circle cx="12.25" cy="12.25" r="0.9" />
+      </g>
+      <rect x="6" y="6" width="4" height="4" rx="1.25" />
     </svg>
   )
 }

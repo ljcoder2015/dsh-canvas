@@ -38,8 +38,7 @@ export const zh = {
   'canvas.dock.keys': '快捷键',
   'canvas.dock.text': '文本',
   'canvas.dock.webapp': '应用',
-  'canvas.dock.image': '图片',
-  'canvas.dock.vector': '矢量图片',
+  'canvas.dock.design': '设计',
 
   // 取材线拖到空白处放手时弹出的「新增节点」（F4.8）
   'canvas.drop.title': '新增节点',
@@ -84,13 +83,29 @@ export const zh = {
   'canvas.action.delete': '删除',
   'canvas.action.retry': '重试',
   'canvas.board.arrange': '自动排版',
+  // 清理失效卡片（F1.11）：只在板上真有这种卡时才出现的按钮
+  'canvas.board.prune': '清理失效卡片 ({count})',
+  'canvas.board.prune.hint':
+    '这些卡片的产物确实丢了（改过名或被删）。还没有写过产物的空卡、以及一时读不到的卡都不算在内；移除只是把它们从画布上拿开',
+  'canvas.prune.title': '移除 {count} 张失效卡片？',
+  'canvas.prune.done': '已移除 {count} 张失效卡片',
+  'canvas.prune.partial': '已移除 {removed} 张；还有 {skipped} 张一时读不到，留在板上没有动',
 
   // Card overlay / panel
   'canvas.panel.latest': '最新一条',
   'canvas.composer.material': '引入其它节点产物',
   'canvas.composer.reference': '引用上游产物文件',
   'canvas.composer.referenceMeta': '文件引用',
+  'canvas.composer.noReference': '没有可引用的文件',
   'canvas.composer.drop': '删除这条取材关系',
+  // 引用标签的类型名（候选行右侧那枚小注）。标签的长相按它选：代码是纸页、图片是缩略图、
+  // 视频是胶片、音频是波形，标记 / 区域是图上的一个点 / 一个框。
+  'canvas.ref.type.code': '文件',
+  'canvas.ref.type.image': '图片',
+  'canvas.ref.type.video': '视频',
+  'canvas.ref.type.audio': '音频',
+  'canvas.ref.type.mark': '标记',
+  'canvas.ref.type.region': '区域',
   'canvas.composer.placeholder': '输入提示词，发送给这张卡片…',
   'canvas.composer.send': '发送',
   // 右上角那颗按钮的两副面孔：行内是「放大」（⤢），放大态是「缩小」（⤡）。同一颗、
@@ -154,6 +169,9 @@ export const zh = {
   'canvas.pick.repick': '先关掉提示词框，再重新选元素',
   'canvas.pick.updated': '产物已更新。',
   'canvas.pick.failed': '发送失败：{message}',
+  // 定位块：打包展示节点定位与源码（只是草稿的另一种画法，发出去的提示词不变）。
+  'canvas.pick.blockToggle': '展开/收起已附带的节点定位与源码',
+  'canvas.pick.requestPlaceholder': '改动要求…',
 
   // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': '这份产物不在任何画布项目中。',
@@ -175,7 +193,7 @@ export const zh = {
   'canvas.menu.remove': '删除画布',
   'canvas.menu.remove.title': '删除这张画布？',
   'canvas.menu.remove.pending': '正在删除画布…',
-  'canvas.menu.remove.desc': '只把「{name}」从画布列表里移开：磁盘上的文件夹与文件原样保留，内容不会丢。这张画布自己的排版与取材关系会一起消失，把这个文件夹重新加成画布即可重来。',
+  'canvas.menu.remove.desc': '只把「{name}」从画布列表里移开：磁盘上的文件夹与文件原样保留，内容不会丢——这个目录里的板面文件也留着，把文件夹重新加成画布，排版与取材关系就从它回来。',
 
   // Folder picker
   'canvas.picker.title': '选择一个文件夹作为画布项目',
@@ -241,8 +259,7 @@ export const en = {
   'canvas.dock.keys': 'Shortcuts',
   'canvas.dock.text': 'Text',
   'canvas.dock.webapp': 'Web app',
-  'canvas.dock.image': 'Image',
-  'canvas.dock.vector': 'Vector image',
+  'canvas.dock.design': 'Design',
 
   // The "new node" popup a source-edge drag opens when it is let go on empty space (F4.8)
   'canvas.drop.title': 'New node',
@@ -287,13 +304,26 @@ export const en = {
   'canvas.action.delete': 'Delete',
   'canvas.action.retry': 'Retry',
   'canvas.board.arrange': 'Auto-arrange',
+  'canvas.board.prune': 'Clear {count} missing',
+  'canvas.board.prune.hint':
+    'These artifacts are really gone (renamed or deleted). Seats that never had an artifact, and files no probe could read, are not counted; removing these only takes them off the board',
+  'canvas.prune.title': 'Remove {count} missing cards?',
+  'canvas.prune.done': 'Removed {count} missing cards',
+  'canvas.prune.partial': 'Removed {removed}; {skipped} could not be read just now and were left in place',
 
   // Card overlay / panel
   'canvas.panel.latest': 'Latest',
   'canvas.composer.material': 'Bring in another node’s artifact',
   'canvas.composer.reference': 'Reference upstream files',
   'canvas.composer.referenceMeta': 'file reference',
+  'canvas.composer.noReference': 'Nothing to reference',
   'canvas.composer.drop': 'Remove this material link',
+  'canvas.ref.type.code': 'File',
+  'canvas.ref.type.image': 'Image',
+  'canvas.ref.type.video': 'Video',
+  'canvas.ref.type.audio': 'Audio',
+  'canvas.ref.type.mark': 'Mark',
+  'canvas.ref.type.region': 'Region',
   'canvas.composer.placeholder': 'Type a prompt to send to this card…',
   'canvas.composer.send': 'Send',
   // Two faces of the same corner button: 〔enlarge〕(⤢) on the strip, 〔shrink〕(⤡)
@@ -359,6 +389,10 @@ export const en = {
   'canvas.pick.repick': 'Close the prompt box before picking another element',
   'canvas.pick.updated': 'The artifact is updated.',
   'canvas.pick.failed': 'Could not send: {message}',
+  // The locator block: the node locator & source, packed for display only — the
+  // prompt that goes out is byte-for-byte what it always was.
+  'canvas.pick.blockToggle': 'Show or hide the attached node locator & source',
+  'canvas.pick.requestPlaceholder': 'What to change…',
 
   // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': 'This file is not inside a canvas project.',
@@ -377,7 +411,7 @@ export const en = {
   'canvas.menu.remove': 'Delete canvas',
   'canvas.menu.remove.title': 'Delete this canvas?',
   'canvas.menu.remove.pending': 'Deleting canvas…',
-  'canvas.menu.remove.desc': 'This only takes “{name}” off the canvas list: the folder and its files stay exactly where they are, nothing on disk is lost. The canvas’s own layout and source edges go with it — add the folder as a canvas again to start over.',
+  'canvas.menu.remove.desc': 'This only takes “{name}” off the canvas list: the folder and its files stay exactly where they are, nothing on disk is lost — the board file inside that folder stays too, so adding the folder as a canvas again brings the layout and source edges back.',
 
   // Folder picker
   'canvas.picker.title': 'Choose a folder as a canvas project',

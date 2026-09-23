@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- dsh-canvas 主标记：点阵网格面 + 落位的那一件产物。
+     与画布设计稿「品牌标识板 · 主标记」同一份几何（导出后仅折平坐标、补 viewBox）。
+     5×5 点阵 r=7.03 @22% 墨色（正中一颗被产物方块盖住，故只画 24 颗）；
+     产物方块 82.03 见方 rx=20 主色 #4B3AEE。适用 ≥64px；更小尺寸用
+     dsh-canvas-mark-small.svg（3×3 简化档）。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"
+     role="img" aria-label="dsh-canvas">
+  <title>dsh-canvas</title>
+  <circle cx="51.56" cy="51.56" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="100.78" cy="51.56" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="150" cy="51.56" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="199.22" cy="51.56" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="248.44" cy="51.56" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="51.56" cy="100.78" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="100.78" cy="100.78" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="150" cy="100.78" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="199.22" cy="100.78" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="248.44" cy="100.78" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="51.56" cy="150" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="100.78" cy="150" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="199.22" cy="150" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="248.44" cy="150" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="51.56" cy="199.22" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="100.78" cy="199.22" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="150" cy="199.22" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="199.22" cy="199.22" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="248.44" cy="199.22" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="51.56" cy="248.44" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="100.78" cy="248.44" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="150" cy="248.44" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="199.22" cy="248.44" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <circle cx="248.44" cy="248.44" r="7.0312" fill="#0F1222" fill-opacity="0.22"/>
+  <rect x="108.984" y="108.984" width="82.0312" height="82.0312" rx="20" fill="#4B3AEE"/>
+</svg>

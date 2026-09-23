@@ -44,9 +44,11 @@ export type FileMentionKind = 'file' | 'directory'
  * instead, which says the same thing without a control-character regex that the
  * repository's lint rules reject. The set is: C0 controls, DEL and the C1
  * block, and the double quote — the first three would corrupt the token, and
- * the quote is the delimiter a quoted form is built from.
+ * the quote is the delimiter a quoted form is built from. Exported because the
+ * prompt-block scanner (`prompt-blocks.ts`) refuses the same set when it decides
+ * whether a token may render as a file block.
  */
-function hasUnsafeCharacter(text: string): boolean {
+export function hasUnsafeCharacter(text: string): boolean {
   for (const character of text) {
     const code = character.codePointAt(0) ?? 0
     if (code < 0x20 || (code >= 0x7f && code <= 0x9f) || character === '"') return true

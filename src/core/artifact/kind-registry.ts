@@ -76,6 +76,15 @@ export const BUILTIN_KINDS: readonly KindDefinition[] = [
     publishable: false,
   },
   {
+    // 设计节点（F2.6）：一个 `.design` 文件就是一份场景图快照（v2）的多画板设计文档。
+    id: 'design',
+    label: '设计',
+    addressPatterns: ['dsh-resource://file/**/*.design'],
+    directory: false,
+    exportFormats: ['png'],
+    publishable: false,
+  },
+  {
     id: 'video',
     label: '视频',
     addressPatterns: ['dsh-resource://file/**/*.mp4'],
@@ -222,6 +231,7 @@ export function detectKind(probe: KindProbe, definitions: readonly KindDefinitio
     return looksLikeDeck(head) ? 'html-deck' : 'site'
   }
   if (extension === 'md' || extension === 'mdx') return 'markdown'
+  if (extension === 'design') return 'design'
   if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif'].includes(extension)) return 'image'
   if (['mp4', 'mov', 'webm', 'm4v'].includes(extension)) return 'video'
   if (['csv', 'tsv', 'json', 'xlsx'].includes(extension)) return 'data'

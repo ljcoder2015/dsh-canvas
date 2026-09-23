@@ -42,11 +42,14 @@ import {
   buildEditPrompt,
   frameMoved,
   placePickBox,
+  splitEditPrompt,
   type PickRect,
   type PickTarget,
 } from '../../../core/artifact/preview-picker.ts'
 import type { ArtifactView } from '../../../types.ts'
 import type { ArtifactChrome } from '../chrome.tsx'
+import { PromptInput } from '../../ui/prompt-input.tsx'
+import type { PromptInputHandle } from '../../ui/prompt-input.tsx'
 import { dropPending, pendingKey, readPending, writePending } from './pending.ts'
 
 /** 选中的元素，加上弹窗要围着它画的那些东西。 */
@@ -169,8 +172,10 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
   const awaitReads = useRef(0)
   /** 发出要求时产物的文本——回读到与它不同，才算改动落地。 */
   const awaitingFrom = useRef(kept?.from ?? '')
-  /** 提示词框里的 textarea，用来把光标放到末尾（用户接在「改动要求：」后面补写）。 */
-  const boxRef = useRef<HTMLTextAreaElement | null>(null)
+  /** 提示词框里的正文，用来把光标放到末尾（用户接在「改动要求：」后面补写）。 */
+  const boxRef = useRef<PromptInputHandle | null>(null)
+  /** 定位块展开了吗：展开就露出块里打包的那段定位提示词（文件、节点、位置、源码）。 */
+  const [expanded, setExpanded] = useState(false)
   /**
    * 最新的 `draft` / `sent`，专给回读那个 effect 读。
    *
@@ -252,6 +257,7 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
       // 新的一笔顶掉上一笔：上一笔的草稿与「等产物」都不再是屏幕上这个东西的事。
       setSent('')
       setAwaiting(false)
+      setExpanded(false)
       setHeld({ target, frame, viewText: view.text })
       setDraft(buildEditPrompt({ file: cardId, target, request: '' }))
     },
@@ -341,16 +347,16 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
    * 光标落在末尾，并且**末尾那一行看得见**。
    *
    * 用户是接着「改动要求：」往下写的，不该先自己按到行尾；同理，滚动条也不该停在开头——
-   * 框里的正文（节点源码）常常比框高，焦点与 `setSelectionRange` 都不会把它滚出来，用户
-   * 看到的是一个停在源码中间、要写的那一行在折叠线以下的框。
+   * 框里的正文（节点源码）常常比框高，只把焦点交过去不会把它滚出来，用户看到的是一个停在
+   * 源码中间、要写的那一行在折叠线以下的框。所以这件事交给输入框自己那一只把手
+   * （`PromptInputHandle.caretToEnd`）：光标与滚动一起摆好，这里不用知道正文是 textarea
+   * 还是别的什么。
    */
   useEffect(() => {
     if (held === undefined) return
-    const node = boxRef.current
-    if (node === null) return
-    node.focus()
-    node.setSelectionRange(node.value.length, node.value.length)
-    node.scrollTop = node.scrollHeight
+    const box = boxRef.current
+    if (box === null) return
+    box.caretToEnd()
   }, [held])
 
   /**
@@ -389,6 +395,9 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
     // 高亮框只在「这一笔还对得上现在这一页」时画：产物被重写过（帧已经换了一页），旧坐标
     // 指着的是别的东西，圈错人比不圈更糟。
     const holdLive = view.text === held.viewText
+    // 定位块：草稿还能对上「这一笔该写出的形状」就切成「定位块 + 要求」两段展示；对不上
+    // （有人动过原文）就整段按普通文本编辑——展示让路，提示词一个字不动。
+    const split = splitEditPrompt({ file: cardId, target: held.target, text: draft })
 
     overlay = (
       <>
@@ -418,19 +427,59 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
               ×
             </button>
           </div>
-          <textarea
-            ref={boxRef}
-            className="dsh-canvas-pickbox-input"
-            value={draft}
-            spellCheck={false}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault()
-                send()
-              }
-            }}
-          />
+          {split === undefined ? (
+            <PromptInput
+              className="dsh-canvas-pickbox-input"
+              handleRef={boxRef}
+              value={draft}
+              spellCheck={false}
+              onChange={setDraft}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  event.preventDefault()
+                  send()
+                }
+              }}
+            />
+          ) : (
+            <>
+              {/* 定位块：节点源码、选择器路径这些「模型定位用」的内容打包成一枚块，
+                  用户只看见是哪个节点、哪个文件——点开能看到块里装的全部原文。它只是
+                  draft 里既有内容的另一种画法：发出去的提示词与从前逐字相同。 */}
+              <div className="dsh-canvas-pickblock">
+                <button
+                  className="dsh-canvas-pickblock-row"
+                  onClick={() => setExpanded((value) => !value)}
+                  aria-expanded={expanded}
+                  title={t('canvas.pick.blockToggle')}
+                >
+                  <span className="dsh-canvas-pickblock-glyph" aria-hidden="true">
+                    ◆
+                  </span>
+                  <span className="dsh-canvas-pickblock-name">{held.target.label}</span>
+                  <span className="dsh-canvas-pickblock-file">{cardId}</span>
+                  <span className="dsh-canvas-pickblock-chev" aria-hidden="true">
+                    {expanded ? '▾' : '▸'}
+                  </span>
+                </button>
+                {expanded ? <pre className="dsh-canvas-pickblock-detail">{split.head}</pre> : null}
+              </div>
+              <PromptInput
+                className="dsh-canvas-pickbox-input"
+                handleRef={boxRef}
+                value={split.request}
+                spellCheck={false}
+                placeholder={t('canvas.pick.requestPlaceholder')}
+                onChange={(text) => setDraft(split.head + text)}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                    event.preventDefault()
+                    send()
+                  }
+                }}
+              />
+            </>
+          )}
           {error === '' ? null : (
             <div className="dsh-canvas-pickbox-error">{t('canvas.pick.failed', { message: error })}</div>
           )}

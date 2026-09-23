@@ -132,6 +132,8 @@
     }
   },
   "dependencies": {
+    "@open-pencil/core": "~0.15.1",
+    "@open-pencil/scene-graph": "~0.15.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -164,9 +166,11 @@
     "@deepseek-ai/dsh-util-values": "^0.1.5-rc.2",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@eslint/js": "^9.30.0",
+    "@open-pencil/kiwi": "~0.15.1",
     "@types/node": "^22.19.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "canvaskit-wasm": "^0.42.0",
     "esbuild": "^0.25.0",
     "eslint": "^9.30.0",
     "react": "^18.3.1",
