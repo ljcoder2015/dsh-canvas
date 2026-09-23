@@ -110,13 +110,19 @@ export class BoardFile {
     const belongs = (record: { project: string }): boolean => record.project === project.id
     const cards = [...this.deps.domain.table('cards').entries()]
       .filter(([, record]) => belongs(record))
-      .map(([key, record]) => ({
-        id: cardIdOfKey(project.id, key),
-        position: record.position,
-        // `undefined` rather than `false`, so a board with no empty seats
-        // renders exactly as it did before this field existed.
-        empty: record.seatedEmpty === true ? true : undefined,
-      }))
+      .map(([key, record]) => {
+        const id = cardIdOfKey(project.id, key)
+        return {
+          id,
+          position: record.position,
+          // Only when it differs from the id: a legacy record (path-shaped id,
+          // no `file`) renders exactly as it did before the split.
+          file: record.file !== undefined && record.file !== id ? record.file : undefined,
+          // `undefined` rather than `false`, so a board with no empty seats
+          // renders exactly as it did before this field existed.
+          empty: record.seatedEmpty === true ? true : undefined,
+        }
+      })
     const sources = [...this.deps.domain.table('sources').entries()]
       .filter(([, record]) => belongs(record))
       .map(([, record]) => ({ downstream: record.downstream, upstream: record.upstream, origin: record.origin }))

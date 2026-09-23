@@ -20,6 +20,8 @@ export const BOARD_ORIGIN: Point = { x: 48, y: 170 }
 /** One card's seating input: its identity and, optionally, where it already is. */
 export interface SeatInput {
   id: CardId
+  /** Artifact path the card binds, when the caller knows it (id/path split: the id is not a path). */
+  file?: string
   /** Current position, used as a stable tiebreaker so re-arranging is idempotent. */
   position?: Point
 }

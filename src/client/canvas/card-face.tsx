@@ -99,12 +99,12 @@ export function CardFace({ located, facts, t, children }: CardFaceProps) {
   return (
     <div className="dsh-canvas-panel">
       <div className="dsh-canvas-panel-head">
-        <span className="dsh-canvas-panel-title">{basenameOf(card.id)}</span>
+        <span className="dsh-canvas-panel-title">{basenameOf(card.file)}</span>
         <span className="dsh-canvas-card-meta">{card.kindLabel}</span>
       </div>
 
       <div className="dsh-canvas-fields">
-        <Field label={t('canvas.panel.path')}>{`${project.root}/${card.id}`}</Field>
+        <Field label={t('canvas.panel.path')}>{`${project.root}/${card.file}`}</Field>
         <Field label={t('canvas.panel.kind')}>{summary?.kind ?? card.kind}</Field>
         <Field label={t('canvas.panel.size')}>{fileSizeText(summary?.bytes ?? 0)}</Field>
         <Field label={t('canvas.panel.updated')}>{new Date(summary?.updatedAt ?? 0).toLocaleString()}</Field>
@@ -119,7 +119,7 @@ export function CardFace({ located, facts, t, children }: CardFaceProps) {
             {facts.material.map((entry) => (
               <div className="dsh-canvas-chain-row" key={entry.cardId}>
                 <span className="dsh-canvas-chain-arrow">↓</span>
-                {entry.cardId}
+                {basenameOf(entry.path)}
               </div>
             ))}
           </div>

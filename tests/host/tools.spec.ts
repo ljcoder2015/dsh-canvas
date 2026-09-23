@@ -46,6 +46,7 @@ const DIGEST: CardSummary = {
 /** One seated card. */
 const CARD: BoardCard = {
   id: 'deck.html',
+  file: 'deck.html',
   project: PROJECT.id,
   kind: 'html-deck',
   kindLabel: 'Deck',

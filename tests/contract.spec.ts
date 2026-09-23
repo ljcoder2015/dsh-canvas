@@ -4,15 +4,24 @@
  */
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { DSH_CANVAS_INVOCATIONS, TOOL_NAMES, TOOL_NAME_LIST, TOOL_NAME_PATTERN, boardSnapshotSchema } from '../src/contract.ts'
+import { DSH_CANVAS_INVOCATIONS, PACKAGE_NAME, TOOL_NAMES, TOOL_NAME_LIST, TOOL_NAME_PATTERN, boardSnapshotSchema } from '../src/contract.ts'
 import { CANVAS_DOMAIN } from '../src/domain.ts'
 import { TYPERT_MANIFEST } from '../src/typert.ts'
+import { DSH_CANVAS_REMOTE } from '../src/client/wire/remote.ts'
 
 describe('dsh-canvas wire contract', () => {
   it('shares one descriptor list between the host manifest and the package', () => {
     expect(TYPERT_MANIFEST.invocations).toBe(DSH_CANVAS_INVOCATIONS)
-    expect(TYPERT_MANIFEST.package).toBe('dsh-canvas')
+    expect(TYPERT_MANIFEST.package).toBe(PACKAGE_NAME)
     expect(TYPERT_MANIFEST.face).toBe('host')
+  })
+
+  // The client contribution is the second place the package name is written as
+  // an identity (the model layer attributes both faces by it). Reading it off
+  // `PACKAGE_NAME` is what keeps the two from drifting when the package is
+  // renamed — the miss this test exists for.
+  it('attributes both faces to the same package', () => {
+    expect(DSH_CANVAS_REMOTE.package).toBe(PACKAGE_NAME)
   })
 
   it('uses unique, namespaced identities', () => {
@@ -20,7 +29,7 @@ describe('dsh-canvas wire contract', () => {
     expect(new Set(ids).size).toBe(ids.length)
 
     for (const descriptor of DSH_CANVAS_INVOCATIONS) {
-      expect(descriptor.id.startsWith('dsh-canvas#')).toBe(true)
+      expect(descriptor.id.startsWith(`${PACKAGE_NAME}#`)).toBe(true)
       expect(['canvas', 'card']).toContain(descriptor.namespace)
       // The wire namespace and the owning service key are the same value in
       // this plugin, which is what lets one `bindTypertRemote` cover both.
@@ -71,7 +80,7 @@ describe('dsh-canvas wire contract', () => {
   })
 
   it('routes the card composer through card/send_message with a prompt and a session binding', () => {
-    const descriptor = DSH_CANVAS_INVOCATIONS.find((entry) => entry.id === 'dsh-canvas#card/send_message')
+    const descriptor = DSH_CANVAS_INVOCATIONS.find((entry) => entry.id === `${PACKAGE_NAME}#card/send_message`)
     expect(descriptor).toBeDefined()
     expect(descriptor?.namespace).toBe('card')
     expect(descriptor?.method).toBe('sendMessage')
@@ -93,6 +102,7 @@ describe('dsh-canvas wire contract', () => {
       cards: [
         {
           id: 'brief.md',
+          file: 'brief.md',
           project: 'p1',
           kind: 'markdown',
           kindLabel: 'Markdown',
@@ -115,10 +125,11 @@ describe('dsh-canvas storage domain', () => {
   // Importing the module is itself the assertion: `defineDomain` validates at
   // module load and throws on a name the medium rejects, which takes the whole
   // host half down at boot (`plugin tree failed to load`). The package name
-  // `dsh-canvas` is not a legal unit name, so the domain cannot mirror it.
+  // (`PACKAGE_NAME` — scoped, with `@` and `/`) is not a legal unit name, so
+  // the domain cannot mirror it.
   it('declares a unit name the medium accepts, and it is not the package name', () => {
     expect(CANVAS_DOMAIN.name).toMatch(/^[a-z][a-z0-9_]*$/)
-    expect(CANVAS_DOMAIN.name).not.toBe('dsh-canvas')
+    expect(CANVAS_DOMAIN.name).not.toBe(PACKAGE_NAME)
     expect(Object.keys(CANVAS_DOMAIN.tables)).toEqual(['projects', 'cards', 'sources', 'notes', 'intents'])
   })
 

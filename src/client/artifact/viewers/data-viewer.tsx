@@ -10,7 +10,7 @@ import type { ViewerProps, ViewerRegistration } from './types.ts'
 
 /** The data viewer: CSV / TSV as a table, JSON pretty-printed. */
 export function DataViewer({ view }: ViewerProps) {
-  const extension = (view.cardId.split('.').pop() ?? '').toLowerCase()
+  const extension = (view.file.split('.').pop() ?? '').toLowerCase()
   const content = useMemo(() => {
     if (extension === 'json') {
       try {

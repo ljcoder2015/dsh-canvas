@@ -8,7 +8,13 @@
 
 /** Branded project identifier. */
 export type ProjectId = string
-/** Card identity: the path of the bound file, relative to the project root. */
+/**
+ * Card identity: an opaque board seat id, minted as six random letters when the
+ * card is seated. It is *not* a path — the artifact's workspace-relative path
+ * lives on the card record ({@link Card.file}) and may be anything, renamed
+ * even, without touching the id. Records minted before this split keep a
+ * path-shaped id and read their file as the id itself.
+ */
 export type CardId = string
 /** Storage key of a card record — project-qualified so two projects may hold the same relative path. */
 export type CardKey = string
@@ -55,8 +61,10 @@ export interface Project {
 
 /** One artifact card (F1.2) — a file on disk plus its board position and bound session. */
 export interface Card {
-  /** Path relative to the owning project's root. */
+  /** Board seat id — six random letters on cards minted after the id/path split. */
   id: CardId
+  /** Path of the bound artifact, relative to the owning project's root. */
+  file: string
   project: ProjectId
   /** Kind id resolved by the kind registry (F2.2). */
   kind: string
@@ -102,6 +110,8 @@ export type CardStatus = 'idle' | 'running' | 'notified'
  */
 export interface BoardCard {
   id: CardId
+  /** Path of the bound artifact, relative to the project root — never the id itself on new cards. */
+  file: string
   project: ProjectId
   kind: string
   /** Human label of the kind, for the card's caption. */
@@ -140,6 +150,7 @@ export interface BoardSnapshot {
 
 /** Content summary of one artifact, used both for injection and for card previews (F5.2). */
 export interface CardSummary {
+  /** The seat id of the card the artifact belongs to. */
   cardId: CardId
   kind: string
   /** Absolute path on disk. */
@@ -163,6 +174,8 @@ export interface CardSummary {
  */
 export interface ArtifactView {
   cardId: CardId
+  /** Path of the artifact the view was read from, relative to the project root. */
+  file: string
   /** Kind id as the artifact classifier resolved it at read time. */
   kind: string
   /** Whether the bound file exists on disk. */
@@ -203,7 +216,7 @@ export interface SourceChain {
 export interface ReferencedFile {
   /** The upstream card, as this board names it. */
   cardId: CardId
-  /** Workspace-relative path of the artifact — the same string as `cardId`. */
+  /** Workspace-relative path of the artifact — the card's `file`, not its id. */
   path: string
   /** The prompt token the model resolves: `@brief.md` or `@"my brief.md"`. */
   mention: string

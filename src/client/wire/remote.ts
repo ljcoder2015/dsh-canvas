@@ -34,11 +34,11 @@ import type {
   Viewport,
   WriteResult,
 } from '../../types.ts'
-import { DSH_CANVAS_INVOCATIONS, type DesignDocumentWire, type DesignEditResultWire } from '../../contract.ts'
+import { DSH_CANVAS_INVOCATIONS, PACKAGE_NAME, type DesignDocumentWire, type DesignEditResultWire } from '../../contract.ts'
 
 /** What the browser mounts to obtain `ctx.remote.canvas` and `ctx.remote.card`. */
 export const DSH_CANVAS_REMOTE: TypertRemoteContribution = {
-  package: 'dsh-canvas',
+  package: PACKAGE_NAME,
   descriptors: DSH_CANVAS_INVOCATIONS,
 }
 
@@ -72,7 +72,8 @@ export interface CanvasFace {
 
 /** The `card` namespace — artifact digests, session binding, writes, export. */
 export interface CardFace {
-  createCard(projectId: string, cardId: string, kind: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
+  /** `file` is the artifact's project-relative path; the host mints the card id. */
+  createCard(projectId: string, file: string, kind: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
   scaffoldWebapp(projectId: string, name: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
   scaffoldDesign(projectId: string, name: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
   readDesign(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<DesignDocumentWire>>

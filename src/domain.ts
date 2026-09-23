@@ -61,6 +61,13 @@ const cardRecord = z.object({
   sessionId: z.string(),
   updatedAt: z.number(),
   seatedEmpty: z.boolean().optional(),
+  /**
+   * Path of the bound artifact, relative to the project root. Optional on
+   * purpose: records written before the id/path split have a path-shaped id
+   * and no file, and `undefined` reads as "the file is the id" — the old
+   * behavior, so no migration is needed. New records always carry it.
+   */
+  file: z.string().optional(),
 })
 
 /** One source edge: `downstream` builds on `upstream` (F4.1, F4.3). */

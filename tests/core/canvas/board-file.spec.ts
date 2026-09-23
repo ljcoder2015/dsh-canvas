@@ -79,6 +79,20 @@ describe('board file envelope', () => {
     expect(composeBoardFile(filled)).not.toContain('empty')
   })
 
+  it('carries the file a card binds, and writes nothing for a legacy path-shaped id', () => {
+    // Since the id/path split a card's artifact path lives in `file` — written
+    // only when it differs from the id, so a pre-split board file (whose ids
+    // *are* paths) renders byte-identically and still parses.
+    const split = board({ cards: [{ id: 'ab', file: 'brief.md', position: { x: 48, y: 170 } }] })
+    const text = composeBoardFile(split)
+    expect(text).toContain('"file": "brief.md"')
+    expect(parseBoardFile(text)).toEqual({ kind: 'parsed', content: split })
+
+    const legacy = board()
+    expect(composeBoardFile(legacy)).not.toContain('file')
+    expect(parseBoardFile(composeBoardFile(legacy))).toEqual({ kind: 'parsed', content: legacy })
+  })
+
   it('is plain JSON a person can read and edit', () => {
     const text = composeBoardFile(board())
     const raw = JSON.parse(text) as { format: string; version: number; cards: unknown[] }
@@ -167,11 +181,17 @@ describe('planIdentity', () => {
 })
 
 describe('planSeats', () => {
+  /** Deterministic stand-in for the host's random mint: counts up, visibly. */
+  const mint = (() => {
+    let n = 0
+    return () => `minted${(n += 1)}`
+  })()
+
   it('seats what the file lists at the position the file remembers', () => {
-    const seats = planSeats({ seated: [], filed: board().cards, scanned: [], gap: 88 })
+    const seats = planSeats({ seated: [], filed: board().cards, scanned: [], gap: 88, mint })
     expect(seats).toEqual([
-      { id: 'brief.md', position: { x: 48, y: 170 } },
-      { id: 'deck.html', position: { x: 336, y: 170 } },
+      { id: 'brief.md', file: 'brief.md', position: { x: 48, y: 170 } },
+      { id: 'deck.html', file: 'deck.html', position: { x: 336, y: 170 } },
     ])
   })
 
@@ -183,20 +203,23 @@ describe('planSeats', () => {
       filed: board().cards,
       scanned: [],
       gap: 88,
+      mint,
     })
-    expect(seats).toEqual([{ id: 'deck.html', position: { x: 336, y: 170 } }])
+    expect(seats).toEqual([{ id: 'deck.html', file: 'deck.html', position: { x: 336, y: 170 } }])
   })
 
-  it('parks a file nobody has seen one step right of the board', () => {
+  it('parks a file nobody has seen one step right of the board, under a minted id', () => {
     const seats = planSeats({
       seated: [{ id: 'brief.md', position: { x: 48, y: 170 } }],
       filed: [],
       scanned: ['pasted.html'],
       gap: 88,
+      mint: () => 'qzxkfa',
     })
     // 48 + 200 (card width) + 88 (gap) — the same seat a first bind has always
-    // given a newly discovered file.
-    expect(seats).toEqual([{ id: 'pasted.html', position: { x: 336, y: 170 } }])
+    // given a newly discovered file. The id is the mint's (six random letters
+    // in production); the file is what the scan found.
+    expect(seats).toEqual([{ id: 'qzxkfa', file: 'pasted.html', position: { x: 336, y: 170 } }])
   })
 
   it('does not seat a card twice when the file and the disk agree', () => {
@@ -205,15 +228,35 @@ describe('planSeats', () => {
       filed: board().cards,
       scanned: ['brief.md', 'deck.html'],
       gap: 88,
+      mint,
     })
     expect(seats.map((seat) => seat.id)).toEqual(['brief.md', 'deck.html'])
+  })
+
+  it('reconciles by file, so a scanned artifact binds to the card that already owns it', () => {
+    // The id/path split: `ab` is a seat id, `brief.md` is its file. A scan
+    // finding `brief.md` must not mint a second card for it.
+    const seats = planSeats({
+      seated: [{ id: 'ab', file: 'brief.md', position: { x: 48, y: 170 } }],
+      filed: [],
+      scanned: ['brief.md', 'new.md'],
+      gap: 88,
+      mint: () => 'qzxkfa',
+    })
+    expect(seats).toEqual([{ id: 'qzxkfa', file: 'new.md', position: { x: 336, y: 170 } }])
   })
 
   it('keeps a card the file lists even when its artifact is gone', () => {
     // A missing card is a real board state carrying real edges (F3.5), and the
     // user removes it deliberately (F1.11) — an import must not decide that.
-    const seats = planSeats({ seated: [], filed: [{ id: 'gone.md', position: { x: 1, y: 2 } }], scanned: [], gap: 88 })
-    expect(seats).toEqual([{ id: 'gone.md', position: { x: 1, y: 2 } }])
+    const seats = planSeats({
+      seated: [],
+      filed: [{ id: 'gone.md', position: { x: 1, y: 2 } }],
+      scanned: [],
+      gap: 88,
+      mint,
+    })
+    expect(seats).toEqual([{ id: 'gone.md', file: 'gone.md', position: { x: 1, y: 2 } }])
   })
 
   it('hands the empty-seat exemption back to the caller, and only when the file claims it', () => {
@@ -229,10 +272,11 @@ describe('planSeats', () => {
       ],
       scanned: [],
       gap: 88,
+      mint,
     })
     expect(seats).toEqual([
-      { id: 'untitled.md', position: { x: 1, y: 2 }, empty: true },
-      { id: 'gone.md', position: { x: 300, y: 2 } },
+      { id: 'untitled.md', file: 'untitled.md', position: { x: 1, y: 2 }, empty: true },
+      { id: 'gone.md', file: 'gone.md', position: { x: 300, y: 2 } },
     ])
   })
 })

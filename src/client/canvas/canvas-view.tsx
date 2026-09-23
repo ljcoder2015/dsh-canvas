@@ -98,7 +98,7 @@ function keyboardOwner(): HTMLElement | undefined {
 interface DockSpec {
   /** Dictionary key of the menu label. */
   readonly label: CanvasKey
-  /** File extension; also the card id's suffix, since a card id is a path. */
+  /** File extension; names the artifact file the new card will bind. */
   readonly extension: string
   /** The kind passed to `card.create_card` while no file exists yet. */
   readonly kind: string
@@ -125,11 +125,12 @@ const DOCK_SPECS: readonly DockSpec[] = [
   { label: 'canvas.dock.design', extension: 'design', kind: 'design', design: true },
 ]
 
-/** 一个还不存在的卡片 id：以扩展名为后缀，撞名就加序号——绝不覆盖已有产物的席位。 */
-function freeCardId(cards: readonly BoardCard[], extension: string): string {
-  let cardId = `untitled.${extension}`
-  for (let n = 2; cards.some((card) => card.id === cardId); n += 1) cardId = `untitled-${n}.${extension}`
-  return cardId
+/** 一个还不存在的产物文件名：以扩展名为后缀，撞名就加序号——绝不覆盖已有产物。
+ *  卡片 id 由 host 铸出（6 位随机字母），与文件名无关，所以这里只对文件查重。 */
+function freeFileName(cards: readonly BoardCard[], extension: string): string {
+  let file = `untitled.${extension}`
+  for (let n = 2; cards.some((card) => card.file === file); n += 1) file = `untitled-${n}.${extension}`
+  return file
 }
 
 /**
@@ -140,7 +141,7 @@ function freeCardId(cards: readonly BoardCard[], extension: string): string {
  * 能在发起前就指向正确的一端。
  */
 function freeAppFolder(cards: readonly BoardCard[]): string {
-  const taken = (folder: string) => cards.some((card) => card.id.startsWith(`${folder}/`))
+  const taken = (folder: string) => cards.some((card) => card.file.startsWith(`${folder}/`))
   let folder = 'app'
   for (let n = 2; taken(folder); n += 1) folder = `app-${n}`
   return folder
@@ -671,14 +672,14 @@ export function CanvasBoard(props: CanvasBoardProps) {
       if (spec.webapp === true) return bridge.scaffoldWebapp(projectId, freeAppFolder(cards), position)
       if (spec.design === true) {
         // The local preview name only has to be *probably* free — the host
-        // settles the real name against the disk, and the returned card id
-        // wins for anything downstream (linking included).
-        const name = freeCardId(cards, 'design').replace(/\.design$/, '')
+        // settles the real name against the disk, and the returned card wins
+        // for anything downstream (linking included).
+        const name = freeFileName(cards, 'design').replace(/\.design$/, '')
         return bridge.scaffoldDesign(projectId, name, position)
       }
-      const cardId = freeCardId(cards, spec.extension)
-      const card = await bridge.createCard(projectId, cardId, spec.kind, position)
-      if (spec.seed !== undefined) await bridge.writeText(projectId, cardId, spec.seed)
+      const file = freeFileName(cards, spec.extension)
+      const card = await bridge.createCard(projectId, file, spec.kind, position)
+      if (spec.seed !== undefined) await bridge.writeText(projectId, card.id, spec.seed)
       return card
     },
     [bridge, cards, projectId],
@@ -1455,7 +1456,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
         {removal === undefined ? null : (
           <div className="dsh-canvas-toolbar is-horizontal" style={{ left: '50%', top: '12px', transform: 'translateX(-50%)', zIndex: 6 }}>
             <span className="dsh-canvas-card-meta" style={{ padding: '0 8px' }}>
-              {basenameOf(removal)}
+              {basenameOf(cards.find((card) => card.id === removal)?.file ?? removal)}
             </span>
             <button className="dsh-canvas-chipbtn" data-primary="true" onClick={confirmRemoval}>
               {t('canvas.action.confirm')}
@@ -1587,7 +1588,7 @@ function PromptModal(props: {
     >
       <div className="dsh-canvas-dialog dsh-canvas-promptmodal">
         <div className="dsh-canvas-dialog-head">
-          {card.id.split('/').pop() ?? card.id}
+          {card.file.split('/').pop() ?? card.file}
           {/* 把壳收回去的那颗（⤡）：它管的是这个弹窗的开合，所以站在壳的头上——三行里
               因此一颗多余的按钮都没有（那边右上角那颗 ⤢ 管的是带子，不是壳）。 */}
           <button

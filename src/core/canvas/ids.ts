@@ -1,12 +1,16 @@
 /**
  * dsh-canvas — stable identities.
  *
- * Card ids are paths *relative* to a project root, so they are already stable
- * and readable. Project ids cannot be paths (they cross the wire and are
- * schema-bounded), and they must stay stable across restarts, so they are
- * derived from the root: a readable slug plus a short digest of the full path.
- * Two projects named `deck` under different parents therefore stay distinct,
- * and re-binding the same directory reuses the same project.
+ * Card ids are opaque board seat identities minted as six random letters —
+ * deliberately *not* file names, so the artifact file can be named (and
+ * renamed) freely; the path lives on the card record's `file` field. Records
+ * minted before that split keep a path-shaped id, which is why every file
+ * lookup falls back to the id when a record carries no `file`. Project ids
+ * cannot be paths (they cross the wire and are schema-bounded), and they must
+ * stay stable across restarts, so they are derived from the root: a readable
+ * slug plus a short digest of the full path. Two projects named `deck` under
+ * different parents therefore stay distinct, and re-binding the same directory
+ * reuses the same project.
  */
 
 /**
@@ -40,6 +44,30 @@ export function projectIdOf(root: string): string {
   const normalised = root.replace(/\/+$/, '')
   const base = normalised.split('/').pop() ?? 'canvas'
   return `${slugify(base)}-${shortDigest(normalised)}`
+}
+
+/** Alphabet a minted card id draws from — lowercase letters only. */
+const CARD_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz'
+/** Length of a minted card id: six letters, per the board's identity rule. */
+const CARD_ID_LENGTH = 6
+
+/**
+ * Mint one card id that no card in `taken` holds.
+ *
+ * Six random letters: short enough to read on a card caption, opaque enough
+ * that no file name can collide with it by accident. The pool is 26⁶ ≈ 309m,
+ * so the retry loop below never spins in practice; it exists because "random"
+ * is not "unique" and the seat table is the only judge that matters.
+ */
+export function mintCardId(taken: Iterable<string>): string {
+  const used = new Set(taken)
+  for (;;) {
+    let id = ''
+    for (let index = 0; index < CARD_ID_LENGTH; index += 1) {
+      id += CARD_ID_ALPHABET[Math.floor(Math.random() * CARD_ID_ALPHABET.length)]
+    }
+    if (!used.has(id)) return id
+  }
 }
 
 /**

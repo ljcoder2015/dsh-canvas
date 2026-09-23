@@ -13,7 +13,7 @@ import { build } from 'esbuild'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 
 /** Module loader identity — must match package name, index.ts `name` and cordis.patch.yml. */
-const PLUGIN_ID = 'dsh-canvas'
+const PLUGIN_ID = '@ljcoder2015/dsh-canvas'
 
 mkdirSync('lib', { recursive: true })
 /**

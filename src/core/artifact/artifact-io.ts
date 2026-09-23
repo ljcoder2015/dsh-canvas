@@ -6,9 +6,10 @@
  * the seam's version guards, sandbox policy parameters and the
  * `fs/write-intent` / `fs/edit-intent` waterfalls that F8.4 hooks into.
  *
- * A card id *is* a path relative to its project root (§2.2), so each operation
- * resolves the card id against the project root rather than concatenating
- * strings — the seam owns the join and the containment rules.
+ * Every method here takes the artifact's path *relative to the project root*
+ * (§2.2) — the card record's `file`, not the card id — and resolves it against
+ * the project root rather than concatenating strings: the seam owns the join
+ * and the containment rules.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { FsError } from '@deepseek-ai/dsh-fs'
@@ -435,6 +436,9 @@ export class ArtifactIo {
     const facts = await this.facts(root, cardId, signal)
     const base = {
       cardId,
+      // `cardId` is the artifact path at this layer; the runtime overrides it
+      // with the card's real id and stamps `file` with the path.
+      file: cardId,
       kind: facts.kind,
       present: facts.present,
       text: '',

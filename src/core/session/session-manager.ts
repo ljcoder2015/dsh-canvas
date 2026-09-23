@@ -35,9 +35,9 @@ export type CardSessionFactory = (ownerCtx: Context) => Promise<{ agent: Agent; 
  * Storage key of a card inside its project.
  *
  * Per-record storage turns keys into file-path segments, so a key may only
- * hold `[a-zA-Z0-9_-]` — the card id (a relative path with `/` and `.`) is
- * hex-escaped, `_` itself included, which keeps the mapping reversible
- * without a lookup table.
+ * hold `[a-zA-Z0-9_-]` — a card id is six letters today, but legacy ids are
+ * relative paths with `/` and `.`, so the id is still hex-escaped, `_`
+ * itself included, which keeps the mapping reversible without a lookup table.
  */
 export function cardKeyOf(project: ProjectId, cardId: CardId): string {
   return `${project}-${encodeSegment(cardId)}`
@@ -50,6 +50,17 @@ export function cardKeyOf(project: ProjectId, cardId: CardId): string {
  */
 export function cardIdOfKey(project: ProjectId, key: string): CardId {
   return decodeSegment(key.slice(project.length + 1))
+}
+
+/**
+ * The artifact path a card record names.
+ *
+ * Since the id/path split, the path lives on the record's `file`; records
+ * written before the split have no `file` and a path-shaped id, so reading
+ * their file as the id is exactly the old behavior — no migration needed.
+ */
+export function cardFileOf(record: { file?: string | undefined }, cardId: CardId): string {
+  return record.file ?? cardId
 }
 
 /** Undo {@link encodeSegment}; fixed-width escapes cannot be ambiguous. */

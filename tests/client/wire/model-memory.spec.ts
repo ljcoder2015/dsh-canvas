@@ -39,6 +39,7 @@ const catalog: ModelCatalog = {
 function card(kind: string): BoardCard {
   return {
     id: 'untitled.md',
+    file: 'untitled.md',
     project: 'p',
     kind,
     kindLabel: kind,

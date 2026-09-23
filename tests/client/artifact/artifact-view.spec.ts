@@ -388,7 +388,7 @@ describe('delimited parsing', () => {
 
 describe('wire payload validation', () => {
   it('accepts a text view and a data-URL view', () => {
-    const base = { cardId: 'a.md', kind: 'markdown', present: true, truncated: false, bytes: 3, updatedAt: 1 }
+    const base = { cardId: 'a.md', file: 'a.md', kind: 'markdown', present: true, truncated: false, bytes: 3, updatedAt: 1 }
     expect(artifactViewSchema.parse({ ...base, text: 'abc', dataUrl: '' }).present).toBe(true)
     expect(artifactViewSchema.parse({ ...base, cardId: 'a.png', kind: 'image', text: '', dataUrl: 'data:image/png;base64,AAAA' }).kind).toBe('image')
   })
@@ -396,6 +396,7 @@ describe('wire payload validation', () => {
   it('accepts the absent state a seated-but-unwritten card answers with', () => {
     const view = artifactViewSchema.parse({
       cardId: 'a.md',
+      file: 'a.md',
       kind: 'markdown',
       present: false,
       text: '',

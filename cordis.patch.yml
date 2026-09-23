@@ -4,11 +4,17 @@
 # backend, so it is inserted after the storage domain consumer (order 100).
 # Override the Config defaults from src/index.ts by adding a `config` block:
 #   - insert:
-#       - id: dsh-canvas
-#         name: dsh-canvas
+#       - id: '@ljcoder2015/dsh-canvas'
+#         name: '@ljcoder2015/dsh-canvas'
 #         config:
 #           workspaceRoot: ./canvas
 #           arrangeGap: 88
+#
+# `name` is the module specifier resolved in the profile — the package name — and
+# `id` is the instance id a patch layer targets. Both follow the package name
+# (docs 技术文档 §三「改名时必须同步的位置」); the short `dsh-canvas` word the
+# logs and prompt sections use is a label (`src/host/prompt.ts` `PLUGIN_ID`), not
+# this identity.
 - insert:
-    - id: dsh-canvas
-      name: dsh-canvas
+    - id: '@ljcoder2015/dsh-canvas'
+      name: '@ljcoder2015/dsh-canvas'

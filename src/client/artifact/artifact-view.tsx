@@ -144,7 +144,7 @@ export function ArtifactModal(props: {
       >
         <div className="dsh-canvas-dialog dsh-canvas-viewer">
           <div className="dsh-canvas-dialog-head">
-            {cardId.split('/').pop() ?? cardId}
+            {(view?.file ?? cardId).split('/').pop()}
             <span className="dsh-canvas-card-meta">{view?.kind ?? ''}</span>
             <span className="dsh-canvas-spacer" />
             {/* 头部插槽：头部的布局在这里，头部里的按钮属于各个预览器。 */}

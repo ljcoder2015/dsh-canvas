@@ -119,14 +119,14 @@ export function CardTile(props: CardTileProps) {
       onDoubleClick={() => onActivate(card.id)}
       role="button"
       tabIndex={0}
-      title={card.id}
+      title={card.file}
     >
       {/* 流光层画在内容之前：它是绝对定位的，因此盖在名字与预览之上（那道光是「正在
           跑」的整句话），而同样绝对定位、排在他后面的两个端口仍压在最上面。 */}
       {state === 'running' ? <span className="dsh-canvas-shimmer" aria-hidden="true" /> : null}
 
       <div className="dsh-canvas-card-head">
-        <div className="dsh-canvas-card-name">{card.id.split('/').pop() ?? card.id}</div>
+        <div className="dsh-canvas-card-name">{card.file.split('/').pop() ?? card.file}</div>
       </div>
 
       <div className="dsh-canvas-card-preview">

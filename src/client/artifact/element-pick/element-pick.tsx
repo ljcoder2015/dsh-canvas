@@ -259,9 +259,9 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
       setAwaiting(false)
       setExpanded(false)
       setHeld({ target, frame, viewText: view.text })
-      setDraft(buildEditPrompt({ file: cardId, target, request: '' }))
+      setDraft(buildEditPrompt({ file: view.file, target, request: '' }))
     },
-    [cardId, view.text],
+    [view.file, view.text],
   )
 
   /**
@@ -421,7 +421,7 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
         >
           <div className="dsh-canvas-pickbox-head">
             <span className="dsh-canvas-pickbox-tag">{held.target.label}</span>
-            <span className="dsh-canvas-pickbox-file">{cardId}</span>
+            <span className="dsh-canvas-pickbox-file">{view.file}</span>
             <span className="dsh-canvas-spacer" />
             <button className="dsh-canvas-chipbtn" onClick={clear} aria-label={t('canvas.action.cancel')}>
               ×
@@ -457,7 +457,7 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
                     ◆
                   </span>
                   <span className="dsh-canvas-pickblock-name">{held.target.label}</span>
-                  <span className="dsh-canvas-pickblock-file">{cardId}</span>
+                  <span className="dsh-canvas-pickblock-file">{view.file}</span>
                   <span className="dsh-canvas-pickblock-chev" aria-hidden="true">
                     {expanded ? '▾' : '▸'}
                   </span>

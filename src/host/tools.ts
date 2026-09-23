@@ -143,7 +143,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
       description:
         '读取指定卡片产物的摘要（结构化大纲 + 有界正文）。用于了解画布上另一张卡片当前是什么样子。只读取，不修改。',
       parameters: {
-        cardId: { type: 'string', description: '项目内的相对路径，即卡片 id，例如 decks/intro.html', required: true },
+        cardId: { type: 'string', description: '目标卡片 id（画布座位身份，不是文件路径）', required: true },
       },
       output: {
         schema: { type: 'object', properties: SUMMARY_PROPERTIES, additionalProperties: false },
@@ -430,7 +430,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         return {
           project: board.project.name,
           root: board.project.root,
-          cards: board.cards.map((card) => `${card.id}(${card.kind})`),
+          cards: board.cards.map((card) => `${card.id}(${card.kind} → 文件 ${card.file})`),
           sources: board.sources.map((source) => `${source.downstream} ← ${source.upstream}`),
         }
       },
@@ -482,7 +482,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         type: { type: 'string', enum: ['note', 'card', 'webapp', 'design'], description: '创建类型', required: true },
         content: {
           type: 'string',
-          description: 'note 为便利贴文字；card 为项目内相对路径；webapp / design 为显示名（落盘名字由它生成）',
+          description: 'note 为便利贴文字；card 为产物文件的项目内相对路径（卡片 id 由画布铸出并在返回值里给出）；webapp / design 为显示名（落盘名字由它生成）',
           required: true,
         },
         kind: { type: 'string', description: 'type=card 时的形态 id；省略则按文件证据认定' },
@@ -492,15 +492,15 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
       output: {
         schema: {
           type: 'object',
-          properties: { type: { type: 'string' }, id: { type: 'string' } },
+          properties: { type: { type: 'string' }, id: { type: 'string' }, file: { type: 'string' } },
           additionalProperties: false,
         },
         render: (_args, value) => {
-          const created = value as { type: string; id: string }
+          const created = value as { type: string; id: string; file?: string }
           if (created.type === 'note') return text(`已创建便利贴 ${created.id}。`)
           if (created.type === 'webapp') return text(`已创建应用 ${created.id}（入口 index.html，文件夹内含脚手架）。`)
           if (created.type === 'design') return text(`已创建设计 ${created.id}（.design，含空白画板）。`)
-          return text(`已在画布上创建卡片 ${created.id}。`)
+          return text(`已创建卡片 ${created.id}（文件 ${created.file ?? ''}）。`)
         },
       },
       async execute(args, exec) {
@@ -534,10 +534,9 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
           )
           return { type: 'design', id: card.id }
         }
-        const cardId = String(args.content)
         const kind = typeof args.kind === 'string' ? args.kind : 'file'
-        await deps.card.createCard(projectId, cardId, kind, { x: x ?? 48, y: y ?? 170 }, exec.signal)
-        return { type: 'card', id: cardId }
+        const card = await deps.card.createCard(projectId, String(args.content), kind, { x: x ?? 48, y: y ?? 170 }, exec.signal)
+        return { type: 'card', id: card.id, file: card.file }
       },
     }),
   )
@@ -571,7 +570,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
   ctx.tools.register(
     defineTool({
       name: TOOL_NAMES.generateImage,
-      description: '为某张图片卡片生成画面。prompt 描述要什么，cardId 指定写进哪张卡片（项目内相对路径）。',
+      description: '为某张图片卡片生成画面。prompt 描述要什么，cardId 指定写进哪张卡片（卡片 id）。',
       parameters: {
         prompt: { type: 'string', description: '画面描述', required: true },
         cardId: { type: 'string', description: '目标图片卡片 id', required: true },

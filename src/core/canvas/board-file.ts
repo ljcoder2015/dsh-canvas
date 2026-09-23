@@ -48,6 +48,13 @@ export interface BoardFileCard {
   id: CardId
   position: Point
   /**
+   * Path of the artifact the card binds, relative to the project root.
+   * Optional so a file written before the id/path split still parses — there
+   * the id *is* the path, and a missing `file` reads as exactly that. Written
+   * only when it differs from the id, so a legacy board is unchanged on disk.
+   */
+  file?: string
+  /**
    * The seat was created without an artifact and has not been seen with one
    * since (F1.11). Carried so the exemption survives leaving this machine: a
    * folder opened elsewhere must not offer a not-yet-written card to a bulk
@@ -105,7 +112,14 @@ export function composeBoardFile(content: BoardFileContent): string {
     .sort((left, right) => left.id.localeCompare(right.id))
     // `empty` only when it is true: the field is an exception flag, and a board
     // whose seats all hold artifacts should read as if it did not exist.
-    .map((card) => ({ id: card.id, position: card.position, ...(card.empty === true ? { empty: true } : {}) }))
+    // `file` only when it differs from the id: a legacy board (id-shaped path,
+    // no split) renders byte-identically to before.
+    .map((card) => ({
+      id: card.id,
+      position: card.position,
+      ...(card.file !== undefined && card.file !== card.id ? { file: card.file } : {}),
+      ...(card.empty === true ? { empty: true } : {}),
+    }))
   const sources = [...content.sources].sort(
     (left, right) => left.downstream.localeCompare(right.downstream) || left.upstream.localeCompare(right.upstream),
   )
@@ -158,7 +172,15 @@ export function parseBoardFile(text: string): BoardFileRead {
         const cardId = text1(entry['id'])
         const position = point(entry['position'])
         if (cardId === '' || position === undefined) return []
-        return [{ id: cardId, position, ...(entry['empty'] === true ? { empty: true } : {}) }]
+        const file = text1(entry['file'])
+        return [
+          {
+            id: cardId,
+            position,
+            ...(file !== '' && file !== cardId ? { file } : {}),
+            ...(entry['empty'] === true ? { empty: true } : {}),
+          },
+        ]
       }),
       sources: list(value['sources']).flatMap((entry) => {
         const downstream = text1(entry['downstream'])
@@ -256,20 +278,28 @@ export interface SeatPlanInput {
   seated: readonly SeatInput[]
   /** Cards the board file lists, in file order. */
   filed: readonly BoardFileCard[]
-  /** Card ids the directory scan found, sorted. */
-  scanned: readonly CardId[]
+  /** Artifact paths the directory scan found, sorted — candidates, not yet cards. */
+  scanned: readonly string[]
   /** Horizontal gap between cards, in canvas px. */
   gap: number
+  /**
+   * Mints a fresh card id for a scanned file no card binds yet. Injected so
+   * this function stays pure: the caller owns the rule (six random letters,
+   * unique against the project's seats) and the randomness.
+   */
+  mint: (file: string) => CardId
 }
 
 /**
  * A seat an import still has to write.
  *
- * Extends a plain seat with the one fact geometry has no use for but the card
- * record does: whether the seat is known to have been born without an artifact
- * (F1.11), which is what keeps a bulk cleanup's hands off it.
+ * Extends a plain seat with the two facts geometry has no use for but the card
+ * record does: the artifact path the card binds, and whether the seat is known
+ * to have been born without an artifact (F1.11), which is what keeps a bulk
+ * cleanup's hands off it.
  */
 export interface PlannedSeat extends Seat {
+  file: string
   empty?: boolean
 }
 
@@ -285,29 +315,39 @@ export interface PlannedSeat extends Seat {
  * file never knew about — files dropped into the folder while nobody was
  * looking.
  *
+ * Reconciliation is by **file**, not id: a scanned artifact path that some
+ * seated card (or some card the board file lists) already binds is that card —
+ * the id stays whatever it was, random letters included. Only a file no card
+ * claims gets a seat, and its id comes from {@link SeatPlanInput.mint}.
+ *
  * Nothing here deletes. A card the file lists but the disk no longer has is
  * still seated, because it is a real board position carrying real edges and
  * notes; it shows up as a missing card (F3.5) and the user removes it (F1.11).
  */
 export function planSeats(input: SeatPlanInput): PlannedSeat[] {
-  const seats: SeatInput[] = [...input.seated]
+  const seats: SeatInput[] = input.seated.map((card) => ({ ...card, file: card.file ?? card.id }))
   const known = new Set(input.seated.map((card) => card.id))
+  const ownerOf = new Map<string, CardId>(seats.map((card) => [card.file ?? card.id, card.id]))
   const fresh: PlannedSeat[] = []
 
   for (const card of input.filed) {
     if (known.has(card.id)) continue
     known.add(card.id)
+    const file = card.file ?? card.id
     const position = { ...card.position }
-    fresh.push({ id: card.id, position, ...(card.empty === true ? { empty: true } : {}) })
-    seats.push({ id: card.id, position })
+    fresh.push({ id: card.id, file, position, ...(card.empty === true ? { empty: true } : {}) })
+    seats.push({ id: card.id, file, position })
+    if (!ownerOf.has(file)) ownerOf.set(file, card.id)
   }
 
-  for (const cardId of input.scanned) {
-    if (known.has(cardId)) continue
-    known.add(cardId)
+  for (const file of input.scanned) {
+    if (ownerOf.has(file)) continue
+    const id = input.mint(file)
+    known.add(id)
+    ownerOf.set(file, id)
     const position = nextFreeSeat(seats, input.gap)
-    fresh.push({ id: cardId, position })
-    seats.push({ id: cardId, position })
+    fresh.push({ id, file, position })
+    seats.push({ id, file, position })
   }
 
   return fresh

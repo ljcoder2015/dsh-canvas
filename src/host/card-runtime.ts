@@ -33,8 +33,8 @@ import type {
 import type { CanvasDomain } from '../domain.ts'
 import type { CanvasCapabilities } from '../capabilities.ts'
 import type { ArtifactIo } from '../core/artifact/artifact-io.ts'
-import { cardIdOfKey, cardKeyOf, SessionManager, type CardSession } from '../core/session/session-manager.ts'
-import { slugify } from '../core/canvas/ids.ts'
+import { cardFileOf, cardIdOfKey, cardKeyOf, SessionManager, type CardSession } from '../core/session/session-manager.ts'
+import { mintCardId, slugify } from '../core/canvas/ids.ts'
 import { cardPreset, composeCardAgent } from '../core/session/agent-preset.ts'
 import { lastUserPromptOfEvents, sessionQueryFace } from '../core/session/session-log.ts'
 import type { ModelRouting } from '../core/session/model-routing.ts'
@@ -88,7 +88,18 @@ interface CardRecord {
   updatedAt: number
   /** The seat was created without an artifact; see `core/canvas/cleanup.ts` (F1.11). */
   seatedEmpty?: boolean | undefined
+  /** Artifact path relative to the project root; absent on pre-split records, where the id *is* the path. */
+  file?: string | undefined
 }
+
+/**
+ * The artifact path a card record names.
+ *
+ * Records written before the id/path split have no `file` and a path-shaped
+ * id — reading their file as the id is exactly the old behavior, so the split
+ * needs no migration.
+ */
+const fileOf = cardFileOf
 
 /** Mint an id for a card's brand-new conversation. */
 function mintSessionId(projectId: ProjectId, cardId: CardId): SessionId {
@@ -124,22 +135,26 @@ export class CardRuntime extends TypertRemoteService {
 
   // ── seating ─────────────────────────────────────────────────────────────
 
-  /** Seat a new card on the board. Its artifact may be created later. */
+  /**
+   * Seat a new card on the board. Its artifact may be created later.
+   *
+   * The caller names the *file* the card binds (`file`, relative to the
+   * project root); the card's id is minted here as six random letters, so a
+   * file may be renamed without ever changing the seat's identity.
+   */
   @Remote
   async createCard(
     projectId: ProjectId,
-    cardId: CardId,
+    file: string,
     kind: string,
     position: Point,
     signal?: AbortSignal,
   ): Promise<BoardCard> {
     signal?.throwIfAborted()
     const project = this.requireProject(projectId)
+    const cardId = mintCardId(this.cardsOf(projectId).map(([key]) => cardIdOfKey(projectId, key)))
     const key = cardKeyOf(projectId, cardId)
-    if (this.cards.get(key) !== undefined) {
-      throw new RemoteError('canvas/card-exists', `card ${cardId} is already seated in ${projectId}`, { projectId, cardId })
-    }
-    const facts = await this.deps.io.facts(project.root, cardId, signal)
+    const facts = await this.deps.io.facts(project.root, file, signal)
     const resolved = facts.present ? facts.kind : kind
     await this.cards.put(key, {
       project: projectId,
@@ -147,6 +162,7 @@ export class CardRuntime extends TypertRemoteService {
       position,
       sessionId: '',
       updatedAt: Date.now(),
+      file,
       // A seat is allowed to precede its artifact (F1.11): remember which
       // seats were born that way, so "missing" can later mean *gone* rather
       // than *not written yet*.
@@ -155,6 +171,7 @@ export class CardRuntime extends TypertRemoteService {
     await this.persist(projectId, project, signal)
     return {
       id: cardId,
+      file,
       project: projectId,
       kind: resolved,
       kindLabel: kindLabel(resolved),
@@ -222,7 +239,7 @@ export class CardRuntime extends TypertRemoteService {
       const cardId = cardIdOfKey(projectId, key)
       candidates.push({
         id: cardId,
-        presence: await this.deps.io.presenceOf(project.root, cardId, signal),
+        presence: await this.deps.io.presenceOf(project.root, fileOf(record, cardId), signal),
         empty: record.seatedEmpty === true,
       })
     }
@@ -308,9 +325,9 @@ export class CardRuntime extends TypertRemoteService {
     for (let n = 2; await this.deps.io.probe(project.root, `${file}.design`, signal).then((probe) => probe.present); n += 1) {
       file = `${base}-${n}`
     }
-    const cardId = `${file}.design`
-    await this.deps.io.writeDesign(project.root, cardId, scaffoldDesignDocument(), undefined, signal)
-    return this.createCard(projectId, cardId, 'design', position, signal)
+    const filePath = `${file}.design`
+    await this.deps.io.writeDesign(project.root, filePath, scaffoldDesignDocument(), undefined, signal)
+    return this.createCard(projectId, filePath, 'design', position, signal)
   }
 
   /**
@@ -357,7 +374,7 @@ export class CardRuntime extends TypertRemoteService {
         operation: 'design-edit',
       })
     }
-    const outcome = await this.deps.io.writeDesign(project.root, cardId, doc, { version }, signal)
+    const outcome = await this.deps.io.writeDesign(project.root, fileOf(record, cardId), doc, { version }, signal)
     await this.touch(projectId, cardId, record)
     await this.notifyDownstream(project, cardId)
     return { cardId, applied: result.applied, errors: result.errors, version: outcome.version }
@@ -386,8 +403,9 @@ export class CardRuntime extends TypertRemoteService {
   async readArtifact(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<ArtifactView> {
     signal?.throwIfAborted()
     const project = this.requireProject(projectId)
-    this.requireCard(projectId, cardId)
-    return this.deps.io.view(project.root, cardId, signal)
+    const record = this.requireCard(projectId, cardId)
+    const view = await this.deps.io.view(project.root, fileOf(record, cardId), signal)
+    return { ...view, cardId, file: fileOf(record, cardId) }
   }
 
   /**
@@ -408,9 +426,16 @@ export class CardRuntime extends TypertRemoteService {
     const order = materialUpstreams(cardId, this.edgesOf(projectId))
     const summaries: CardSummary[] = []
     for (const upstream of order) {
-      if (this.cards.get(cardKeyOf(projectId, upstream)) === undefined) continue
+      const upstreamRecord = this.cards.get(cardKeyOf(projectId, upstream))
+      if (upstreamRecord === undefined) continue
       try {
-        summaries.push(await this.deps.io.summarize(project.root, upstream, this.deps.summaryBudget, signal))
+        const summary = await this.deps.io.summarize(
+          project.root,
+          fileOf(upstreamRecord, upstream),
+          this.deps.summaryBudget,
+          signal,
+        )
+        summaries.push({ ...summary, cardId: upstream })
       } catch {
         // A card whose artifact is missing is a real board state (seated, not
         // yet written). It contributes nothing to the material list rather
@@ -451,9 +476,9 @@ export class CardRuntime extends TypertRemoteService {
    *
    * A 取材 edge says "this artifact builds on that artifact", and the harness
    * already has a way to say that inside a prompt: an `@` token holding a
-   * workspace-relative path. Every card id *is* such a path — the file sits at
-   * `<project root>/<cardId>`, which is the card session's own working directory
-   * — so this method names upstream artifacts rather than copying them.
+   * workspace-relative path. Every card names its artifact by its own `file`
+   * — which sits at `<project root>/<file>`, the card session's working
+   * directory — so this method names upstream artifacts rather than copying them.
    *
    * Nothing is read here and no content is attached, and that is the point of a
    * reference: the material stays the one file it already is, so it cannot go
@@ -541,7 +566,7 @@ export class CardRuntime extends TypertRemoteService {
     const attach = async (ownerCtx: Context, resumeId: SessionId | undefined, fresh: boolean) => {
       const setup = async (agentCtx: Context): Promise<void> => {
         await composeCardAgent(this.ctx, agentCtx, presetId)
-        this.scopeFor(agentCtx, project, cardId, record.kind)
+        this.scopeFor(agentCtx, project, cardId, fileOf(record, cardId), record.kind)
       }
       const options = this.deps.routing.agentOptions()
       const agentOptions = options === undefined ? {} : { agentOptions: options }
@@ -837,8 +862,9 @@ export class CardRuntime extends TypertRemoteService {
       }
     }
     try {
+      const file = fileOf(record, cardId)
       const result = await publish(
-        { project, cardId, kind: record.kind, path: await this.deps.io.displayPathOf(project.root, cardId, signal), title: cardId },
+        { project, cardId, kind: record.kind, path: await this.deps.io.displayPathOf(project.root, file, signal), title: file },
         signal,
       )
       return { cardId, format: 'publish', ok: true, path: result.url, reason: '' }
@@ -910,11 +936,15 @@ export class CardRuntime extends TypertRemoteService {
       return { cardId, ok: false, path: '', reason: '部署未提供生图能力（服务键 dsh-canvas.capabilities）' }
     }
     try {
-      const result = await generate({ project, cardId, prompt, referencePath }, signal)
+      // The capability writes to a *path*, not a seat id: an existing card
+      // contributes its file; an unknown id is taken at its face value (a
+      // legacy path id behaves exactly as before).
+      const record = this.cards.get(cardKeyOf(project.id, cardId))
+      const file = record === undefined ? cardId : fileOf(record, cardId)
+      const result = await generate({ project, file, prompt, referencePath }, signal)
       const key = cardKeyOf(project.id, cardId)
-      const record = this.cards.get(key)
       if (record !== undefined) {
-        const facts = await this.deps.io.facts(project.root, cardId, signal)
+        const facts = await this.deps.io.facts(project.root, file, signal)
         await this.cards.put(key, { ...record, kind: facts.kind, updatedAt: Date.now() })
       }
       return { cardId, ok: true, path: result.path, reason: '' }
@@ -946,13 +976,15 @@ export class CardRuntime extends TypertRemoteService {
     session: CardSession,
     signal?: AbortSignal,
   ): Promise<CardSummary> {
-    const summary = await this.deps.io.summarize(project.root, sourceCardId, this.deps.summaryBudget, signal)
+    const sourceRecord = this.cards.get(cardKeyOf(project.id, sourceCardId))
+    const sourceFile = sourceRecord === undefined ? sourceCardId : fileOf(sourceRecord, sourceCardId)
+    const summary = await this.deps.io.summarize(project.root, sourceFile, this.deps.summaryBudget, signal)
     const body =
       mode === 'full'
-        ? (await this.deps.io.readText(project.root, sourceCardId, signal)).text.slice(0, 200_000)
+        ? (await this.deps.io.readText(project.root, sourceFile, signal)).text.slice(0, 200_000)
         : renderMaterial([summary])
     session.agent.inject(injectionMessage(summary, mode, body))
-    return summary
+    return { ...summary, cardId: sourceCardId }
   }
 
   /**
@@ -975,12 +1007,16 @@ export class CardRuntime extends TypertRemoteService {
   ): Promise<FileReferenceTarget[]> {
     const targets: FileReferenceTarget[] = []
     for (const upstream of materialUpstreams(cardId, this.edgesOf(project.id))) {
-      const kind = this.cards.get(cardKeyOf(project.id, upstream))?.kind ?? 'text'
+      const record = this.cards.get(cardKeyOf(project.id, upstream))
+      const kind = record?.kind ?? 'text'
+      // The mention must name the *file* the model's own `read` resolves — the
+      // card's artifact path, not the seat id.
+      const path = record === undefined ? upstream : fileOf(record, upstream)
       let directory = false
       let present = false
       let bytes = 0
       try {
-        const probe = await this.deps.io.probe(project.root, upstream, signal)
+        const probe = await this.deps.io.probe(project.root, path, signal)
         directory = probe.directory
         present = probe.present
         bytes = probe.bytes
@@ -988,10 +1024,7 @@ export class CardRuntime extends TypertRemoteService {
         if (signal?.aborted === true) throw signal.reason
         this.ctx.logger(PLUGIN_ID).debug(`card ${cardId}: cannot probe upstream ${upstream}`, error)
       }
-      // The card id *is* the workspace-relative path: the artifact lives at
-      // `<project root>/<cardId>`, which is exactly the session's cwd, so the
-      // name is one the model's own `read` resolves without translation.
-      targets.push({ cardId: upstream, path: upstream, directory, kind, kindLabel: kindLabel(kind), present, bytes })
+      targets.push({ cardId: upstream, path, directory, kind, kindLabel: kindLabel(kind), present, bytes })
     }
     return targets
   }
@@ -1027,10 +1060,11 @@ export class CardRuntime extends TypertRemoteService {
   }
 
   /** Compose the card's prompt facts; used from the agent setup callback. */
-  private scopeFor(agentCtx: Context, project: Project, cardId: CardId, kind: string): void {
+  private scopeFor(agentCtx: Context, project: Project, cardId: CardId, file: string, kind: string): void {
     installCardScope(agentCtx, {
       project,
       cardId,
+      file,
       kind,
       kindLabel: kindLabel(kind),
       material: () => this.materialText(project.id, cardId),
@@ -1048,19 +1082,19 @@ export class CardRuntime extends TypertRemoteService {
     // absorbed it.
     //
     // Resolved synchronously against cached facts, so this block carries *names*
-    // and never file bodies: the card id is the workspace-relative path, which
-    // is exactly what the harness's `@file` grammar denotes, and the material
-    // itself arrives when somebody reads it. A digest served from here would
-    // have to be cached — and nothing invalidates such a cache, so a card whose
-    // upstream was rewritten by an ordinary file edit would keep feeding the
-    // prompt a stale summary.
+    // and never file bodies: the card's `file` is the workspace-relative path,
+    // which is exactly what the harness's `@file` grammar denotes, and the
+    // material itself arrives when somebody reads it. A digest served from here
+    // would have to be cached — and nothing invalidates such a cache, so a card
+    // whose upstream was rewritten by an ordinary file edit would keep feeding
+    // the prompt a stale summary.
     const lines = materialUpstreams(cardId, this.edgesOf(projectId)).map((upstream) => {
       const record = this.cards.get(cardKeyOf(projectId, upstream))
       // `nameWithoutProbe` and not the kind: this block is assembled without
       // I/O, and a `site`/`webapp` card is a *file* even though its kind is a
       // directory — see that helper. `canvas_reference_files` probes, so it
       // owns the exact token; this block just names the files.
-      const name = nameWithoutProbe(upstream)
+      const name = nameWithoutProbe(record === undefined ? upstream : fileOf(record, upstream))
       return record === undefined ? `- ${name}` : `- ${name} (${kindLabel(record.kind)})`
     })
     if (lines.length === 0) return ''
@@ -1077,7 +1111,7 @@ export class CardRuntime extends TypertRemoteService {
   }
 
   private async touch(projectId: ProjectId, cardId: CardId, record: CardRecord): Promise<void> {
-    const facts = await this.deps.io.facts(this.requireProject(projectId).root, cardId)
+    const facts = await this.deps.io.facts(this.requireProject(projectId).root, fileOf(record, cardId))
     await this.cards.put(cardKeyOf(projectId, cardId), {
       ...record,
       kind: facts.kind,

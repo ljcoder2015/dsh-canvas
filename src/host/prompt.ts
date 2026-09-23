@@ -89,7 +89,10 @@ export function registerGlobalPrompt(ctx: Context): void {
 /** What one card session needs to describe itself. */
 export interface CardScopeInput {
   project: Project
+  /** The card's seat id — six random letters, not a file name. */
   cardId: CardId
+  /** Path of the card's artifact, relative to the project root. */
+  file: string
   /** Kind id resolved by the kind registry. */
   kind: string
   /** Human label of that kind. */
@@ -105,7 +108,7 @@ export interface CardScopeInput {
  * @param input - the card's identity, kind, and a lazy material reader.
  */
 export function installCardScope(agentCtx: Context, input: CardScopeInput): void {
-  const { project, cardId, kind, kindLabel } = input
+  const { project, cardId, file, kind, kindLabel } = input
 
   agentCtx.systemPrompt.section({
     name: CARD_SECTION,
@@ -113,9 +116,9 @@ export function installCardScope(agentCtx: Context, input: CardScopeInput): void
     text: [
       '## This conversation',
       '',
-      `Conversation for the canvas card \`${cardId}\` (kind: ${kindLabel} / \`${kind}\`) in project **${project.name}**.`,
+      `Conversation for the canvas card \`${cardId}\` (kind: ${kindLabel} / \`${kind}\`) in project **${project.name}**. The card id is only a seat identity — the artifact lives at the file below.`,
       '',
-      `- The artifact is the file \`${cardId}\`, relative to the project root \`${project.root}\`. Its absolute path is available as the \`canvas_card_path\` variable.`,
+      `- The artifact is the file \`${file}\`, relative to the project root \`${project.root}\`. Its absolute path is available as the \`canvas_card_path\` variable.`,
       kind === 'design'
         ? `- This is a **design** card: the artifact is a scene-graph design document (.design, v2). Do not edit the file with text tools — read the document with \`${TOOL_NAMES.designRead}\` and change it with \`${TOOL_NAMES.designEdit}\` batches. ${DESIGN_PRESET}`
         : '- Write the artifact by editing that file with the ordinary file tools. The canvas re-reads it from disk whenever the board is read, so no export or publish step is needed for the card to be up to date.',

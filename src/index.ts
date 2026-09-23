@@ -24,10 +24,15 @@ import { registerAssetRoute } from './host/assets.ts'
 import { PLUGIN_ID, registerGlobalPrompt } from './host/prompt.ts'
 import { resolveCapabilities } from './capabilities.ts'
 import { TYPERT_MANIFEST } from './typert.ts'
+import { PACKAGE_NAME } from './contract.ts'
 import type { ResolvedConfig, UpstreamPolicy } from './types.ts'
 
-/** Cordis plugin name. Must match `package.json` `name` and `cordis.patch.yml`. */
-export const name = PLUGIN_ID
+/**
+ * Cordis plugin name. Must match `package.json` `name` and `cordis.patch.yml`
+ * (the module specifier that row loads). `PLUGIN_ID` stays the short label the
+ * logs, prompt sections and error prefixes use — that is a different thing.
+ */
+export const name = PACKAGE_NAME
 
 /** Services required before anything here can run. */
 export const inject = ['typert', 'tools', 'fs', 'sessions', 'agents', 'storageDomain', 'systemPrompt']

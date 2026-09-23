@@ -34,8 +34,8 @@ import { ArtifactIo, missingOf } from '../core/artifact/artifact-io.ts'
 import type { BoardFile } from './board-file.ts'
 import { arrangeSeats } from '../core/canvas/board.ts'
 import { planEdges, planIdentity, planNotes, planSeats } from '../core/canvas/board-file.ts'
-import { projectIdOf } from '../core/canvas/ids.ts'
-import { cardIdOfKey, cardKeyOf, SessionManager } from '../core/session/session-manager.ts'
+import { mintCardId, projectIdOf } from '../core/canvas/ids.ts'
+import { cardFileOf, cardIdOfKey, cardKeyOf, SessionManager } from '../core/session/session-manager.ts'
 import { kindLabel } from '../core/artifact/kind-registry.ts'
 import { claimCanvasWorkspace } from '../core/canvas/workspace.ts'
 import {
@@ -70,7 +70,12 @@ interface CardRecord {
   updatedAt: number
   /** The seat was created without an artifact; see `core/canvas/cleanup.ts` (F1.11). */
   seatedEmpty?: boolean | undefined
+  /** Artifact path relative to the project root; absent on pre-split records, where the id *is* the path. */
+  file?: string | undefined
 }
+
+/** The artifact path a record names — `file`, falling back to a legacy path-shaped id. */
+const fileOf = cardFileOf
 
 /** A stored project record. */
 interface ProjectRecord {
@@ -180,20 +185,32 @@ export class CanvasRuntime extends TypertRemoteService {
     })
 
     const seated = this.cardsOf(plan.id)
+    // The mint closes over every id the project already holds plus the ones it
+    // mints below, so a scan can never mint a duplicate seat id.
+    const taken = new Set(seated.map(([key]) => cardIdOfKey(plan.id, key)))
     const seats = planSeats({
-      seated: seated.map(([key, record]) => ({ id: cardIdOfKey(plan.id, key), position: record.position })),
+      seated: seated.map(([key, record]) => {
+        const id = cardIdOfKey(plan.id, key)
+        return { id, file: fileOf(record, id), position: record.position }
+      }),
       filed: carried?.cards ?? [],
       scanned: scan,
       gap: this.deps.arrangeGap,
+      mint: () => {
+        const id = mintCardId(taken)
+        taken.add(id)
+        return id
+      },
     })
     for (const seat of seats) {
-      const facts = await this.deps.io.facts(root, seat.id, signal)
+      const facts = await this.deps.io.facts(root, seat.file, signal)
       await this.cards.put(cardKeyOf(plan.id, seat.id), {
         project: plan.id,
         kind: facts.kind,
         position: seat.position,
         sessionId: '',
         updatedAt: Date.now(),
+        file: seat.file,
         // Restored only where the file says so: a card the file lists whose
         // artifact is simply gone was **never** an empty seat, and marking it
         // one would make it permanently un-cleanable (F1.11).
@@ -238,7 +255,7 @@ export class CanvasRuntime extends TypertRemoteService {
       this.cardsOf(plan.id).map(([, card]) => card.sessionId),
     )
     const scanned = new Set(scan)
-    return { project, discovered: seats.filter((seat) => scanned.has(seat.id)).length }
+    return { project, discovered: seats.filter((seat) => scanned.has(seat.file)).length }
   }
 
   /** Forget a project. The files on disk are never touched. */
@@ -302,9 +319,10 @@ export class CanvasRuntime extends TypertRemoteService {
     const cards = await Promise.all(
       this.cardsOf(projectId).map(async ([key, record]) => {
         const cardId = cardIdOfKey(projectId, key)
+        const file = fileOf(record, cardId)
         // Presence only, never a head read: painting the board asks "is it
         // there", and the artifact's own view is the one that reads content.
-        const presence = await this.deps.io.presenceOf(project.root, cardId, signal)
+        const presence = await this.deps.io.presenceOf(project.root, file, signal)
         if (presence === 'present' && record.seatedEmpty === true) {
           // The seat has been filled — by a seed write, a generation run, or
           // the model writing the file with its own tools, which is why the
@@ -315,6 +333,7 @@ export class CanvasRuntime extends TypertRemoteService {
         }
         return {
           id: cardId,
+          file,
           project: projectId,
           kind: record.kind,
           kindLabel: kindLabel(record.kind),
@@ -363,9 +382,10 @@ export class CanvasRuntime extends TypertRemoteService {
     if (record === undefined) throw this.cardNotFound(projectId, cardId)
     await this.cards.put(key, { ...record, position })
     await this.persist(projectId, signal)
-    const presence = await this.deps.io.presenceOf(project.root, cardId, signal)
+    const presence = await this.deps.io.presenceOf(project.root, fileOf(record, cardId), signal)
     return {
       id: cardId,
+      file: fileOf(record, cardId),
       project: projectId,
       kind: record.kind,
       kindLabel: kindLabel(record.kind),
@@ -477,26 +497,34 @@ export class CanvasRuntime extends TypertRemoteService {
     const entries = this.cardsOf(projectId)
     const known = entries.map(([key]) => cardIdOfKey(projectId, key))
     const knownSet = new Set(known)
+    // A reference inside an artifact names a *file*; the board means the card
+    // whose artifact that file is. This map is the whole translation.
+    const cardOfFile = new Map(entries.map(([key, record]) => [fileOf(record, cardIdOfKey(projectId, key)), cardIdOfKey(projectId, key)]))
     const existing = this.edgeList(projectId)
     const addedEdges: Source[] = []
     const added: BoardSource[] = []
 
-    for (const cardId of known) {
-      const facts = await this.deps.io.facts(project.root, cardId, signal)
+    for (const [key, record] of entries) {
+      const cardId = cardIdOfKey(projectId, key)
+      const file = fileOf(record, cardId)
+      const facts = await this.deps.io.facts(project.root, file, signal)
       if (!facts.present || facts.kind === 'image' || facts.kind === 'video' || facts.kind === 'folder') continue
-      const extension = cardId.includes('.') ? (cardId.split('.').pop() ?? '') : ''
+      const extension = file.includes('.') ? (file.split('.').pop() ?? '') : ''
       let text = ''
       try {
-        text = (await this.deps.io.readText(project.root, cardId, signal)).text
+        text = (await this.deps.io.readText(project.root, file, signal)).text
       } catch {
         continue
       }
       // A reference is only a candidate once it resolves to a seated card:
       // resolving is relative to the referencing artifact's own directory.
-      const base = cardId.includes('/') ? cardId.slice(0, cardId.lastIndexOf('/') + 1) : ''
+      const base = file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : ''
       const referenced = referencedPaths(facts.kind, text, extension)
         .map((raw) => normaliseRelative(base, raw))
-        .filter((candidate) => knownSet.has(candidate))
+        .flatMap((candidate) => {
+          const owner = cardOfFile.get(candidate)
+          return owner !== undefined && knownSet.has(owner) ? [owner] : []
+        })
 
       for (const edge of reconcileEdges(cardId, referenced, known, [...existing, ...addedEdges])) {
         const id = sourceIdOf(edge.downstream, edge.upstream)

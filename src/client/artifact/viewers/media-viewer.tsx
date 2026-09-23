@@ -11,7 +11,7 @@ import type { ViewerProps, ViewerRegistration } from './types.ts'
 export function ImageViewer({ view }: ViewerProps) {
   return (
     <div className="dsh-canvas-media">
-      <img src={view.dataUrl} alt={view.cardId} />
+      <img src={view.dataUrl} alt={view.file} />
     </div>
   )
 }

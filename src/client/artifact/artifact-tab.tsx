@@ -99,8 +99,10 @@ function useLocation(bridge: CanvasBridge, address: string): Location {
           return
         }
         const board = await bridge.readBoard(project.id)
-        const cardId = relativeTo(project.root, parsed.path)
-        const seated = board.cards.find((card) => card.id === cardId)
+        const cardFile = relativeTo(project.root, parsed.path)
+        // Reconciliation is by *file*: the card id is a random seat identity,
+        // and the artifact path lives on the card's `file`.
+        const seated = board.cards.find((card) => card.file === cardFile)
         if (!cancelled) {
           setLocation({
             located: seated === undefined ? undefined : { project, card: seated },
@@ -141,11 +143,12 @@ export function ArtifactTabView(props: ArtifactTabProps) {
         const project = projects.find((entry) => isInside(entry.root, parsed.path))
         if (project === undefined) return
         const board = await bridge.readBoard(project.id)
-        const seats: SeatInput[] = board.cards.map((card) => ({ id: card.id, position: card.position }))
-        const cardId = relativeTo(project.root, parsed.path)
-        // The host re-derives the kind from the file's own evidence; `file` is
-        // only the fallback it would use for an artifact it cannot place.
-        await bridge.createCard(project.id, cardId, 'file', nextFreeSeat(seats, SEAT_GAP))
+        const seats: SeatInput[] = board.cards.map((card) => ({ id: card.id, file: card.file, position: card.position }))
+        const cardFile = relativeTo(project.root, parsed.path)
+        // The host re-derives the kind from the file's own evidence and mints
+        // the card id; `file` is only the fallback kind for an artifact it
+        // cannot place.
+        await bridge.createCard(project.id, cardFile, 'file', nextFreeSeat(seats, SEAT_GAP))
       } finally {
         setBusy(false)
       }

@@ -149,7 +149,7 @@ Harness 只认 `package.json`。两个关键字段把它变成插件：
 
 ```json
 {
-  "name": "dsh-canvas",
+  "name": "@ljcoder2015/dsh-canvas",
   "version": "1.0.0",
   "type": "module",
   "main": "lib/index.js",
@@ -181,8 +181,8 @@ Harness 只认 `package.json`。两个关键字段把它变成插件：
 
 ```yaml
 - insert:
-    - id: dsh-canvas
-      name: dsh-canvas
+    - id: '@ljcoder2015/dsh-canvas'
+      name: '@ljcoder2015/dsh-canvas'
       # 可选：覆盖 src/index.ts 的 Config 默认值
       # config:
       #   workspaceRoot: ./canvas
@@ -192,7 +192,7 @@ Harness 只认 `package.json`。两个关键字段把它变成插件：
 
 ```json
 {
-  "id": "dsh-canvas",
+  "id": "@ljcoder2015/dsh-canvas",
   "version": "1.0.0",
   "main": "lib/index.js",
   "engines": { "dsh": ">=0.1.0-rc.6" },
@@ -202,22 +202,36 @@ Harness 只认 `package.json`。两个关键字段把它变成插件：
 
 > `contributes` 字段本身在模板中存在（模板填的是空数组），其**条目格式**尚未核对注册表文档——发布前需确认这里是工具名清单还是完整贡献对象。
 
-**改名时必须同步的位置**（模板经验，缺一处即加载失败或运行期失联）：
+**改名时必须同步的位置**（v1.50 按实际落刀校准）：模板那份一张表列到底，实测要分两类——**包身份**必须逐字等于 npm 包名（模型层按它归因两侧贡献、profile 按它定位模块），**命名空间键**则是本插件内部的注册键，与包名没有解析关系。
 
-| 位置 | 字段 |
-|------|------|
-| `package.json` | `name`、`exports`、`files` |
-| `build.mjs` | `__ModuleLoader__.load` 的 `id` |
-| `src/index.ts` | `name`（须与包名、`cordis.patch.yml` 一致） |
-| `src/client/wire/remote.ts` | `TypertRemoteNamespace$<hex>` 十六进制命名空间名 |
-| `src/client/ui/locales.ts` | locale namespace key |
-| `src/client/canvas/canvas-tab.ts` | tab 类型 `id` / `kind` |
-| `src/typert.ts` | `package` |
-| `src/contract.ts` | invocation `id` |
-| `cordis.patch.yml` | `id`、`name` |
-| `dsh.plugin.json` | `id` |
+**一、包身份**（`tests/contract.spec.ts` 钉死前缀，漏一处即模型层归因对不上）：
 
-包名为 `dsh-canvas` 不是随意的：服务键 `canvas` 的十六进制命名空间名是 `TypertRemoteNamespace$63616e766173`，`card` 是 `TypertRemoteNamespace$63617264`（`canvas` → 63 61 6e 76 61 73）。
+| 位置 | 字段 | 为什么 |
+|------|------|--------|
+| `package.json` | `name` | 唯一真源；profile 的依赖键与 `dsh.profile.bundles` 都按它 |
+| `cordis.patch.yml` | `name`、`id` | `name` 是 profile 里的模块定位符，`id` 是 patch 层要覆盖的实例 id |
+| `dsh.plugin.json` | `id` | 注册表清单 |
+| `build.mjs` | `__ModuleLoader__.load` 的 `id` | 客户端 bundle 的装载键 |
+| `src/index.ts` | `name` | 取 `PACKAGE_NAME`（cordis 视角的插件名） |
+| `src/typert.ts` | `package` | 取 `PACKAGE_NAME` |
+| `src/client/wire/remote.ts` | `package` | 取 `PACKAGE_NAME`——**最容易漏的一处**：两端各写一次，没有它就只有 Host 那半边归对包 |
+| `src/contract.ts` | descriptor `id`（`<package>#<service>/<method>`，89 处） | 契约身份 |
+
+后面四处都由一行常量兜住：`src/contract.ts` 的 **`PACKAGE_NAME`** 是包身份的唯一真源，`index.ts` / `typert.ts` / `remote.ts` 从它读，contract spec 另有一条断言钉「两侧贡献归同一个包」。
+
+**二、命名空间键**（不随包名走，刻意留在短词上）：
+
+| 位置 | 值 | 说明 |
+|------|-----|------|
+| `src/host/prompt.ts` | `PLUGIN_ID = 'dsh-canvas'` | 日志与 effect 标签、注入消息来源、提示词小节名前缀（`dsh-canvas:tools` 等） |
+| `src/client/ui/locales.ts` | `NS = 'dsh-canvas'` | locale 命名空间（两端同一个常量，自洽） |
+| `src/client/canvas/canvas-tab.ts` | `'dsh-canvas:workbench'` / `'dsh-canvas:kind:'` | tab 类型 id |
+| `src/host/assets.ts` | `ASSET_ROUTE = '/dsh-canvas/assets'` | 资产**路由**（URL，不是包名） |
+| `src/capabilities.ts` | `CAPABILITIES_SERVICE_KEY = 'dsh-canvas.capabilities'` | **部署侧**实现者按这个名字注册，改它等于改跨包契约 |
+| `src/client/wire/model-memory.ts` | `'dsh-canvas:model-by-kind:v1'` | 浏览器本地存储键（改了会丢用户已选的模型） |
+| 画布目录 / 样式 | `.dsh-canvas/board.json` / `.dsh-canvas-*` | 目录约定与 CSS 类前缀 |
+
+> 包名现为 **scoped 的 `@ljcoder2015/dsh-canvas`**（v1.50）：裸名 `dsh-canvas` 在 npm 上被他人占位（2026-08-19 发布的 0.0.1），发布只能走 scope。服务键 `canvas` 的十六进制命名空间名仍是 `TypertRemoteNamespace$63616e766173`、`card` 是 `$63617264`——它由**服务键**决定，与包名无关。
 
 ## 四、契约层：一份 descriptors，三处引用
 
@@ -237,9 +251,9 @@ export const cardSummarySchema = z.object({
 
 export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
   {
-    id: 'dsh-canvas#card/read_sources', service: 'card', namespace: 'card', method: 'readSources',
+    id: '@ljcoder2015/dsh-canvas#card/read_sources', service: 'card', namespace: 'card', method: 'readSources',
     invocation: { kind: 'direct' }, parameters: [], cancellation: { parameter: 'signal' },
-    result: { mode: 'strict', typeSymbol: 'dsh-canvas#CardSummaryList', schema: z.array(cardSummarySchema) },
+    result: { mode: 'strict', typeSymbol: '@ljcoder2015/dsh-canvas#CardSummaryList', schema: z.array(cardSummarySchema) },
   },
   // …其余 canvas.* / card.* 方法同理，一个方法一条 descriptor
 ]
@@ -250,7 +264,7 @@ export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
 import { DSH_CANVAS_INVOCATIONS } from './contract.ts'
 
 export const TYPERT_MANIFEST: TypertContribution = {
-  package: 'dsh-canvas', face: 'host', schemas: [],
+  package: TYPERT_PACKAGE, face: 'host', schemas: [],
   model: {
     services: [
       { key: 'canvas', exportName: 'CanvasRuntime', description: '画布座次与取材链。', tags: [], members: [ /* 每个方法一条 */ ], types: [] },
@@ -266,7 +280,7 @@ export const TYPERT_MANIFEST: TypertContribution = {
 import { DSH_CANVAS_INVOCATIONS } from '../contract.ts'
 
 export const DSH_CANVAS_REMOTE: TypertRemoteContribution = {
-  package: 'dsh-canvas', descriptors: DSH_CANVAS_INVOCATIONS,
+  package: PACKAGE_NAME, descriptors: DSH_CANVAS_INVOCATIONS,
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -332,7 +346,7 @@ export class CanvasRuntime extends TypertRemoteService {
 // src/host/tools.ts
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
-export const name = 'dsh-canvas'
+export const name = PACKAGE_NAME
 export const inject = ['tools']
 
 export function apply(ctx: Context): void {
@@ -697,7 +711,7 @@ await build({ entryPoints: ['src/client/index.tsx'], outfile: 'lib/client.js', b
   format: 'cjs', platform: 'browser', target: ['es2022'], sourcemap: true, jsx: 'automatic',
   external: [...dshExternal, 'react', 'react-dom', 'react-dom/client',
              'react/jsx-runtime', 'react/jsx-dev-runtime', 'scheduler'],
-  banner: { js: "window.__ModuleLoader__.load({ id: 'dsh-canvas', factory: (require) => { var module = { exports: {} }; var exports = module.exports;" },
+  banner: { js: "window.__ModuleLoader__.load({ id: '@ljcoder2015/dsh-canvas', factory: (require) => { var module = { exports: {} }; var exports = module.exports;" },
   footer: { js: 'return module.exports; } });' } })
 ```
 
@@ -718,11 +732,11 @@ CI：**尚未落地**——仓库里还没有 `.github/workflows/`，`check` 目
 ```sh
 pnpm install && pnpm run build
 dsh plugin --profile web add .              # 本地目录安装
-dsh plugin --profile web add github:you/dsh-canvas   # 从 Git 安装（会跑 prepare 构建）
-dsh plugin --profile web remove dsh-canvas
+dsh plugin --profile web add https://github.com/ljcoder2015/dsh-canvas   # 从 Git 安装（会跑 prepare 构建）
+dsh plugin --profile web remove @ljcoder2015/dsh-canvas
 ```
 
-Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在该 profile 的 `pnpm-workspace.yaml` 里加 `allowBuilds: { dsh-canvas: true }`——**该授权允许包在安装时执行代码，只对可信来源开放并锁定 commit**。开发期把包加进工作区软链后，`dsh-client-hmr` 会轮询客户端 bundle 变化并热重载（仅 sourcemap 变化不触发），Host 侧改动需重启 Web Harness。
+Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在该 profile 的 `pnpm-workspace.yaml` 里加 `allowBuilds: { '@ljcoder2015/dsh-canvas': true }`——**该授权允许包在安装时执行代码，只对可信来源开放并锁定 commit**。开发期把包加进工作区软链后，`dsh-client-hmr` 会轮询客户端 bundle 变化并热重载（仅 sourcemap 变化不触发），Host 侧改动需重启 Web Harness。
 
 ## 十一、与初版技术设想的差异（必读）
 
@@ -734,6 +748,7 @@ Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在�
 | 页面/预览 | 自造 `preview(path) => Component` | 右栏 tab 类型注册表 + 资源地址认领 | 形态注册表一半落到宿主已有席位 |
 | 取材存储 | 自建「画布元数据文件」 | `defineDomain` + `ctx.storageDomain.open()`，`domain/changed` 通知 | 不需要自造持久化与变更广播。**v1.47 把「自建元数据文件」以另一种身份请了回来**：目录里那份 `.dsh-canvas/board.json` 是**投影不是真源**（见 §6），它存在的理由是跨机器/跨目录的可迁移性，而不是想自己管持久化——写链、校验、变更通知仍全在存储域那边 |
 | 画布身份 | 「项目」由路径决定（隐含：目录不会动） | 身份写在**目录自己身上**（板面文件里的 `id`），绑定目录时先读它再决定是哪张画布（`planIdentity` 四态） | 改名不再等于新建一张画布，老画布零迁移（没有文件就退回路径摘要），复制出去的那份自动获得新身份 |
+| 卡片身份 | 卡片 id＝产物文件的相对路径（隐含：id 与文件名互为因果） | **id 与文件解耦（2026-09-23）**：新卡的 id 由 host 铸成**6 位随机小写字母**（`core/canvas/ids.ts` 的 `mintCardId`），产物路径改记在卡记录的 `file` 字段（域 schema 可选，老记录 `undefined` 时回落读 id＝旧行为，**零迁移**）。所有文件读写走 `fileOf(record, id)`；板面投影只在 `file ≠ id` 时写 `file` 字段；扫描落座按 **file 对账**（`planSeats` 收 `mint` 回调铸新 id）；产物引用对账（F4.5）先由 file 映射回卡 id | 文件名不再进入身份，**文件可改名**而不动座位；旧板面/旧记录/旧投影全部原样可读；客户端展示一律用 `file`（卡片名、预览标题、@mention），id 只作座位身份流转 |
 | 会话创建 | 「创建卡片时自动创建独立会话」 | `ctx.sessions.create()` 归调用方 fiber；**不落盘**，必须经 agent 生命周期事务 | P0 的会话绑定需先打通 agent 工厂，工作量重估 |
 | 会话隔离 | 靠 system prompt 约定 | 工具注册作用域 + `restrict` / `schemas(scope)` 的可见性过滤 | 隔离可被结构性保证，不必靠提示词 |
 | 取材注入 | `agent.inject()` 抽象调用 | `agent.inject({ content, source: { kind: 'plugin', plugin } })`，追加持久化上下文但**不唤醒空闲 agent** | 响应策略（F5.7）需自行决定用 `inject` 还是直接发起轮次 |

@@ -265,9 +265,14 @@ export class CanvasBridge {
 
   // ── card: artifacts ───────────────────────────────────────────────────────
 
-  /** Put a card for an existing artifact on the board. */
-  createCard(projectId: string, cardId: string, kind: string, position: Point): Promise<BoardCard> {
-    return unwrap(this.card.createCard(projectId, cardId, kind, position, this.signal))
+  /**
+   * Put a card for an artifact on the board.
+   *
+   * `file` is the artifact's project-relative path; the host mints the card's
+   * id (six random letters) and returns the seat — the id is *not* the path.
+   */
+  createCard(projectId: string, file: string, kind: string, position: Point): Promise<BoardCard> {
+    return unwrap(this.card.createCard(projectId, file, kind, position, this.signal))
   }
 
   /**

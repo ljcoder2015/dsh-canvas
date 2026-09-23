@@ -8,10 +8,10 @@
  * and `tests/contract.spec.ts` asserts the identity of the shared array.
  */
 import type { TypertContribution, TypertMemberModel, TypertServiceModel } from '@deepseek-ai/dsh-typert-registry'
-import { DSH_CANVAS_INVOCATIONS } from './contract.ts'
+import { DSH_CANVAS_INVOCATIONS, PACKAGE_NAME } from './contract.ts'
 
 /** Package identity — must match `package.json`, `build.mjs` and `cordis.patch.yml`. */
-export const TYPERT_PACKAGE = 'dsh-canvas'
+export const TYPERT_PACKAGE = PACKAGE_NAME
 
 /** One documented method of a Remote service. */
 const member = (name: string, signature: string, summary: string): TypertMemberModel => ({
@@ -43,7 +43,7 @@ const CANVAS_MEMBERS: readonly TypertMemberModel[] = [
 
 /** The `card` namespace: artifact digests, writes, injection, export. */
 const CARD_MEMBERS: readonly TypertMemberModel[] = [
-  member('createCard', 'createCard(projectId, cardId, kind, position, signal?): Promise<BoardCard>', '在画布上新建一张卡片。'),
+  member('createCard', 'createCard(projectId, file, kind, position, signal?): Promise<BoardCard>', '为产物文件落一张新卡：file 是项目内相对路径，卡片 id 由画布铸出（6 位随机字母），返回值携带。'),
   member('scaffoldWebapp', 'scaffoldWebapp(projectId, name, position, signal?): Promise<BoardCard>', '新建应用节点：建一个文件夹，写入 web components + shadcn 风格的 web 应用脚手架，并落成卡片。'),
   member('scaffoldDesign', 'scaffoldDesign(projectId, name, position, signal?): Promise<BoardCard>', '新建设计节点：写入一份含空白画板的场景图设计文档（.design v2），并落成卡片。'),
   member('readDesign', 'readDesign(projectId, cardId, signal?): Promise<DesignDocument>', '读取设计文档的 JSON 结构（画板与图层树，scene-graph 快照）。'),

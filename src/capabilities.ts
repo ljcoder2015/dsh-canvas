@@ -45,7 +45,7 @@ export interface PublishRequest extends ArtifactRef {
 export interface GenerateImageRequest {
   project: Project
   /** Project-relative path the generated artifact should be written to. */
-  cardId: CardId
+  file: string
   prompt: string
   /** Absolute path of an artifact whose look the image should follow, when any. */
   referencePath?: string
@@ -57,7 +57,7 @@ export interface CanvasCapabilities {
   export?(request: ExportRequest, signal?: AbortSignal): Promise<{ path: string }>
   /** Publish one artifact and return its URL. */
   publish?(request: PublishRequest, signal?: AbortSignal): Promise<PublishResult>
-  /** Generate an image and write it to `request.cardId`, returning its path. */
+  /** Generate an image and write it to `request.file`, returning its path. */
   generateImage?(request: GenerateImageRequest, signal?: AbortSignal): Promise<{ path: string }>
 }
 

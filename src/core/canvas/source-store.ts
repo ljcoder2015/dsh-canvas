@@ -26,11 +26,11 @@ export type EdgeValidation = { ok: true } | { ok: false; reason: EdgeRejection }
  * Stable storage id for an edge, so re-linking the same pair is idempotent.
  *
  * The id doubles as the per-record storage key, and the medium rejects every
- * key outside `[a-zA-Z0-9_-]+` — while a card id is a path, dots and slashes
- * included. Both endpoints are therefore escaped with the same segment encoder
- * the card table uses (`__` separates them; an escaped id can never contain a
- * literal `_`, so the delimiter stays unambiguous). The record itself carries
- * the plain ids, so nothing ever needs to parse the key back.
+ * key outside `[a-zA-Z0-9_-]+` — while a legacy card id is a path, dots and
+ * slashes included. Both endpoints are therefore escaped with the same segment
+ * encoder the card table uses (`__` separates them; an escaped id can never
+ * contain a literal `_`, so the delimiter stays unambiguous). The record
+ * itself carries the plain ids, so nothing ever needs to parse the key back.
  */
 export function sourceIdOf(downstream: CardId, upstream: CardId): SourceId {
   return `${encodeSegment(downstream)}__${encodeSegment(upstream)}`

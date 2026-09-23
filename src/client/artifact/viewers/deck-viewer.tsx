@@ -243,7 +243,7 @@ export function DeckViewer({ view, t }: ViewerProps) {
           className="dsh-canvas-frame"
           sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
           srcDoc={view.text}
-          title={view.cardId}
+          title={view.file}
           onLoad={tell}
         />
       </div>
