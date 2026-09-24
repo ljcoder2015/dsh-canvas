@@ -25,9 +25,11 @@ import type {
   CreateDesignEngineArgs,
   DesignBackend,
   DesignEngine,
+  DesignEffectItem,
   DesignLayerNode,
   DesignNodeProps,
   DesignNodeRead,
+  DesignStrokeItem,
   DesignViewport,
   EngineOutcome,
 } from './design-engine-types.ts'
@@ -100,6 +102,14 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       fill: firstSolidCss(node),
       opacity: node.opacity,
       cornerRadius: node.cornerRadius,
+      topLeftRadius: node.topLeftRadius,
+      topRightRadius: node.topRightRadius,
+      bottomRightRadius: node.bottomRightRadius,
+      bottomLeftRadius: node.bottomLeftRadius,
+      independentCorners: node.independentCorners,
+      clipsContent: node.clipsContent,
+      strokes: readStrokes(node),
+      effects: readEffects(node),
       text: node.text,
       fontSize: node.fontSize,
     }
@@ -160,7 +170,7 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       const previous: Record<string, unknown> = {}
       // 直接落在节点标量字段上的项（几何/显隐/命名）——同一套「先记旧值、
       // 后提交 undo」的节律。
-      for (const key of ['name', 'visible', 'locked', 'x', 'y', 'width', 'height'] as const) {
+      for (const key of ['name', 'visible', 'locked', 'x', 'y', 'width', 'height', 'clipsContent', 'independentCorners'] as const) {
         const next = props[key]
         if (next === undefined || node[key] === next) continue
         changes[key] = next
@@ -177,9 +187,41 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
         changes.opacity = props.opacity
         previous.opacity = node.opacity
       }
+      // 统一圆角联动四角并关掉独立开关（与 ops.setProps 的生成语义一致）；
+      // 独立角写任一个都把开关打开——两个入口不会互相打架。
       if (props.cornerRadius !== undefined && node.cornerRadius !== props.cornerRadius) {
         changes.cornerRadius = props.cornerRadius
+        changes.topLeftRadius = props.cornerRadius
+        changes.topRightRadius = props.cornerRadius
+        changes.bottomRightRadius = props.cornerRadius
+        changes.bottomLeftRadius = props.cornerRadius
+        changes.independentCorners = false
         previous.cornerRadius = node.cornerRadius
+        previous.topLeftRadius = node.topLeftRadius
+        previous.topRightRadius = node.topRightRadius
+        previous.bottomRightRadius = node.bottomRightRadius
+        previous.bottomLeftRadius = node.bottomLeftRadius
+        previous.independentCorners = node.independentCorners
+      }
+      for (const key of ['topLeftRadius', 'topRightRadius', 'bottomRightRadius', 'bottomLeftRadius'] as const) {
+        const next = props[key]
+        if (next === undefined || node[key] === next) continue
+        changes[key] = next
+        previous[key] = node[key]
+        changes.independentCorners = true
+        previous.independentCorners = node.independentCorners
+      }
+      // 边框与效果：面板给的是整组数组的语义面，这里换算成场景图的 plain 数据。
+      if (props.strokes !== undefined) {
+        changes.strokes = props.strokes.map(strokeToPlain)
+        previous.strokes = structuredClone(node.strokes)
+        const sideChanges = strokeSideChanges(node, props.strokes)
+        Object.assign(changes, sideChanges.changes)
+        Object.assign(previous, sideChanges.previous)
+      }
+      if (props.effects !== undefined) {
+        changes.effects = props.effects.map(effectToPlain)
+        previous.effects = structuredClone(node.effects)
       }
       if (props.text !== undefined && node.text !== props.text) {
         changes.text = props.text
@@ -295,6 +337,112 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
 function firstSolidCss(node: SceneNode): string | null {
   const paint = node.fills.find((entry) => entry.visible !== false && entry.type === 'SOLID')
   return paint === undefined ? null : colorToCss(paint.color)
+}
+
+// ── 边框/效果的语义面 ↔ 场景图 plain 数据（属性面板的读写换算） ──────────────
+
+/** 作用边判定：未开独立边宽一律 ALL；开了且只有一条边非零 → 那条边，否则 ALL。 */
+function readStrokeSide(node: SceneNode): DesignStrokeItem['side'] {
+  if (!node.independentStrokeWeights) return 'ALL'
+  const sides: [DesignStrokeItem['side'], number][] = [
+    ['TOP', node.borderTopWeight],
+    ['RIGHT', node.borderRightWeight],
+    ['BOTTOM', node.borderBottomWeight],
+    ['LEFT', node.borderLeftWeight],
+  ]
+  const live = sides.filter(([, weight]) => weight > 0)
+  return live.length === 1 ? live[0][0] : 'ALL'
+}
+
+/** 节点 strokes → 面板的边框数组（只收可见描边）。 */
+function readStrokes(node: SceneNode): DesignStrokeItem[] {
+  return node.strokes
+    .filter((stroke) => stroke.visible)
+    .map((stroke) => ({
+      color: colorToCss(stroke.color),
+      weight: stroke.weight,
+      align: stroke.align,
+      dashed: (stroke.dashPattern?.length ?? 0) > 0,
+      side: readStrokeSide(node),
+    }))
+}
+
+/** 面板边框格 → 场景图 Stroke（虚线样式按描边宽度取节距，视觉与 Figma 相当）。 */
+function strokeToPlain(item: DesignStrokeItem): SceneNode['strokes'][number] {
+  const weight = Math.max(item.weight, 0)
+  const color = colorFromCss(item.color) ?? { r: 0.06, g: 0.09, b: 0.16, a: 1 }
+  return {
+    color,
+    weight,
+    opacity: 1,
+    visible: true,
+    align: item.align,
+    dashPattern: item.dashed ? [weight * 2, weight * 2] : [],
+  }
+}
+
+/**
+ * 作用边 → 节点级独立边宽的换算：任一格圈了单边就打开 independentStrokeWeights，
+ * 每条边的宽度取「作用于它的描边」的最大值（ALL 格作用于全部边）——单描边场景
+ * 精确一一对应，多描边混圈单边时按并集退化。
+ */
+function strokeSideChanges(
+  node: SceneNode,
+  items: DesignStrokeItem[],
+): { changes: Record<string, unknown>; previous: Record<string, unknown> } {
+  const changes: Record<string, unknown> = {}
+  const previous: Record<string, unknown> = {}
+  const weights: Record<Exclude<DesignStrokeItem['side'], 'ALL'>, number> = { TOP: 0, RIGHT: 0, BOTTOM: 0, LEFT: 0 }
+  for (const item of items) {
+    if (item.side === 'ALL') {
+      for (const side of ['TOP', 'RIGHT', 'BOTTOM', 'LEFT'] as const) weights[side] = Math.max(weights[side], item.weight)
+    } else {
+      weights[item.side] = Math.max(weights[item.side], item.weight)
+    }
+  }
+  const anySide = items.some((item) => item.side !== 'ALL')
+  if (node.independentStrokeWeights !== anySide) {
+    changes.independentStrokeWeights = anySide
+    previous.independentStrokeWeights = node.independentStrokeWeights
+  }
+  for (const [key, weight] of [
+    ['borderTopWeight', weights.TOP],
+    ['borderRightWeight', weights.RIGHT],
+    ['borderBottomWeight', weights.BOTTOM],
+    ['borderLeftWeight', weights.LEFT],
+  ] as const) {
+    if (node[key] === weight) continue
+    changes[key] = weight
+    previous[key] = node[key]
+  }
+  return { changes, previous }
+}
+
+/** 节点 effects → 面板的效果数组（只收可见效果；前景模糊罕见，不在面板展示）。 */
+function readEffects(node: SceneNode): DesignEffectItem[] {
+  return node.effects
+    .filter((effect) => effect.visible && effect.type !== 'FOREGROUND_BLUR')
+    .map((effect) => ({
+      type: effect.type as DesignEffectItem['type'],
+      color: colorToCss(effect.color),
+      x: effect.offset.x,
+      y: effect.offset.y,
+      radius: effect.radius,
+      spread: effect.spread,
+    }))
+}
+
+/** 面板效果格 → 场景图 Effect（模糊的 offset/spread 归零，保持数据自洽）。 */
+function effectToPlain(item: DesignEffectItem): SceneNode['effects'][number] {
+  const blur = item.type === 'LAYER_BLUR' || item.type === 'BACKGROUND_BLUR'
+  return {
+    type: item.type,
+    color: colorFromCss(item.color) ?? { r: 0, g: 0, b: 0, a: blur ? 0 : 0.25 },
+    offset: blur ? { x: 0, y: 0 } : { x: item.x, y: item.y },
+    radius: Math.max(item.radius, 0),
+    spread: blur ? 0 : Math.max(item.spread, 0),
+    visible: true,
+  }
 }
 
 /** 2D 后端的选中高亮：给选中节点描一圈强调色（Skia 路径由渲染器原生画）。 */

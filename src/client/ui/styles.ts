@@ -604,7 +604,7 @@ body[data-ds-dark-theme] .dsh-canvas-root{
    自己的固有宽度说话。input[type=number] 的固有宽约 125px，一进 1fr 轨道就
    把它顶出去（实测 scrollWidth 362 vs clientWidth 200），所以轨道写 minmax(0,1fr)
    拆掉自动最小尺寸、输入框 width:100% + border-box 由父级宽度定死。 */
-.dsh-canvas-design-form{display:flex;flex-direction:column;gap:8px;box-sizing:border-box;width:100%;
+.dsh-canvas-design-form{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;box-sizing:border-box;width:100%;
   padding:10px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
 .dsh-canvas-design-grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}
 .dsh-canvas-design-field{display:flex;align-items:center;gap:6px;min-width:0;box-sizing:border-box;
@@ -622,6 +622,53 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-design-danger{border:1px solid var(--dsh-hairline);background:transparent;color:var(--dsh-sunset);
   cursor:pointer;font:11px/16px var(--dsh-font);padding:4px 8px;border-radius:6px}
 .dsh-canvas-design-danger:hover{background:var(--dsh-soft)}
+/* 属性面板标签栏（设计/AI）：面板头部换成两个平铺标签，底线高亮当前页。
+   下划线用 border-bottom 压在容器发丝线上（margin-bottom:-1px 盖住它）。 */
+.dsh-canvas-design-tabs{flex:none;display:flex;gap:2px;padding:6px 8px 0;
+  border-bottom:1px solid var(--dsh-hairline);user-select:none}
+.dsh-canvas-design-tab{flex:1 1 0;border:none;background:transparent;color:var(--dsh-fg-3);cursor:pointer;
+  font:11px/16px var(--dsh-font);padding:4px 0 6px;border-radius:4px 4px 0 0;
+  border-bottom:2px solid transparent;margin-bottom:-1px}
+.dsh-canvas-design-tab:hover{color:var(--dsh-fg-2)}
+.dsh-canvas-design-tab.is-active{color:var(--dsh-fg);border-bottom-color:var(--dsh-breeze)}
+/* 模块小节：小标题行 + 内容；标题行右侧挂「＋添加」。 */
+.dsh-canvas-design-module{display:flex;flex-direction:column;gap:6px}
+.dsh-canvas-design-module-head{display:flex;align-items:center;justify-content:space-between;
+  font:10px/14px var(--dsh-font);color:var(--dsh-fg-3);letter-spacing:.02em}
+.dsh-canvas-design-module-head button{border:none;background:transparent;color:var(--dsh-fg-2);cursor:pointer;
+  font:11px/14px var(--dsh-font);padding:0 4px;border-radius:4px}
+.dsh-canvas-design-module-head button:hover{background:var(--dsh-soft);color:var(--dsh-fg)}
+.dsh-canvas-design-module-empty{font:11px/16px var(--dsh-font);color:var(--dsh-fg-3);opacity:.7}
+/* 动态数组的一格（边框/效果）：发丝线小盒子里排两列字段。 */
+.dsh-canvas-design-item{display:flex;flex-direction:column;gap:6px;padding:6px;
+  border:1px solid var(--dsh-hairline);border-radius:6px;box-sizing:border-box}
+.dsh-canvas-design-item-row{display:flex;align-items:center;gap:6px;min-width:0}
+.dsh-canvas-design-item-row input[type=color]{flex:none;width:34px;height:22px;padding:0;
+  border:1px solid var(--dsh-hairline);border-radius:4px;background:none;cursor:pointer}
+.dsh-canvas-design-item-row .dsh-canvas-design-field{flex:1 1 auto}
+.dsh-canvas-design-item-remove{flex:none;width:18px;height:18px;border:none;background:transparent;
+  color:var(--dsh-fg-3);cursor:pointer;font:12px/18px var(--dsh-font);border-radius:4px;align-self:center}
+.dsh-canvas-design-item-remove:hover{background:var(--dsh-soft);color:var(--dsh-sunset)}
+/* 下拉与勾选：跟数字/文本输入同一族壳。裸 select（模块级）与条目内 select 都要盖到。 */
+.dsh-canvas-design-form select,.dsh-canvas-design-item select{flex:1 1 auto;min-width:0;width:100%;box-sizing:border-box;
+  border:1px solid var(--dsh-hairline);border-radius:4px;padding:2px 3px;background:var(--dsh-soft);
+  color:var(--dsh-fg);font:11px/16px var(--dsh-font);outline:none;cursor:pointer}
+.dsh-canvas-design-check{display:flex;align-items:center;justify-content:space-between;gap:6px;
+  font:11px/16px var(--dsh-font);color:var(--dsh-fg-3);cursor:pointer}
+.dsh-canvas-design-check input[type=checkbox]{margin:0;accent-color:var(--dsh-breeze);cursor:pointer}
+/* AI 标签页：提示区 + 纵向撑满的输入框 + 发送按钮；回执/错误各占一行。 */
+.dsh-canvas-design-ai{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;
+  box-sizing:border-box;padding:10px;overflow-y:auto;overscroll-behavior:contain}
+.dsh-canvas-design-ai-hint{margin:0;font:11px/16px var(--dsh-font);color:var(--dsh-fg-3)}
+.dsh-canvas-design-ai textarea{flex:1 1 auto;min-height:140px;resize:none;box-sizing:border-box;
+  border:1px solid var(--dsh-hairline);border-radius:6px;padding:6px 8px;background:var(--dsh-soft);
+  color:var(--dsh-fg);font:12px/18px var(--dsh-font);outline:none}
+.dsh-canvas-design-ai textarea:focus{border-color:var(--dsh-breeze)}
+.dsh-canvas-design-ai-send{flex:none;border:none;background:var(--dsh-breeze);color:var(--dsh-on-accent);
+  cursor:pointer;font:12px/18px var(--dsh-font);padding:6px 8px;border-radius:6px}
+.dsh-canvas-design-ai-send:disabled{opacity:.45;cursor:default}
+.dsh-canvas-design-ai-notice{margin:0;font:11px/16px var(--dsh-font);color:var(--dsh-fg-2)}
+.dsh-canvas-design-ai-error{margin:0;font:11px/16px var(--dsh-font);color:var(--dsh-sunset)}
 /* 帧区：帧与「浮在它上面」的提示条共用的一块定位上下文。它接过 viewer-body 里那份
    剩余高度（flex:1），帧照旧铺满它。 */
 .dsh-canvas-frame-area{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}

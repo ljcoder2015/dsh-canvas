@@ -94,7 +94,39 @@ export interface DesignEngine {
   onDirty(cb: () => void): () => void
 }
 
-/** 属性面板可编辑项：几何/外观/文本，外加图层管理字段（名称/显隐/锁定）。 */
+/**
+ * 描边作用边（属性面板「边框」一格）：ALL = 四边统一描边；其余为单边描边——
+ * 场景图把单边宽度存在节点级（independentStrokeWeights + borderXxxWeight），
+ * 面板按「每格一条边」的语义读写（见引擎的换算）。
+ */
+export type DesignStrokeSide = 'ALL' | 'TOP' | 'RIGHT' | 'BOTTOM' | 'LEFT'
+
+/**
+ * 边框一格的读写面：css 颜色 + 场景图 Stroke 的语义子集（虚线折叠成布尔，
+ * 作用边独立成字段）。整组数组提交时整体替换节点 strokes。
+ */
+export interface DesignStrokeItem {
+  color: string
+  weight: number
+  align: 'INSIDE' | 'CENTER' | 'OUTSIDE'
+  dashed: boolean
+  side: DesignStrokeSide
+}
+
+/**
+ * 效果一格的读写面（阴影/模糊）。模糊用 radius，忽略 x/y/spread；
+ * 面板按 type 分桶展示（阴影/内阴影/模糊），提交时合并回一个数组。
+ */
+export interface DesignEffectItem {
+  type: 'DROP_SHADOW' | 'INNER_SHADOW' | 'LAYER_BLUR' | 'BACKGROUND_BLUR'
+  color: string
+  x: number
+  y: number
+  radius: number
+  spread: number
+}
+
+/** 属性面板可编辑项：几何/外观/文本/边框/效果，外加图层管理字段（名称/显隐/锁定）。 */
 export interface DesignNodeProps {
   name?: string
   visible?: boolean
@@ -105,7 +137,20 @@ export interface DesignNodeProps {
   height?: number
   fill?: string
   opacity?: number
+  /** 统一圆角：写入时联动四角并关掉 independentCorners（与 ops.setProps 同语义）。 */
   cornerRadius?: number
+  /** 四角独立圆角；写任一角都会把 independentCorners 打开。 */
+  topLeftRadius?: number
+  topRightRadius?: number
+  bottomRightRadius?: number
+  bottomLeftRadius?: number
+  independentCorners?: boolean
+  /** frame 裁切溢出内容的开关（Figma 语义）。 */
+  clipsContent?: boolean
+  /** 边框数组：整组替换（含作用边 → 节点级独立边宽的换算）。 */
+  strokes?: DesignStrokeItem[]
+  /** 效果数组：整组替换（面板负责分桶合并）。 */
+  effects?: DesignEffectItem[]
   text?: string
   fontSize?: number
 }
@@ -124,6 +169,14 @@ export interface DesignNodeRead {
   fill: string | null
   opacity: number
   cornerRadius: number
+  topLeftRadius: number
+  topRightRadius: number
+  bottomRightRadius: number
+  bottomLeftRadius: number
+  independentCorners: boolean
+  clipsContent: boolean
+  strokes: DesignStrokeItem[]
+  effects: DesignEffectItem[]
   text: string
   fontSize: number
 }
