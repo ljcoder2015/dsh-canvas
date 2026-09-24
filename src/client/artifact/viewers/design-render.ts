@@ -41,6 +41,15 @@ export interface DesignPaintOps {
    * already resolved, the backend only sets `textAlign`.
    */
   text(lines: readonly string[], x: number, y: number, size: number, family: string, align: 'left' | 'center' | 'right', fill: string, lineHeight: number): void
+  /**
+   * Clip everything painted between this and the matching {@link popClip} to a
+   * rounded rect (screen-space). Calls nest strictly (tree recursion), like
+   * canvas save/restore — a frame pushes before its children paint and pops
+   * after, so content that overflows the frame simply does not show.
+   */
+  pushClip(x: number, y: number, width: number, height: number, radius: number): void
+  /** End the innermost {@link pushClip} (restores the enclosing clip and opacity). */
+  popClip(): void
 }
 
 /** The bounding box of all artboards, in document units. */
@@ -73,7 +82,7 @@ export function paintDocument(graph: DesignGraph, ops: DesignPaintOps, transform
     const py = transform.y + board.y * transform.scale
     if (board.visible) {
       ops.shadowRect?.(px, py, board.width * transform.scale, board.height * transform.scale, board.cornerRadius * transform.scale)
-      paintNode(graph, board, ops, transform, px, py)
+      paintNode(graph, board, ops, transform, px, py, true)
     }
   }
 }
@@ -85,13 +94,24 @@ function paintNode(
   transform: { x: number; y: number; scale: number },
   px: number,
   py: number,
+  isBoard: boolean,
 ): void {
   ops.opacity(clamp01(node.opacity))
   paintOne(node, ops, px, py, transform.scale)
+  // 画板默认裁切溢出内容（一页一板：文本页面 / App 页面 / PPT 页面 / 海报……）；
+  // 模块 frame 不裁——元素可以溢出模块照常显示，只要不出画板。画板自己的填充与
+  // 描边先画，不被自己的裁切削掉半根边。
+  const clips = isBoard && node.type === 'FRAME'
+  if (clips) {
+    ops.pushClip(px, py, node.width * transform.scale, node.height * transform.scale, node.cornerRadius * transform.scale)
+  }
   for (const child of graph.getChildren(node.id)) {
     if (child.visible) {
-      paintNode(graph, child, ops, transform, px + child.x * transform.scale, py + child.y * transform.scale)
+      paintNode(graph, child, ops, transform, px + child.x * transform.scale, py + child.y * transform.scale, false)
     }
+  }
+  if (clips) {
+    ops.popClip()
   }
   ops.opacity(1)
 }
@@ -194,6 +214,15 @@ export function canvas2dBackend(context: CanvasRenderingContext2D): DesignPaintO
       context.textBaseline = 'top'
       context.fillStyle = fill
       lines.forEach((line, index) => context.fillText(line, x, y + index * lineHeight))
+    },
+    pushClip(x, y, width, height, radius) {
+      context.save()
+      context.beginPath()
+      context.roundRect(x, y, width, height, Math.min(radius, width / 2, height / 2))
+      context.clip()
+    },
+    popClip() {
+      context.restore()
     },
   }
 }

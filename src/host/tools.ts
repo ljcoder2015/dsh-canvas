@@ -364,7 +364,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.designEdit,
       description:
-        '对本卡设计文档应用批量结构化编辑 op。kind=upsert 新建（缺 id 自动分配）；setProps 改属性；move 挪位置/换父节点；delete 级联删除子图层；reorder 调整叠放次序（index 省略则移到最上层）。坐标是图层坐标（x/y 为左上角），颜色用 #RRGGBB[AA]。一次给一批 op；全部失败会报错，部分失败时 errors 逐条说明。',
+        '对本卡设计文档应用批量结构化编辑 op。kind=upsert 新建（缺 id 自动分配）；setProps 改属性；move 挪位置/换父节点；delete 级联删除子图层；reorder 调整叠放次序（index 省略则移到最上层）。坐标是图层坐标（相对父图层，x/y 为左上角），颜色用 #RRGGBB[AA]。结构上按模块分层：画板 → 模块 frame（导航栏/内容区/页脚…）→ 元素，元素不要直接平铺在画板上；画板默认裁切溢出内容（一页一板：文本页面 / App 页面 / PPT 页面），模块 frame 不裁，元素可溢出模块只要不出画板。一次给一批 op；全部失败会报错，部分失败时 errors 逐条说明。',
       parameters: {
         ops: {
           type: 'array',

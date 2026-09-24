@@ -58,7 +58,10 @@ export interface Config {
 }
 
 /** Configuration schema with defaults, validated at plugin load. */
-export const Config = z.object({
+// 显式标注为 Schema<Partial<Config>, Config>：留空时推断类型的泛型会引用依赖树里
+// 另一份 schemastery 副本（.pnpm 路径），declaration 模式下 tsc 无法可移植地命名它
+// （TS2883）。第一位是调用入参（字段全有默认值，允许整包省略），第二位是校验产出。
+export const Config: z<Partial<Config>, Config> = z.object({
   pickerRoot: z.string().default(''),
   arrangeGap: z.number().min(8).max(400).default(88),
   summaryBudget: z.number().min(200).max(200_000).default(4000),

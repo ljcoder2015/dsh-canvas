@@ -44,6 +44,13 @@ const ZOOM_MAX = 8
 /** 改稿落盘前的停手期（复用文本编辑的节律）。 */
 const SAVE_SETTLE_MS = 800
 
+/**
+ * 设计卡聚焦时**归设计**的键：与背后画布的快捷键（window 级监听）正面相撞的那一批。
+ * onKeyDown 里对这些键 stopPropagation——按键已经消化在设计自己的视口手势里，
+ * 不许隔着弹窗再把背后的画布推走缩走。Esc 不在此列：弹窗靠它关闭，必须放行。
+ */
+const DESIGN_KEYS = new Set([' ', 'w', 'a', 's', 'd', 'q', 'e', 'delete', 'backspace'])
+
 /** The engine chunk's shape — the module is loaded by URL, typed here. */
 interface DesignEngineModule {
   createDesignEngine(args: CreateDesignEngineArgs): Promise<EngineOutcome>
@@ -113,6 +120,9 @@ export function DesignViewer({ view }: ViewerProps) {
         engineRef.current?.select([], false)
         drawRef.current()
       }
+      // 焦点交还画布：模式开关长在 header（wrap 之外），点击后焦点留在那个按钮上，
+      // 下一按 WASD 既不归设计也不归弹窗正文——把焦点收回 wrap，快捷键立刻归位。
+      wrapRef.current?.focus()
     },
     [],
   )
@@ -449,6 +459,12 @@ export function DesignViewer({ view }: ViewerProps) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target)) return
       const key = event.key.toLowerCase()
+      // 归设计的键拦在冒泡路上：设计卡聚焦时，画布那套 window 级 WASD/QE/空格
+      // 监听不能隔着弹窗再收一遍（否则按住 W，背后的画布跟着平移）。Esc 例外——
+      // 弹窗的关闭就靠它，拦了弹窗就关不上了。
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && DESIGN_KEYS.has(key)) {
+        event.stopPropagation()
+      }
       // 编辑类快捷键（undo/删除/Esc）只在编辑模式生效；预览模式保留视口手势。
       const editing = modeRef.current === 'edit'
       if ((event.metaKey || event.ctrlKey) && !event.altKey) {

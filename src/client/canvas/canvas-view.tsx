@@ -1134,6 +1134,8 @@ export function CanvasBoard(props: CanvasBoardProps) {
       event.preventDefault()
       event.stopPropagation()
       if (owner === 'board') {
+        // 滚轮平移与键盘平移同一归宿：举起 dirty，由停顿 effect 落盘。
+        viewDirty.current = true
         setView((current) => ({ ...current, x: current.x - event.deltaX, y: current.y - event.deltaY }))
         return
       }
@@ -1141,6 +1143,8 @@ export function CanvasBoard(props: CanvasBoardProps) {
       const px = event.clientX - rect.left
       const py = event.clientY - rect.top
       const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08
+      // 缩放按钮没有抬手、滚轮缩放也没有——同样交给停顿 effect 收尾。
+      viewDirty.current = true
       setView((current) => {
         const zoom = clampZoom(current.zoom * factor)
         const ratio = zoom / current.zoom
