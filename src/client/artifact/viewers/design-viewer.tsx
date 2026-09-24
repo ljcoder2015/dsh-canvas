@@ -190,6 +190,14 @@ export function DesignViewer({ view }: ViewerProps) {
     }
   }, [])
 
+  // 挂载即把焦点交给预览画布：键盘的归属由焦点决定（keydown 监听挂在 wrap 上，
+  // 焦点不在里面就轮不到它说话，按键会直达 window 被背后的画布收走）。打开预览
+  // 就要能直接按 WASD 平移，而不是先点一下画布。preventScroll 避免焦点抢夺
+  // 顺手滚动页面。
+  useEffect(() => {
+    wrapRef.current?.focus({ preventScroll: true })
+  }, [])
+
   const draw = useCallback(() => {
     const engine = engineRef.current
     const wrap = wrapRef.current
