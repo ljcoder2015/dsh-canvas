@@ -36,27 +36,14 @@ export const PROBE_HEAD_LIMIT = 4096
  */
 export const BUILTIN_KINDS: readonly KindDefinition[] = [
   {
-    id: 'html-deck',
-    label: 'HTML Deck',
-    addressPatterns: ['dsh-resource://file/**/*.html'],
-    directory: false,
-    exportFormats: ['html', 'pdf', 'png'],
-    publishable: true,
-  },
-  {
-    id: 'webapp',
+    // 应用（v1.56 归并）：html-deck / site / webapp 三类产物本是同一种东西——一份
+    // 跑在沙箱 iframe 里的 HTML 入口页，落在单个文件或一个带入口的目录上。类型表只留
+    // 一个 id，预览、内联、命名、导出走同一套判据；目录形态的判据在 detectKind。
+    id: 'app',
     label: '应用',
-    addressPatterns: ['dsh-resource://file/**/index.html'],
-    directory: true,
-    exportFormats: ['zip', 'html'],
-    publishable: true,
-  },
-  {
-    id: 'site',
-    label: '站点',
-    addressPatterns: ['dsh-resource://file/**/index.html'],
-    directory: true,
-    exportFormats: ['zip', 'html'],
+    addressPatterns: ['dsh-resource://file/**/*.html', 'dsh-resource://file/**/index.html'],
+    directory: false,
+    exportFormats: ['zip', 'html', 'pdf', 'png'],
     publishable: true,
   },
   {
@@ -118,9 +105,17 @@ export const BUILTIN_KINDS: readonly KindDefinition[] = [
   },
 ]
 
-/** Look up a kind definition by id. */
+/**
+ * 归并前的 kind id → 归并后的 id（v1.56）。
+ *
+ * 老板上的记录还盖着旧章（`webapp` / `site` / `html-deck`），零迁移的代价是读侧
+ * 顺手对齐：查表时先折算，标签、导出格式这些按 kind 查的东西对老卡照常成立。
+ */
+const LEGACY_KIND_IDS: Readonly<Record<string, string>> = { 'html-deck': 'app', site: 'app', webapp: 'app' }
+
+/** Look up a kind definition by id; pre-merge ids resolve onto their merged kind. */
 export function kindById(id: string, definitions: readonly KindDefinition[] = BUILTIN_KINDS): KindDefinition | undefined {
-  return definitions.find((entry) => entry.id === id)
+  return definitions.find((entry) => entry.id === (LEGACY_KIND_IDS[id] ?? id))
 }
 
 /** Human label for a kind id, falling back to the id itself. */
@@ -140,19 +135,16 @@ export function kindSupportsExport(
 /**
  * The kinds whose artifact is a whole HTML page (F3.8).
  *
- * A slide deck, a site's entry page and an app's entry page are three kinds
- * but one preview: the markup runs in a sandboxed iframe. They also need the
- * same preparation before that happens — a `srcdoc` document has no base URL,
- * so a locally referenced `styles.css` or `app.js` resolves against nothing
- * and the page renders unstyled and dead. The host inlines those references
- * for every kind in this set.
+ * There is exactly one such kind (`app`), but the set stays a set on purpose:
+ * the host's inlining gate and the client's kind→viewer table both read it, and
+ * they were two hand-written lists once — the one that forgot a kind is exactly
+ * how an HTML artifact lost its stylesheet.
  *
- * Two layers read this set — the host's inlining gate and the client's
- * kind→viewer table — which is the point: they were two hand-written lists
- * once, and the one that forgot a kind is exactly how an HTML artifact lost
- * its stylesheet.
+ * A `srcdoc` document has no base URL, so a locally referenced `styles.css` or
+ * `app.js` resolves against nothing and the page renders unstyled and dead.
+ * The host inlines those references for every kind in this set.
  */
-export const HTML_KINDS: readonly string[] = ['html-deck', 'site', 'webapp']
+export const HTML_KINDS: readonly string[] = ['app']
 
 /** Whether a kind's artifact is a whole HTML page (see {@link HTML_KINDS}). */
 export function isHtmlKind(kind: string): boolean {
@@ -187,49 +179,31 @@ export function isDirectTextKind(kind: string): boolean {
   return DIRECT_TEXT_KINDS.includes(kind)
 }
 
-/** True for a directory that carries its own `index.html` entry point. */
-function isSiteDirectory(probe: KindProbe): boolean {
-  return probe.directory && probe.children.some((name) => name.toLowerCase() === 'index.html')
-}
-
 /**
- * True for a directory that carries the webapp manifest.
- *
- * A webapp is a site plus structure — the manifest is what separates an
- * *application* folder (web components, shadcn tokens, an agent-editable
- * scaffold) from any other directory with an `index.html`. The check runs
- * before the site check: with the manifest present the folder is a webapp
- * even though it also has an entry point.
+ * True for a directory that behaves as an app: it carries an entry page or the
+ * scaffold manifest. The manifest alone separates a scaffolded folder from a
+ * hand-made one, but both preview and name identically, so one verdict serves.
  */
-function isWebAppDirectory(probe: KindProbe): boolean {
-  return probe.directory && probe.children.includes(WEBAPP_MANIFEST)
-}
-
-/** True when a `.html` file is a slide deck rather than a plain page. */
-function looksLikeDeck(head: string): boolean {
-  return /\bdata-slide\b|\bclass="[^"]*\bslide\b|reveal\.js|impress\.js|section\s+data-/.test(head)
+function isAppDirectory(probe: KindProbe): boolean {
+  return (
+    probe.children.some((name) => name.toLowerCase() === 'index.html') || probe.children.includes(WEBAPP_MANIFEST)
+  )
 }
 
 /**
  * Resolve the kind of one artifact from its evidence (F2.2).
  *
- * Order matters: a directory with an entry point is a site before it is a
- * folder, and an `.html` deck is a deck before it is a generic HTML file. The
- * last entry in {@link BUILTIN_KINDS} is the catch-all, so this never returns
- * `undefined` for a path that exists.
+ * Any HTML page — a deck, a site's entry, an app's entry, a plain page — is
+ * `app`; only a directory without either entry point or manifest falls through
+ * to `folder`. The last entry in {@link BUILTIN_KINDS} is the catch-all, so
+ * this never returns `undefined` for a path that exists.
  */
 export function detectKind(probe: KindProbe, definitions: readonly KindDefinition[] = BUILTIN_KINDS): string {
-  if (probe.directory) {
-    if (isWebAppDirectory(probe)) return 'webapp'
-    return isSiteDirectory(probe) ? 'site' : 'folder'
-  }
+  if (probe.directory) return isAppDirectory(probe) ? 'app' : 'folder'
 
-  const { extension, basename, head } = probe
+  const { extension } = probe
 
-  if (extension === 'html' || extension === 'htm') {
-    if (basename === 'index.html') return 'site'
-    return looksLikeDeck(head) ? 'html-deck' : 'site'
-  }
+  if (extension === 'html' || extension === 'htm') return 'app'
   if (extension === 'md' || extension === 'mdx') return 'markdown'
   if (extension === 'design') return 'design'
   if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif'].includes(extension)) return 'image'
@@ -263,11 +237,18 @@ export function outlineOf(kind: string, text: string, limit = 24): string[] {
   switch (kind) {
     case 'markdown':
       return take(/^\s{0,3}#{1,3}\s+(.+)$/gm)
-    case 'html-deck':
-      return take(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/gi).map((line) => line.replace(/<[^>]+>/g, '').trim())
-    case 'site':
-    case 'webapp':
-      return take(/<title[^>]*>([\s\S]*?)<\/title>/gi)
+    case 'app': {
+      // 标题在前（页面叫什么），标题级标签在后（页面有什么章节）——幻灯片、站点、
+      // 应用共用这一套，去重由 add 统一负责。
+      const found: string[] = []
+      const add = (raw: string): void => {
+        const line = raw.replace(/<[^>]+>/g, '').trim()
+        if (line !== '' && !found.includes(line)) found.push(line)
+      }
+      for (const match of text.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/gi)) add(match[1] ?? '')
+      for (const match of text.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/gi)) add(match[1] ?? '')
+      return found.slice(0, limit)
+    }
     case 'data': {
       const [header = ''] = text.split(/\r?\n/)
       return header

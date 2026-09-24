@@ -36,8 +36,7 @@ describe('kind → viewer mapping', () => {
   it('sends each content kind to its own viewer', () => {
     expect(viewerIdFor('markdown')).toBe('markdown')
     expect(viewerIdFor('image')).toBe('image')
-    expect(viewerIdFor('html-deck')).toBe('deck')
-    expect(viewerIdFor('site')).toBe('deck')
+    expect(viewerIdFor('app')).toBe('deck')
     expect(viewerIdFor('data')).toBe('data')
     expect(viewerIdFor('video')).toBe('video')
   })
@@ -69,9 +68,9 @@ describe('the viewer registry', () => {
   })
 
   it('spreads the HTML family from the host kind list rather than restating it', () => {
-    // 「HTML 家族」这份清单只有一份（宿主的 HTML_KINDS）。从前 deck 那两条判据各抄了
+    // 「HTML 页面」这份清单只有一份（宿主的 HTML_KINDS）。从前 deck 那两条判据各抄了
     // 一份，而漏掉一个 kind 的下场就是某天某个 HTML 产物丢了它的样式表。这里钉住两边
-    // 同源：宿主那份加了哪一种，预览这边自动跟着有。
+    // 同源：宿主那份怎么改，预览这边自动跟着有。
     const deck = VIEWER_REGISTRY.find((entry) => entry.id === 'deck')
     expect(deck).toBeDefined()
     for (const kind of HTML_KINDS) expect(deck?.claims(kind)).toBe(true)
@@ -95,7 +94,7 @@ describe('in-place text editing', () => {
   it('keeps the editor away from kinds that would be overwritten whole', () => {
     // 数据看的是表格、Deck 看的是渲染结果、图片与视频根本不是文字：编辑器整篇写回，
     // 这些形态给一枚编辑钮就是把文件改成文本。目录同样不行——它的 payload 不是文本。
-    for (const kind of ['data', 'html-deck', 'site', 'webapp', 'image', 'video', 'folder', '']) {
+    for (const kind of ['data', 'app', 'image', 'video', 'folder', '']) {
       expect(isDirectTextKind(kind)).toBe(false)
     }
     // 预览器 id 不是 kind：兜底那条的 id 恰好叫 `text`，别把它当 kind 用。
@@ -152,7 +151,7 @@ describe('「手动输入」落到还没有产物的文本卡上（F3.12 × F3.1
     // 空文件是**在**的：那是用户自己清空的结果，不是我们要补的缺。
     expect(needsBlankText({ kind: 'markdown', present: true }, true)).toBe(false)
     // 给别的形态补一份空文本就是把那个文件改成文本。
-    for (const kind of ['data', 'html-deck', 'site', 'webapp', 'image', 'video', 'folder', '']) {
+    for (const kind of ['data', 'app', 'image', 'video', 'folder', '']) {
       expect(needsBlankText({ kind, present: false }, true)).toBe(false)
     }
   })

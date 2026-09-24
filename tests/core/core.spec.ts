@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { CARD_HEIGHT, CARD_WIDTH, arrangeSeats, depthsOf, nextFreeSeat } from '../../src/core/canvas/board.ts'
 import { projectIdOf, shortDigest, slugify } from '../../src/core/canvas/ids.ts'
-import { BUILTIN_KINDS, HTML_KINDS, detectKind, digestOf, isHtmlKind, kindSupportsExport, outlineOf } from '../../src/core/artifact/kind-registry.ts'
+import { BUILTIN_KINDS, HTML_KINDS, detectKind, digestOf, isHtmlKind, kindById, kindLabel, kindSupportsExport, outlineOf } from '../../src/core/artifact/kind-registry.ts'
 import {
   materialUpstreams,
   reconcileEdges,
@@ -166,7 +166,7 @@ describe('source edges', () => {
   })
 
   it('extracts references that could imply an edge, ignoring absolute and inline URLs', () => {
-    const html = referencedPaths('site', '<img src="cover.png"><a href="https://x.dev/y.md">y</a><i src="data:image/png;base64,AA">', 'html')
+    const html = referencedPaths('app', '<img src="cover.png"><a href="https://x.dev/y.md">y</a><i src="data:image/png;base64,AA">', 'html')
     expect(html).toContain('cover.png')
     expect(html.some((value) => value.startsWith('https'))).toBe(false)
     expect(html.some((value) => value.startsWith('data:'))).toBe(false)
@@ -189,13 +189,14 @@ describe('kind registry', () => {
     ...over,
   })
 
-  it('recognises a deck from its markup, not just its extension', () => {
-    expect(detectKind(probe({ path: 'd.html', basename: 'd.html', extension: 'html', head: '<section class="slide">' }))).toBe('html-deck')
-    expect(detectKind(probe({ path: 'p.html', basename: 'p.html', extension: 'html', head: '<p>plain</p>' }))).toBe('site')
+  it('any html page is an app, whatever its markup', () => {
+    // 归并后幻灯片标记、普通页面都是 app——head 嗅探（slide/reveal）已废除。
+    expect(detectKind(probe({ path: 'd.html', basename: 'd.html', extension: 'html', head: '<section class="slide">' }))).toBe('app')
+    expect(detectKind(probe({ path: 'p.html', basename: 'p.html', extension: 'html', head: '<p>plain</p>' }))).toBe('app')
   })
 
-  it('prefers site over folder for a directory with an entry point', () => {
-    expect(detectKind(probe({ path: 'site', directory: true, children: ['index.html', 'a.css'] }))).toBe('site')
+  it('prefers app over folder for a directory with an entry point', () => {
+    expect(detectKind(probe({ path: 'site', directory: true, children: ['index.html', 'a.css'] }))).toBe('app')
     expect(detectKind(probe({ path: 'site', directory: true, children: ['a.css'] }))).toBe('folder')
   })
 
@@ -213,7 +214,11 @@ describe('kind registry', () => {
       expect(BUILTIN_KINDS.some((entry) => entry.id === kind)).toBe(true)
       expect(isHtmlKind(kind)).toBe(true)
     }
-    expect(HTML_KINDS).toEqual(['html-deck', 'site', 'webapp'])
+    expect(HTML_KINDS).toEqual(['app'])
+    // 老板上的记录盖着归并前的章：读侧折算到 app，标签与导出对老卡照常成立。
+    expect(kindById('webapp')?.id).toBe('app')
+    expect(kindLabel('site')).toBe('应用')
+    expect(kindSupportsExport('html-deck', 'pdf')).toBe(true)
     for (const kind of ['markdown', 'image', 'video', 'data', 'folder', 'file', '']) {
       expect(isHtmlKind(kind)).toBe(false)
     }
@@ -224,7 +229,7 @@ describe('kind registry', () => {
       expect(definition.id).toBe(definition.id.trim())
       expect(definition.label.length).toBeGreaterThan(0)
     }
-    expect(kindSupportsExport('html-deck', 'pdf')).toBe(true)
+    expect(kindSupportsExport('app', 'pdf')).toBe(true)
     expect(kindSupportsExport('video', 'pdf')).toBe(false)
   })
 

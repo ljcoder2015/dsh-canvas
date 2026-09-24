@@ -50,7 +50,7 @@ const CARD: BoardCard = {
   file: 'deck.html',
   name: 'deck',
   project: PROJECT.id,
-  kind: 'html-deck',
+  kind: 'app',
   kindLabel: 'Deck',
   position: { x: 0, y: 0 },
   sessionId: '',
@@ -252,7 +252,7 @@ describe('canvas tools — declared output', () => {
     const branches = [
       { type: 'note', content: '记一笔' },
       { type: 'card', content: 'deck.html' },
-      { type: 'webapp', content: '官网' },
+      { type: 'app', content: '官网' },
       { type: 'design', content: '海报' },
     ]
     for (const args of branches) {

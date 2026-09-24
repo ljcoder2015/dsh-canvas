@@ -64,9 +64,9 @@ export function selectionOf(view: ModelSelectionView | undefined): ModelChoice |
 /**
  * The node type a card counts as.
  *
- * The recognized kind wins over the seated one: a `.md` file seated as
- * `markdown` and then recognized as `html-deck` is a deck, and the memory should
- * follow what the user sees on the card.
+ * The recognized kind wins over the seated one: the memory should follow what
+ * the user sees on the card, and the summary's kind is the current fact —
+ * old records may still carry a pre-merge kind id.
  *
  * @param card - the card.
  * @param summary - its digest, when read.

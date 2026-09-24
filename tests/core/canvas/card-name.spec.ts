@@ -51,21 +51,21 @@ describe('默认卡片名（F1.12）', () => {
   it('文件形态取文件名去掉扩展名', () => {
     expect(cardNameOf({ file: 'brief.md', kind: 'markdown' })).toBe('brief')
     expect(cardNameOf({ file: 'notes/brief.md', kind: 'markdown' })).toBe('brief')
-    expect(cardNameOf({ file: 'deck.html', kind: 'html-deck' })).toBe('deck')
+    expect(cardNameOf({ file: 'deck.html', kind: 'app' })).toBe('deck')
     expect(cardNameOf({ file: 'blank.design', kind: 'design' })).toBe('blank')
   })
 
   it('目录形态取目录名，而不是入口页的名字', () => {
     // 这是这条功能里最显眼的一处：应用卡的产物是「一个目录带 index.html」，
     // 卡片上写着 index.html 说的其实是「怎么搭的」，不是「做了什么」。
-    expect(cardNameOf({ file: 'myapp/index.html', kind: 'webapp' })).toBe('myapp')
-    expect(cardNameOf({ file: 'docs/site/index.html', kind: 'site' })).toBe('site')
+    expect(cardNameOf({ file: 'myapp/index.html', kind: 'app' })).toBe('myapp')
+    expect(cardNameOf({ file: 'docs/site/index.html', kind: 'app' })).toBe('site')
     // `folder` 形态的 file 本身就是那个目录。
     expect(cardNameOf({ file: 'docs', kind: 'folder' })).toBe('docs')
   })
 
   it('根上的入口页没有目录可借名，退回入口页自己的名字', () => {
-    expect(cardNameOf({ file: 'index.html', kind: 'site' })).toBe('index')
+    expect(cardNameOf({ file: 'index.html', kind: 'app' })).toBe('index')
   })
 
   it('记录里有名字就用它', () => {
@@ -110,18 +110,18 @@ describe('改名改的是哪一项', () => {
     )
     // 扩展名比名字长得多也照样留着：改的是名字，不是形态。
     expect(renamed(planRename({ file: 'blank.design', kind: 'design', name: '首页' })).to).toBe('首页.design')
-    expect(renamed(planRename({ file: 'deck.html', kind: 'html-deck', name: '季度汇报' })).to).toBe('季度汇报.html')
+    expect(renamed(planRename({ file: 'deck.html', kind: 'app', name: '季度汇报' })).to).toBe('季度汇报.html')
   })
 
-  it('应用与站点绑在目录上：改目录，入口页跟着搬', () => {
-    expect(renamed(planRename({ file: 'myapp/index.html', kind: 'webapp', name: '市场分析' }))).toEqual({
+  it('应用绑在目录上：改目录，入口页跟着搬', () => {
+    expect(renamed(planRename({ file: 'myapp/index.html', kind: 'app', name: '市场分析' }))).toEqual({
       kind: 'rename',
       from: 'myapp',
       to: '市场分析',
       file: '市场分析/index.html',
     })
     // 目录不在根上时，改的是它自己，父目录一个字都不动。
-    expect(renamed(planRename({ file: 'apps/site/index.html', kind: 'site', name: '官网' }))).toEqual({
+    expect(renamed(planRename({ file: 'apps/site/index.html', kind: 'app', name: '官网' }))).toEqual({
       kind: 'rename',
       from: 'apps/site',
       to: 'apps/官网',
@@ -140,7 +140,7 @@ describe('改名改的是哪一项', () => {
 
   it('画布根目录那一项拒改', () => {
     // 根上的入口页：改它等于改画布目录本身（或者把它改成一张不再叫 index 的页）。
-    expect(planRename({ file: 'index.html', kind: 'site', name: '官网' })).toEqual({
+    expect(planRename({ file: 'index.html', kind: 'app', name: '官网' })).toEqual({
       kind: 'refused',
       reason: 'root-entry',
     })
@@ -166,7 +166,7 @@ describe('改名改的是哪一项', () => {
     expect(renamed(planRename({ file: 'brief.md', kind: 'markdown', name: '市场分析', suffix: 2 })).to).toBe(
       '市场分析-2.md',
     )
-    expect(renamed(planRename({ file: 'myapp/index.html', kind: 'webapp', name: '市场分析', suffix: 3 })).file).toBe(
+    expect(renamed(planRename({ file: 'myapp/index.html', kind: 'app', name: '市场分析', suffix: 3 })).file).toBe(
       '市场分析-3/index.html',
     )
   })
@@ -224,7 +224,7 @@ describe('撞名连同它的变体都占着时，拒改而不是死循环', () =
     let asked = 0
     const plan = await settleRename({
       file: 'index.html',
-      kind: 'site',
+      kind: 'app',
       name: '官网',
       taken: async () => {
         asked += 1
@@ -264,7 +264,7 @@ describe('磁盘那一步做什么', () => {
 describe('记录里存不存这个名字', () => {
   it('与产物自己说的名字一致就不存（老记录因此永远零迁移）', () => {
     expect(storedNameOf({ file: 'brief.md', kind: 'markdown', name: 'brief' })).toBeUndefined()
-    expect(storedNameOf({ file: 'myapp/index.html', kind: 'webapp', name: 'myapp' })).toBeUndefined()
+    expect(storedNameOf({ file: 'myapp/index.html', kind: 'app', name: 'myapp' })).toBeUndefined()
     expect(storedNameOf({ file: 'brief.md', kind: 'markdown', name: '   ' })).toBeUndefined()
   })
 
@@ -288,6 +288,6 @@ describe('建卡时铸的默认名（v1.54）', () => {
     expect(cardNameOf({ file: '文本1.md', kind: 'markdown' })).toBe('文本1')
     expect(storedNameOf({ file: '文本1.md', kind: 'markdown', name: '文本1' })).toBeUndefined()
     // 应用同理：文件夹 `应用1`，入口页跟着它。
-    expect(cardNameOf({ file: '应用1/index.html', kind: 'webapp' })).toBe('应用1')
+    expect(cardNameOf({ file: '应用1/index.html', kind: 'app' })).toBe('应用1')
   })
 })

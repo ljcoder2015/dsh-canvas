@@ -353,7 +353,8 @@ export class ArtifactIo {
       }
     }
 
-    const isDirectory = facts.kind === 'site' || facts.kind === 'webapp' || facts.kind === 'folder'
+    // 归并后 html 产物只有 app 一种；folder 是没有入口页的普通目录。
+    const isDirectory = facts.kind === 'app' || facts.kind === 'folder'
     return {
       cardId,
       kind: facts.kind,

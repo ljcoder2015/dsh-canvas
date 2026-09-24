@@ -366,7 +366,7 @@ export interface FolderEntry {
 
 /** One entry of the kind registry (F2.1/F2.4). */
 export interface KindDefinition {
-  /** Stable kind id, e.g. `html-deck`. */
+  /** Stable kind id, e.g. `app`. */
   id: string
   /** Human label shown on the card caption. */
   label: string

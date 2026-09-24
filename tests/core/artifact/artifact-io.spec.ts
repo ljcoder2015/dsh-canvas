@@ -170,7 +170,7 @@ describe('artifact view inlining', () => {
 <body><h1>站点</h1><script src="app.js"></script></body>
 </html>`
 
-  it('inlines a site entry page’s own stylesheet and script', async () => {
+  it('inlines an app entry page’s own stylesheet and script', async () => {
     const io = viewHarness({
       'site/index.html': PAGE,
       'site/styles.css': 'h1 { color: red; }',
@@ -179,7 +179,7 @@ describe('artifact view inlining', () => {
 
     const view = await io.view('/root', 'site/index.html')
 
-    expect(view.kind).toBe('site')
+    expect(view.kind).toBe('app')
     expect(view.text).toContain('<style>\nh1 { color: red; }\n</style>')
     expect(view.text).toContain('console.log(1)')
     expect(view.text).not.toContain('href="styles.css"')
@@ -194,7 +194,7 @@ describe('artifact view inlining', () => {
 
     const view = await io.view('/root', 'decks/talk.html')
 
-    expect(view.kind).toBe('html-deck')
+    expect(view.kind).toBe('app')
     expect(view.text).toContain('font-size: 40px')
     expect(view.text).not.toContain('font-size: 1px')
   })
@@ -204,7 +204,7 @@ describe('artifact view inlining', () => {
 
     const view = await viewHarness({ 'a.html': remote }).view('/root', 'a.html')
 
-    expect(view.kind).toBe('site')
+    expect(view.kind).toBe('app')
     // The page's own markup survives untouched — nothing remote is fetched,
     // rewritten or inlined — while the preview link guard is still installed:
     // a relative *link* resolves against the host page in a `srcdoc` iframe

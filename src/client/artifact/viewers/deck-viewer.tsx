@@ -1,5 +1,5 @@
 /**
- * dsh-canvas — HTML 家族（幻灯片 / 站点 / 应用）共用的页面预览器。
+ * dsh-canvas — HTML 页面（应用 app）共用的页面预览器。
  *
  * 三个 kind 一个预览：入口页的标记跑在一个沙箱 iframe 里。`allow-scripts` 而不给
  * `allow-same-origin` 是那个折中——幻灯片要靠自己的 JS 翻页，而文档待在 opaque
@@ -254,7 +254,7 @@ export function DeckViewer({ view, t }: ViewerProps) {
 }
 
 /**
- * 注册项：HTML 家族（幻灯片 / 站点 / 应用）共用同一个 iframe 预览。
+ * 注册项：HTML 页面（应用 app）共用同一个 iframe 预览。
  *
  * `claims` 直接拿 `isHtmlKind` —— kind 清单只有一份，在宿主的
  * `core/artifact/kind-registry.ts`。这条从前是两份手抄的清单，而「漏掉一个 kind」的后果

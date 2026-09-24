@@ -21,26 +21,23 @@ const directoryProbe = (children: string[]): KindProbe => ({
 })
 
 describe('webapp kind detection', () => {
-  it('reads a directory with the manifest as a webapp', () => {
-    expect(detectKind(directoryProbe([WEBAPP_MANIFEST, 'index.html', 'app.js', 'styles.css']))).toBe('webapp')
+  it('reads a directory with the manifest as an app', () => {
+    expect(detectKind(directoryProbe([WEBAPP_MANIFEST, 'index.html', 'app.js', 'styles.css']))).toBe('app')
   })
 
-  it('prefers the manifest over a bare site entry point', () => {
-    // manifest + index.html 同时在场：webapp 赢过 site
-    expect(detectKind(directoryProbe(['index.html', WEBAPP_MANIFEST]))).toBe('webapp')
-  })
-
-  it('still reads a manifest-less entry folder as a site', () => {
-    expect(detectKind(directoryProbe(['index.html']))).toBe('site')
+  it('reads a manifest-less entry folder as an app too', () => {
+    // 归并后不再区分站点与应用：有入口页的目录就是 app。
+    expect(detectKind(directoryProbe(['index.html', WEBAPP_MANIFEST]))).toBe('app')
+    expect(detectKind(directoryProbe(['index.html']))).toBe('app')
   })
 
   it('leaves other directories as folders', () => {
     expect(detectKind(directoryProbe(['a.css', 'b.js']))).toBe('folder')
   })
 
-  it('outlines a webapp by its entry title', () => {
+  it('outlines an app by its entry title', () => {
     const html = '<html><head><title>我的应用</title></head></html>'
-    expect(outlineOf('webapp', html)).toEqual(['我的应用'])
+    expect(outlineOf('app', html)).toEqual(['我的应用'])
   })
 })
 

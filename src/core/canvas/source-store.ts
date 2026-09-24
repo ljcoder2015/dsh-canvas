@@ -187,7 +187,7 @@ export function referencedPaths(kind: string, text: string, extension: string): 
     found.add(value.split('#')[0].split('?')[0])
   }
 
-  if (kind === 'html-deck' || kind === 'site') {
+  if (kind === 'app') {
     for (const match of text.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)) collect(match[1] ?? '')
   } else if (kind === 'markdown') {
     for (const match of text.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/gi)) collect(match[1] ?? '')

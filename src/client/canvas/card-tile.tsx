@@ -45,6 +45,8 @@ export interface CardTileProps {
   selected: boolean
   /** Which port the user is currently dragging a source edge from, if any. */
   connecting: 'in' | 'out' | undefined
+  /** 连线拖拽悬停在卡片上：碰撞高亮，放手就在它身上结关联。 */
+  linkOver: boolean
   /** Board zoom, so a pointer delta in screen px becomes a canvas delta. */
   zoom: number
   t: Translate
@@ -72,12 +74,8 @@ function previewLines(summary: CardSummary | undefined, fallback: string): strin
   return prose.length > 0 ? prose.slice(0, 4) : [fallback]
 }
 
-/** 缩放低于这一档时应用迷你帧整体卸载：卡片本身已小于半寸，页面画得再真也看不清，只留 CPU 账单。 */
-const FRAME_ZOOM_MIN = 0.5
-
 /**
  * 补齐被截断的 markdown 围栏。
- *
  * `head` 是按字符数硬切的，可能正好落在一段未闭合的 ``` 围栏中间；不补的话，
  * 渲染器把围栏记号当正文画出来。围栏记号出现奇数次＝有一段没闭合，补一个收尾。
  */
@@ -88,16 +86,15 @@ function balancedFences(head: string): string {
 
 /** 应用卡的迷你帧：入口页跑在一个缩到一半的沙箱 iframe 里，不接指针、不进 Tab 序。 */
 function FramePreview({ html, title }: { html: string; title: string }) {
-  const [loaded, setLoaded] = useState(false)
   return (
-    <div className={`dsh-canvas-card-frame${loaded ? ' is-loaded' : ''}`}>
+    <div className="dsh-canvas-card-frame">
       <iframe
         title={title}
-        // 只给脚本不给同源：与全屏预览同一副锁（opaque origin），但迷你帧连弹窗都不需要。
-        sandbox="allow-scripts"
+        // 与全屏预览同一副锁（opaque origin + 放行弹窗）：全屏路径验证过的组合，
+        // 迷你帧不发明自己的沙箱规则。
+        sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
         srcDoc={html}
         tabIndex={-1}
-        onLoad={() => setLoaded(true)}
       />
     </div>
   )
@@ -105,7 +102,7 @@ function FramePreview({ html, title }: { html: string; title: string }) {
 
 /** Render one artifact card. */
 export function CardTile(props: CardTileProps) {
-  const { card, state, summary, projectId, bridge, selected, connecting, zoom, t, onSelect, onMove, onDragMove, onConnectStart, onConnectDrop, onActivate, onRename } = props
+  const { card, state, summary, projectId, bridge, selected, connecting, linkOver, zoom, t, onSelect, onMove, onDragMove, onConnectStart, onConnectDrop, onActivate, onRename } = props
   const [offset, setOffset] = useState<Point | undefined>(undefined)
   const drag = useRef<{ x: number; y: number; moved: boolean; name: boolean } | undefined>(undefined)
 
@@ -161,13 +158,9 @@ export function CardTile(props: CardTileProps) {
   // 应用卡装迷你帧；其余 kind 与一切还没读到的时刻，照旧显示大纲行。
   // 两个取材 hook 必须无条件调用（React 规则），闸都收在 enabled 里。
   //
-  // kind 以座位上的章为准：scaffold 把应用卡盖在 <folder>/index.html 上（card.kind =
-  // 'webapp'），而盘面证据只认得文件——summary.kind 对它永远读出 site。两处任一是
-  // webapp 就按应用卡分派，防的是「卡片坐在文件夹上」与「坐在入口文件上」两种座法。
-  const kind =
-    card.kind === 'webapp' || summary?.kind === 'webapp'
-      ? 'webapp'
-      : summary?.kind ?? card.kind
+  // kind 以盘面证据（summary）为准：旧板上的记录可能盖着归并前的章（site/webapp），
+  // 重探出来的 kind 才是当前的类型表认的那一个（app）。
+  const kind = summary?.kind ?? card.kind
   const mdHtml = useMemo(
     () => (kind === 'markdown' && summary !== undefined && summary.head !== '' ? renderMarkdown(balancedFences(summary.head)) : ''),
     [kind, summary],
@@ -178,7 +171,7 @@ export function CardTile(props: CardTileProps) {
     projectId,
     card.id,
     summary?.bytes ?? 0,
-    kind === 'webapp' && summary !== undefined && zoom >= FRAME_ZOOM_MIN,
+    kind === 'app' && summary !== undefined,
   )
 
   const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -230,6 +223,8 @@ export function CardTile(props: CardTileProps) {
 
   const className = ['dsh-canvas-card']
   if (selected) className.push('is-selected')
+  // 碰撞高亮与选中是两回事：一个说「线会结到我身上」，一个说「面板跟着我」。
+  if (linkOver) className.push('is-link-over')
   if (state === 'missing') className.push('is-absent')
   // 会话 running = 这张卡片正在产出内容，卡面亮起流光（见 styles.ts 的 is-working）。
   // 不另设本地的「已发送」标志：会话状态就是唯一真源，光在扫与模型在跑始终同义。
@@ -293,8 +288,8 @@ export function CardTile(props: CardTileProps) {
         ) : kind === 'design' && designShot !== undefined ? (
           // 设计卡片：场景图离屏渲染成的截图。
           <img className="dsh-canvas-card-shot" src={designShot} alt="" draggable={false} />
-        ) : kind === 'webapp' && frameHtml !== undefined ? (
-          // 应用卡片：跑起来的入口页缩比帧（zoom 低于阈值时不装帧，退回大纲行）。
+        ) : kind === 'app' && frameHtml !== undefined ? (
+          // 应用卡片：跑起来的入口页缩比帧——真帧而非截图，shadow root 里的内容都在。
           <FramePreview html={frameHtml} title={card.name} />
         ) : (
           lines.map((line, index) => (

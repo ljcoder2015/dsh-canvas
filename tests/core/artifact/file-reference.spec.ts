@@ -84,7 +84,7 @@ describe('nameFileReferences', () => {
   })
 
   it('names a directory with its trailing slash', () => {
-    const named = nameFileReferences([target({ cardId: 'site', path: 'site', directory: true, kind: 'site', kindLabel: '站点' })])
+    const named = nameFileReferences([target({ cardId: 'site', path: 'site', directory: true, kind: 'app', kindLabel: '应用' })])
     expect(named.references[0]?.mention).toBe('@site/')
   })
 

@@ -10,7 +10,7 @@
  * - **应用卡**：入口页的 HTML（host 已内联本地样式与脚本）装进卡片上的迷你 iframe
  *   跑起来。它不是死的截图而是活的缩比页面：脚手架的 web components 在 shadow root
  *   里渲染，任何「序列化 DOM 再转图片」的方案都会把它们拍成空壳，真帧不会。帧不接
- *   指针、不进 Tab 序；缩放低于阈值时整帧卸载（阈值由调用方的 zoom 闸决定）。
+ *   指针、不进 Tab 序；座法与入口解析见 `webAppHtml`。
  *
  * 两类素材都按 `bytes` 缓存——bytes 是「文件被重写过」最便宜的凭证（updatedAt 每次
  * 重读都会变，当不了缓存键）。请求单飞、容量有界：应用页的 HTML 最多到
@@ -86,14 +86,29 @@ function designShot(bridge: CanvasBridge, projectId: string, cardId: string, byt
   )
 }
 
-/** 应用入口页的内联 HTML（host 已注入链接闸与选择探针，探针默认是死的）；失败归一成 `undefined`。 */
+/**
+ * 应用入口页的内联 HTML（host 已注入链接闸与选择探针，探针默认是死的）；失败归一成 `undefined`。
+ *
+ * 应用卡有两种座法：坐在 `<folder>/index.html` 入口文件上（scaffold 盖的章），
+ * 或坐在文件夹本身上。后者 `readArtifact` 读目录必然失败，所以按候选依次试——
+ * 卡片 id 本身先试，不是入口文件就再试 `<id>/index.html`；哪种座法都收敛到
+ * 同一个入口页（host 对入口文件的相对引用，恰好按所属文件夹内联）。
+ */
 function webAppHtml(bridge: CanvasBridge, projectId: string, cardId: string, bytes: number): Promise<string | undefined> {
-  return cachedFetch(frames, `${projectId}/${cardId}@${bytes}`, FRAME_CACHE_MAX, () =>
-    bridge
-      .readArtifact(projectId, cardId)
-      .then((view) => (view.present && view.text !== '' ? view.text : undefined))
-      .catch(() => undefined),
-  )
+  return cachedFetch(frames, `${projectId}/${cardId}@${bytes}`, FRAME_CACHE_MAX, async () => {
+    const candidates = /\/index\.html?$/.test(cardId)
+      ? [cardId]
+      : [cardId, `${cardId.replace(/\/+$/, '')}/index.html`]
+    for (const id of candidates) {
+      try {
+        const view = await bridge.readArtifact(projectId, id)
+        if (view.present && view.text !== '') return view.text
+      } catch {
+        // 目录座法的第一候选会在这里失败——换下一个候选，不声张。
+      }
+    }
+    return undefined
+  })
 }
 
 /** 设计卡截图的读取 hook；`enabled` 为假时不发起任何请求。 */
@@ -118,7 +133,7 @@ export function useDesignShot(
   return shot
 }
 
-/** 应用卡内联 HTML 的读取 hook；同样的 `enabled` 闸（调用方拿 zoom 当阈值）。 */
+/** 应用卡内联 HTML 的读取 hook。目录座法的 `bytes` 是 0（probe 不数目录），这里不拿它当闸。 */
 export function useWebAppHtml(
   bridge: CanvasBridge,
   projectId: string,
@@ -128,7 +143,7 @@ export function useWebAppHtml(
 ): string | undefined {
   const [html, setHtml] = useState<string | undefined>(undefined)
   useEffect(() => {
-    if (!enabled || bytes <= 0) return
+    if (!enabled) return
     let cancelled = false
     void webAppHtml(bridge, projectId, cardId, bytes).then((text) => {
       if (!cancelled) setHtml(text)

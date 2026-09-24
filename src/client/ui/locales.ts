@@ -37,7 +37,7 @@ export const zh = {
   'canvas.dock.add': '新增卡片',
   'canvas.dock.keys': '快捷键',
   'canvas.dock.text': '文本',
-  'canvas.dock.webapp': '应用',
+  'canvas.dock.app': '应用',
   'canvas.dock.design': '设计',
 
   // 引用线拖到空白处放手时弹出的「新增节点」（F4.8）
@@ -260,7 +260,7 @@ export const en = {
   'canvas.dock.add': 'New card',
   'canvas.dock.keys': 'Shortcuts',
   'canvas.dock.text': 'Text',
-  'canvas.dock.webapp': 'Web app',
+  'canvas.dock.app': 'Web app',
   'canvas.dock.design': 'Design',
 
   // The "new node" popup a source-edge drag opens when it is let go on empty space (F4.8)

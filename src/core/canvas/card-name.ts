@@ -17,10 +17,10 @@
  *
  * 三条判据：
  *
- * 1. **改的是「产物自己那一项」。** 文件形态改文件、目录形态改目录：`webapp` /
- *    `site` 的产物是「一个目录带 `index.html`」，所以改的是那个**目录**，入口页
- *    跟着走（`myapp/index.html` → `市场分析/index.html`）；`folder` 的产物就是目录
- *    本身；其余形态改文件，**扩展名留着**（改的是名字，不是形态）。
+ * 1. **改的是「产物自己那一项」。** 文件形态改文件、目录形态改目录：判据是**路径
+ *    形态**（入口页固定叫 `index.html`，见 {@link isEntryPage}）——目录形态的产物
+ *    改的是那个**目录**，入口页跟着走（`myapp/index.html` → `市场分析/index.html`）；
+ *    `folder` 的产物就是目录本身；其余形态改文件，**扩展名留着**（改的是名字，不是形态）。
  * 2. **画布根目录不归卡片管。** 产物就落在项目根上时（根上的 `index.html`、
  *    根名本身）没有可改的那一项：改了就等于改画布目录，交给画布自己那条路。
  * 3. **名字里不出现路径。** 用户输入先过一遍 {@link fileStemOf}：控制字符与
@@ -30,14 +30,14 @@
  */
 
 /**
- * The kinds whose artifact is a directory *entry page*: `file` names a file inside
- * the app's own folder, and the thing a name change renames is that folder.
- *
- * Detected by kind rather than by path shape because the kind is the fact the
- * board already resolved from file evidence — a card whose entry page sits at
- * the project root is the same kind and takes the refusal below.
+ * 产物是不是「一个目录的入口页」：scaffold 的约定是入口页固定叫 `index.html`，
+ * 所以判据看**路径形态**而不是 kind——归并后 `app` 既盖得住单文件页面
+ * （`deck.html`，改名改文件），也盖得住目录应用（`myapp/index.html`，改名改目录），
+ * kind 已经分不出这两种形态，路径分得清。
  */
-export const ENTRY_DIRECTORY_KINDS: readonly string[] = ['webapp', 'site']
+function isEntryPage(file: string): boolean {
+  return basenameOf(file).toLowerCase() === 'index.html'
+}
 
 /** Longest name this module keeps, in characters. */
 const NAME_LIMIT = 60
@@ -108,7 +108,7 @@ export function cardNameOf(input: { file: string; kind: string; name?: string | 
   const stored = input.name?.trim() ?? ''
   if (stored !== '') return stored
   const base = basenameOf(input.file)
-  if (!ENTRY_DIRECTORY_KINDS.includes(input.kind)) return stemOf(base)
+  if (!isEntryPage(input.file)) return stemOf(base)
   const folder = dirnameOf(input.file)
   // A root-level entry page has no folder of its own to borrow a name from.
   return folder === '' ? stemOf(base) : basenameOf(folder)
@@ -177,7 +177,7 @@ export function planRename(input: { file: string; kind: string; name: string; su
   const suffix = input.suffix ?? 1
   const entry = suffix > 1 ? `${stem}-${suffix}` : stem
 
-  if (ENTRY_DIRECTORY_KINDS.includes(input.kind)) {
+  if (isEntryPage(input.file)) {
     const folder = dirnameOf(input.file)
     if (folder === '') return { kind: 'refused', reason: 'root-entry' }
     const parent = dirnameOf(folder)

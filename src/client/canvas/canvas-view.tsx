@@ -126,7 +126,7 @@ interface DockSpec {
 /** The dock's creation options, in menu order. */
 const DOCK_SPECS: readonly DockSpec[] = [
   { label: 'canvas.dock.text', extension: 'md', kind: 'markdown', seed: (name) => `# ${name}\n` },
-  { label: 'canvas.dock.webapp', extension: 'webapp', kind: 'webapp', webapp: true },
+  { label: 'canvas.dock.app', extension: 'app', kind: 'app', webapp: true },
   { label: 'canvas.dock.design', extension: 'design', kind: 'design', design: true },
 ]
 
@@ -303,6 +303,8 @@ export function CanvasBoard(props: CanvasBoardProps) {
   const [view, setView] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const [dragging, setDragging] = useState<{ cardId: string; position: Point } | undefined>()
   const [linkFrom, setLinkFrom] = useState<{ cardId: string; side: 'in' | 'out' } | undefined>()
+  // 连线拖拽悬停在哪张卡上：碰撞高亮与「放手即关联」的判据都来自它。
+  const [linkOver, setLinkOver] = useState<string | undefined>()
   /** 引用线拖到空白处放手后开着的那张「新增节点」；undefined = 没在等落笔。 */
   const [dropNode, setDropNode] = useState<DropNode | undefined>()
   const [pointer, setPointer] = useState<Point>({ x: 0, y: 0 })
@@ -580,12 +582,21 @@ export function CanvasBoard(props: CanvasBoardProps) {
 
   // 拖拽中的那条线：手还按着时跟着指针走，放空之后由「新增节点」弹窗接管——弹窗
   // 开着的那段时间线照旧钉在放手点上，好让人看见这一笔将连到哪里。
-  const pending: PendingEdge | undefined =
-    linkFrom !== undefined
-      ? { cardId: linkFrom.cardId, side: linkFrom.side, at: pointer }
-      : dropNode === undefined
-        ? undefined
-        : { cardId: dropNode.cardId, side: dropNode.side, at: dropNode.at }
+  const pending: PendingEdge | undefined = (() => {
+    if (linkFrom === undefined) {
+      return dropNode === undefined ? undefined : { cardId: dropNode.cardId, side: dropNode.side, at: dropNode.at }
+    }
+    // 悬停在目标卡上时，线头吸到卡心：高亮的矩形与线的落点说的是同一句话。
+    const over =
+      linkOver !== undefined && linkOver !== linkFrom.cardId
+        ? cards.find((card) => card.id === linkOver)
+        : undefined
+    return {
+      cardId: linkFrom.cardId,
+      side: linkFrom.side,
+      at: over === undefined ? pointer : { x: over.position.x + CARD_W / 2, y: over.position.y + CARD_H / 2 },
+    }
+  })()
 
   /**
    * 点别处 = 取消这一笔。
@@ -613,6 +624,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
       const surface = surfaceRef.current
       if (surface !== null && event.target instanceof Node && surface.contains(event.target)) return
       setLinkFrom(undefined)
+      setLinkOver(undefined)
     }
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
@@ -677,6 +689,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
     (cardId: string) => {
       const from = linkFrom
       setLinkFrom(undefined)
+      setLinkOver(undefined)
       if (from === undefined || projectId === '' || from.cardId === cardId) return
       // The port the drag started from names which end of the edge it is: `out`
       // means the start card supplies material, `in` means it consumes.
@@ -966,6 +979,26 @@ export function CanvasBoard(props: CanvasBoardProps) {
     [clientToCanvas],
   )
 
+  /** 连线拖拽的碰撞检测：落点在哪张卡的矩形里，就高亮它、也把线结给它。 */
+  const cardAt = useCallback(
+    (at: Point): string | undefined => {
+      // 画布按数组序叠放，后画的在上层；重叠时认最上面那张。
+      for (let index = cards.length - 1; index >= 0; index -= 1) {
+        const card = cards[index]
+        if (
+          at.x >= card.position.x &&
+          at.x <= card.position.x + CARD_W &&
+          at.y >= card.position.y &&
+          at.y <= card.position.y + CARD_H
+        ) {
+          return card.id
+        }
+      }
+      return undefined
+    },
+    [cards],
+  )
+
   /**
    * 放手点，以及弹层该往哪一侧张开。
    *
@@ -1020,7 +1053,9 @@ export function CanvasBoard(props: CanvasBoardProps) {
 
   const surfacePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (linkFrom !== undefined) {
-      setPointer(pointerToCanvas(event))
+      const at = pointerToCanvas(event)
+      setPointer(at)
+      setLinkOver(cardAt(at))
       return
     }
     const pan = panRef.current
@@ -1033,14 +1068,25 @@ export function CanvasBoard(props: CanvasBoardProps) {
   }
 
   /**
-   * 放空在画布上：就地弹出「新增节点」，让这一笔有个着落。
+   * 放手：落在卡片身上就地结关联，落在空白处才弹「新增节点」。
    *
    * 落在别的卡片端口上不算放空——端口自己的 `pointerup` 会先认领（`finishLink`），
-   * 冒泡到这里的已经是一次已完成的连线。剩下的落点（空白、卡片身上、便签上）都
-   * 走弹窗：从这里建一张新卡片并把线连上，或者点别处把这一笔抹掉。
+   * 冒泡到这里的已经是一次已完成的连线。落在卡片**身上**同样不弹窗：碰撞高亮过的
+   * 那张卡就是这一笔的去处（落回起点卡视同取消）；「从这里建一张新卡片」只留给
+   * 空白落点。`pointercancel` 是系统打断了手势，既不结线也不弹窗，直接作废。
    */
   const surfacePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (linkFrom !== undefined) {
+      setLinkOver(undefined)
+      if (event.type === 'pointercancel') {
+        setLinkFrom(undefined)
+        return
+      }
+      const hit = cardAt(pointerToCanvas(event))
+      if (hit !== undefined) {
+        if (hit !== linkFrom.cardId) finishLink(hit)
+        return
+      }
       setDropNode({ ...linkFrom, ...dropPlacement(event) })
       setLinkFrom(undefined)
       return
@@ -1346,6 +1392,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 bridge={bridge}
                 selected={selected === card.id}
                 connecting={linkFrom?.side}
+                linkOver={linkOver === card.id}
                 zoom={view.zoom}
                 t={t}
                 onSelect={setSelected}
@@ -1714,7 +1761,7 @@ function DockIcon({ extension }: { extension: string }) {
     strokeLinejoin: 'round' as const,
     'aria-hidden': true,
   }
-  if (extension === 'webapp') {
+  if (extension === 'app') {
     // 应用：一个窗口里拼着组件方块——web 组件拼装成的应用，不是单页文档。
     return (
       <svg {...shared}>

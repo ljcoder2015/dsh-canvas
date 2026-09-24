@@ -57,7 +57,7 @@ function summary(kind: string): CardSummary {
 
 describe('node-type model memory', () => {
   it('files a card under its recognized kind, falling back to the seated one', () => {
-    expect(nodeTypeOf(card('markdown'), summary('html-deck'))).toBe('html-deck')
+    expect(nodeTypeOf(card('markdown'), summary('app'))).toBe('app')
     expect(nodeTypeOf(card('markdown'), undefined)).toBe('markdown')
     // A digest whose kind came back empty must not blank the key.
     expect(nodeTypeOf(card('image'), summary(''))).toBe('image')

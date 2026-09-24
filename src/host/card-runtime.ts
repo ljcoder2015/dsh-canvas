@@ -199,7 +199,7 @@ export class CardRuntime extends TypertRemoteService {
    *
    * 名字有两处：**记录上的 `name`**（用户自己起的，与产物推出来的默认名不一致时才写）
    * 与**磁盘上那一项**（文件的改文件、目录的改目录——判据在 `core/canvas/card-name.ts`：
-   * 应用与站点的产物是「一个目录带 index.html」，所以改的是那个目录，入口页跟着搬）。
+   * 应用（app）的产物是「一个目录带 index.html」，所以改的是那个目录，入口页跟着搬）。
    *
    * 三条次序上的规矩：
    *
@@ -387,7 +387,7 @@ export class CardRuntime extends TypertRemoteService {
       folder = `${base}-${n}`
     }
     await this.deps.io.writeScaffold(project.root, folder, name, signal)
-    return this.createCard(projectId, `${folder}/index.html`, 'webapp', position, signal)
+    return this.createCard(projectId, `${folder}/index.html`, 'app', position, signal)
   }
 
   /**

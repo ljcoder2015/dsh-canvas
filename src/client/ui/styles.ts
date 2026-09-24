@@ -138,6 +138,7 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-surface.is-space .dsh-canvas-promptbox-field{cursor:grab}
 .dsh-canvas-surface.is-panning,.dsh-canvas-surface.is-panning .dsh-canvas-card{cursor:grabbing}
 .dsh-canvas-surface.is-linking{cursor:crosshair}
+.dsh-canvas-surface.is-linking .dsh-canvas-card{cursor:crosshair}
 .dsh-canvas-layer{position:absolute;left:0;top:0;transform-origin:0 0}
 
 /* ── card ───────────────────────────────────────────────────────────────── */
@@ -157,6 +158,9 @@ body[data-ds-dark-theme] .dsh-canvas-root{
   transition:border-color .12s ease,background .12s ease}
 .dsh-canvas-card:hover{border-color:var(--dsh-mid)}
 .dsh-canvas-card.is-selected{background:var(--dsh-soft);border-color:var(--dsh-mid)}
+/* 连线拖拽的碰撞高亮：指针落进哪张卡，哪张卡亮起 breeze 色的边与光晕——
+   放手就在它身上结关联，而不是弹「新增节点」。与 is-selected 的静音灰刻意不同。 */
+.dsh-canvas-card.is-link-over{border-color:var(--dsh-breeze);box-shadow:0 0 0 3px var(--dsh-hl-edge)}
 .dsh-canvas-card.is-absent .dsh-canvas-card-preview{opacity:.35}
 /* 生成中（会话 running）：整张卡片亮起**流光**——一道斜切 25° 的光带从左扫到右，
    1.8s 一趟，不停顿。名字与预览照常显示（陈旧不等于假：卡上留着的是最近一次真正
@@ -206,10 +210,8 @@ body[data-ds-dark-theme] .dsh-canvas-root{
    卡面（负边距抵掉 10px 左右与 8px 底），下缘的两只圆角继承卡片的内圆角变量。 */
 .dsh-canvas-card-shot{display:block;width:calc(100% + 20px);margin:0 -10px -8px;
   border-bottom-left-radius:var(--dsh-card-inner-r);border-bottom-right-radius:var(--dsh-card-inner-r);background:var(--dsh-card)}
-.dsh-canvas-card-frame{width:calc(100% + 20px);height:calc(100% + 8px);margin:0 -10px -8px;overflow:hidden;
-  border-bottom-left-radius:var(--dsh-card-inner-r);border-bottom-right-radius:var(--dsh-card-inner-r);
-  opacity:0;transition:opacity .25s ease}
-.dsh-canvas-card-frame.is-loaded{opacity:1}
+.dsh-canvas-card-frame{width:calc(100% + 20px);height:calc(100% + 8px);margin:0 -10px -8px;overflow:hidden;background:var(--dsh-card);
+  border-bottom-left-radius:var(--dsh-card-inner-r);border-bottom-right-radius:var(--dsh-card-inner-r)}
 /* 帧按 2x 视口渲染再缩回 0.5：页面以两倍尺寸排版，缩下后文字仍然锐——这正是截图的清晰度。 */
 .dsh-canvas-card-frame iframe{display:block;width:200%;height:200%;border:0;pointer-events:none;
   transform:scale(.5);transform-origin:0 0}

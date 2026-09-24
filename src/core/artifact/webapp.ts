@@ -1,5 +1,5 @@
 /**
- * dsh-canvas — the webapp scaffold, and the preview inlining every HTML kind shares (应用节点).
+ * dsh-canvas — the webapp scaffold, and the preview inlining HTML pages share (应用节点).
  *
  * A webapp card is a *directory*: a manifest (`dsh.webapp.json`), an entry
  * `index.html`, and the app's own source beside it — web components for the
@@ -27,9 +27,9 @@
  * application — the one outcome a preview must never have. So the page also
  * leaves here with a guard that owns its clicks.
  *
- * That inlining is not webapp-specific: every kind in `HTML_KINDS` — a deck, a
- * site entry, an app entry — previews as one `srcDoc` and loses its local
- * styles without it. This module owns the *mechanism*; the kind list lives in
+ * The inlining serves every kind in `HTML_KINDS` (exactly one: `app` — a single
+ * page or an app entry previews as the same `srcDoc` and loses its local
+ * styles without it). This module owns the *mechanism*; the kind list lives in
  * `kind-registry.ts`, so the preview's kind table and the host's inlining gate
  * read the same source.
  */
@@ -322,8 +322,8 @@ input.addEventListener('wc-submit', () => addTask(input.value ?? ''))
  * The webapp scaffold: the manifest, the entry page, the tokens, the components.
  *
  * Four files, in write order. The manifest is written first so a crash mid-
- * scaffold still leaves kind evidence behind (the folder reads as a webapp,
- * not as a half-built site); `title` feeds the page heading and the manifest's
+ * scaffold still leaves kind evidence behind (the folder reads as an app,
+ * not as a half-built folder); `title` feeds the page heading and the manifest's
  * `name`.
  *
  * @param title - the app's display name; may be any text, it lands in HTML and JSON.

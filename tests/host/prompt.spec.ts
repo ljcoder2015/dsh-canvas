@@ -82,7 +82,7 @@ describe('renderMaterial', () => {
   })
 
   it('keeps one entry per digest, in the order given', () => {
-    const text = renderMaterial([digest(), digest({ cardId: 'deck.html', kind: 'html-deck' })])
+    const text = renderMaterial([digest(), digest({ cardId: 'deck.html', kind: 'app' })])
     expect(text.match(/^- \*\*/gm)).toHaveLength(2)
     expect(text.indexOf('brief.md')).toBeLessThan(text.indexOf('deck.html'))
   })

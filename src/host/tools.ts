@@ -479,12 +479,12 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.createOnBoard,
       description:
-        '在画布上创建内容：type=note 创建共享便利贴（决策记录），type=card 把项目内的一个产物落成卡片，type=webapp 新建一个应用节点——建文件夹并写入 web components + shadcn 风格的 web 应用脚手架，type=design 新建一个设计节点——写入含空白画板的场景图设计文档（.design v2）。',
+        '在画布上创建内容：type=note 创建共享便利贴（决策记录），type=card 把项目内的一个产物落成卡片，type=app 新建一个应用节点——建文件夹并写入 web components + shadcn 风格的 web 应用脚手架，type=design 新建一个设计节点——写入含空白画板的场景图设计文档（.design v2）。',
       parameters: {
-        type: { type: 'string', enum: ['note', 'card', 'webapp', 'design'], description: '创建类型', required: true },
+        type: { type: 'string', enum: ['note', 'card', 'app', 'design'], description: '创建类型', required: true },
         content: {
           type: 'string',
-          description: 'note 为便利贴文字；card 为产物文件的项目内相对路径（卡片 id 与卡片名由画布铸出并在返回值里给出）；webapp / design 为显示名（落盘名字由它生成）',
+          description: 'note 为便利贴文字；card 为产物文件的项目内相对路径（卡片 id 与卡片名由画布铸出并在返回值里给出）；app / design 为显示名（落盘名字由它生成）',
           required: true,
         },
         kind: { type: 'string', description: 'type=card 时的形态 id；省略则按文件证据认定' },
@@ -501,7 +501,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
           const created = value as { type: string; id: string; name?: string; file?: string }
           const named = created.name === undefined ? '' : `「${created.name}」`
           if (created.type === 'note') return text(`已创建便利贴 ${created.id}。`)
-          if (created.type === 'webapp') return text(`已创建应用${named}（id ${created.id}，入口 index.html，文件夹内含脚手架）。`)
+          if (created.type === 'app') return text(`已创建应用${named}（id ${created.id}，入口 index.html，文件夹内含脚手架）。`)
           if (created.type === 'design') return text(`已创建设计${named}（id ${created.id}，.design，含空白画板）。`)
           return text(`已创建卡片${named}（id ${created.id}，文件 ${created.file ?? ''}）。`)
         },
@@ -519,14 +519,14 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
           )
           return { type: 'note', id: note.id }
         }
-        if (args.type === 'webapp') {
+        if (args.type === 'app') {
           const card = await deps.card.scaffoldWebapp(
             projectId,
             String(args.content),
             { x: x ?? 48, y: y ?? 170 },
             exec.signal,
           )
-          return { type: 'webapp', id: card.id, name: card.name }
+          return { type: 'app', id: card.id, name: card.name }
         }
         if (args.type === 'design') {
           const card = await deps.card.scaffoldDesign(

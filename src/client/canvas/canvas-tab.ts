@@ -36,7 +36,7 @@ export const WORKBENCH_KIND = 'canvas'
 export const KIND_TAB_PREFIX = 'dsh-canvas:kind:'
 
 /** Kinds whose addresses the canvas will claim. */
-const CLAIMABLE = new Set(['html-deck', 'site', 'markdown', 'image', 'video', 'data'])
+const CLAIMABLE = new Set(['app', 'markdown', 'image', 'video', 'data'])
 
 /** The kinds this package claims addresses for. */
 function claimedKinds(): readonly KindDefinition[] {
