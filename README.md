@@ -3,7 +3,7 @@
 
 跑在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 上的**通用创作画布插件**：把一个项目铺成一张无限画布，通过创建不同的卡片类型，来配合完成大型复杂的任务，比如产品设计、应用开发等。同时，通过连线**引用**，基于已有的卡片，进行多方向的探索创作，比如基于同一份产品文档，生成多种风格的设计稿，更好保留你的探索过程。
 
-[▶ 功能速览](docs/Dsh_Canvas_Tutorial.mp4)
+![功能速览](docs/Dsh_Canvas_Tutorial.mp4)
 
 ---
 
