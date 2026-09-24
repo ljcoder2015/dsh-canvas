@@ -1,8 +1,8 @@
 /**
  * dsh-canvas — durable canvas state.
  *
- * Source edges are deliberately *not* kept in the file system: "取材数据独立于
- * 文件系统" (§2.4). They live in a storage domain so the deployment's backend
+ * Source edges are deliberately *not* kept in the file system: "引用数据独立于产物文件"
+ * (§2.4). They live in a storage domain so the deployment's backend
  * routing, record versioning, serialized write chain and `domain/changed`
  * notifications all apply, and the plugin never grows its own metadata file.
  *
@@ -68,6 +68,14 @@ const cardRecord = z.object({
    * behavior, so no migration is needed. New records always carry it.
    */
   file: z.string().optional(),
+  /**
+   * The card's own name (F1.12), when the user gave it one the artifact's own
+   * path does not already say. Optional for the same reason `file` is: records
+   * written before this field existed read as "name it after its artifact",
+   * which is exactly what they showed. `core/canvas/card-name.ts` owns the
+   * derivation and the rule that a name equal to it is not stored at all.
+   */
+  name: z.string().optional(),
 })
 
 /** One source edge: `downstream` builds on `upstream` (F4.1, F4.3). */

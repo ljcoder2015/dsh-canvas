@@ -5,10 +5,16 @@
  * checked literally: identity, path and structure lead, the body is indented
  * under them, and a card that sources from nothing contributes no heading at
  * all rather than an empty section.
+ *
+ * `installCardScope` is checked on what it actually hands the model: the
+ * design card's preset (F3.16) and the rules it must carry (v1.55 — one page
+ * is one continuous artboard, no per-screen split) — asserted through the
+ * section it installs rather than on the module's private strings.
  */
 import { describe, expect, it } from 'vitest'
-import { renderMaterial, userPromptMessage } from '../../src/host/prompt.ts'
-import type { CardSummary } from '../../src/types.ts'
+import type { Context } from '@deepseek-ai/cordis'
+import { installCardScope, renderMaterial, userPromptMessage } from '../../src/host/prompt.ts'
+import type { CardSummary, Project } from '../../src/types.ts'
 
 /** One digest, with only the fields under test spelled out. */
 const digest = (over: Partial<CardSummary> = {}): CardSummary => ({
@@ -17,10 +23,41 @@ const digest = (over: Partial<CardSummary> = {}): CardSummary => ({
   path: '/proj/brief.md',
   summary: 'A short brief.',
   outline: ['Goal', 'Audience'],
+  head: '',
   bytes: 16,
   updatedAt: 0,
   ...over,
 })
+
+const project: Project = {
+  id: 'p',
+  name: 'demo',
+  root: '/proj',
+  viewport: { x: 0, y: 0, zoom: 1 },
+  style: { tone: '', font: '', palette: [] },
+  createdAt: 0,
+}
+
+/** Run one card's `installCardScope` against a stub context, return its text. */
+function sectionTextOf(kind: string): string {
+  const sections: string[] = []
+  const agentCtx = {
+    systemPrompt: {
+      section: (entry: { text: string }) => sections.push(entry.text),
+      variable: () => undefined,
+      context: () => undefined,
+    },
+  } as unknown as Context
+  installCardScope(agentCtx, {
+    project,
+    cardId: 'abcdef',
+    file: '文本1.md',
+    kind,
+    kindLabel: '文本',
+    material: () => '',
+  })
+  return sections.join('\n')
+}
 
 describe('renderMaterial', () => {
   it('contributes nothing when the card sources from nothing', () => {
@@ -61,5 +98,27 @@ describe('userPromptMessage', () => {
   it('carries the prompt as its single text block', () => {
     const message = userPromptMessage('按 brief 生成 deck')
     expect(message.content).toEqual([{ type: 'text', text: '按 brief 生成 deck' }])
+  })
+})
+
+describe('设计卡的预设（F3.16 / v1.55）', () => {
+  it('设计卡带画板尺寸与「一页一块画板」的规矩', () => {
+    const text = sectionTextOf('design')
+    expect(text).toContain('design** card')
+    expect(text).toContain('height follow the content')
+    expect(text).toContain('Do not split one page into per-screen boards')
+    // 网页 / 应用的高度按内容给，菜单里的固定值只是**宽度**与「整块给出」的稿件尺寸。
+    expect(text).toContain('手机屏 375 宽')
+    expect(text).toContain('海报 1242×1660')
+  })
+
+  it('菜单里不再给出「一屏高」的网页稿（那正是分屏的由来）', () => {
+    expect(sectionTextOf('design')).not.toContain('官网首屏 1440×900')
+  })
+
+  it('非设计卡不带这套画板规矩', () => {
+    const text = sectionTextOf('markdown')
+    expect(text).not.toContain('artboard')
+    expect(text).not.toContain('No pagination')
   })
 })

@@ -149,17 +149,29 @@ export interface PromptReference {
   /** 标记类：归一化到 0–999 的点与框。 */
   readonly point?: readonly [number, number]
   readonly bbox?: readonly [number, number, number, number]
+  /**
+   * 悬停时给出的那一行说明（调用方给得出才有）。
+   *
+   * 元素类靠它把被折进去的定位交代清楚——一枚标签把那几十行原文收成一行字，人总得有个
+   * 地方确认「说的是哪个节点、哪个文件」。没有它时退回路径 / 目标 / 名字。
+   */
+  readonly detail?: string
 }
 
 /**
- * The six reference types, as the document names them.
+ * The reference types, as the document names them.
  *
  * `code` 是本插件的主力（提示词里引一份文件，模型去读它），媒体三类是同一件事换了一副
- * 长相（缩略图 / 类型图标），而 `mark` / `region` 是**图上的坐标**——它的文本形态
+ * 长相（缩略图 / 类型图标），`mark` / `region` 是**图上的坐标**——它的文本形态
  * （{@link markText}）今天还没有入口产生，契约先钉在这里：等图像预览器上有了圈选，
  * 写进提示词的就是这一段。
+ *
+ * `element` 与它们都不同：它指的**不是文件、也不是图上的坐标**，而是「产物里的这个
+ * 节点」（F3.14 的元素选择）。它那串字符是一整段定位提示词（产物、节点、位置、源码），
+ * 由 {@link PromptFold} 折成一枚标签——多模态引用的第四种长相，也是唯一一种**原文由
+ * 调用方生成**的引用。
  */
-export type ReferenceType = 'code' | 'image' | 'video' | 'audio' | 'mark' | 'region'
+export type ReferenceType = 'code' | 'image' | 'video' | 'audio' | 'mark' | 'region' | 'element'
 
 /** Image extensions the board shows as pictures rather than text. */
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'svg'])
@@ -207,6 +219,31 @@ export interface ReferenceFacts {
 export type PromptAtom =
   | { kind: 'text'; text: string }
   | { kind: 'ref'; reference: PromptReference }
+
+/**
+ * 值里的一段**已知原文**：调用方说「这 N 个字符是一枚引用」。
+ *
+ * `@文件` 记号是输入面**自己认出来**的（语法就写在字符里）。但有些引用不是那种形态——
+ * 元素选择把「产物 + 节点 + 位置 + 源码」一整段定位写进提示词（F3.14），那是几十行原文，
+ * 没有任何记号语法能表达它。而调用方**知道**那一段的确切位置与长度（它就是自己刚写进去
+ * 的），所以由调用方声明「这一段是一枚引用」，输入面照着画一枚标签。
+ *
+ * 两处刻意的设计：
+ *
+ * - `at` 是**绝对**偏移。相对长度（「从上一枚之后数」）省不了几个字符，却要多一次累加，
+ *   而累加错一位就会把不相干的字符折进去。今天只有一枚（在 0），多枚也只是排个序。
+ * - **`reference.id` 不作数**，输入面一律拿 `text` 上那一段原文当自己的 token（见
+ *   {@link promptAtoms}）。于是「标签写出去的是它自己那串字符」这条不变量在折叠这条路上
+ *   是**结构性**成立的，不靠调用方守规矩。
+ */
+export interface PromptFold {
+  /** 从值的开头数，这段原文排第几个字符起。 */
+  readonly at: number
+  /** 折进去几个字符。 */
+  readonly length: number
+  /** 这一段该画成什么样（类型、名字、tooltip）。它的 `id` 会被原文覆盖。 */
+  readonly reference: PromptReference
+}
 
 /** 归一化坐标的上界：0–999 是图像那套约定（{@link markText} 写出去的就是这个刻度）。 */
 export const COORDINATE_SPAN = 999
@@ -297,11 +334,45 @@ function readMark(
 /**
  * Split a prompt into the atoms the input surface draws.
  *
+ * 两条路合起来读一段文本：**折叠**（调用方声明的那几段，直接成原子）与**记号**（字符
+ * 里自己写得出来的 `@路径`）。两者不冲突——折叠区间的字符不再过扫描器，扫描器只处理
+ * 它们**之间**的普通文本。
+ *
+ * 折叠那一侧有一条结构性的保证：原子的 token 一律取 `text` 上那一段原文，**不用调用方
+ * 给的 `id`**。于是「标签吐回它自己那串字符」这件事不依赖调用方不出错——哪怕它给的 id
+ * 与原文差着几个字符，往返也照样逐字节成立（`{@link atomsText}` 拼的是我们存下来的那份）。
+ * 区间越界或与前一枚重叠的，按普通文本画：宁可少画一枚标签，也不能把不相干的字符折进去。
+ *
  * @param text - the prompt as written.
  * @param facts - what the caller knows about particular paths (thumbnail, lines, mark).
+ * @param folds - stretches of text the caller already knows are references.
  * @returns the atoms, in order; {@link atomsText} of them is `text` again.
  */
 export function promptAtoms(
+  text: string,
+  facts?: Readonly<Record<string, ReferenceFacts>>,
+  folds?: readonly PromptFold[],
+): PromptAtom[] {
+  const atoms: PromptAtom[] = []
+  let cursor = 0
+  for (const fold of [...(folds ?? [])].sort((left, right) => left.at - right.at)) {
+    const end = fold.at + fold.length
+    if (fold.length <= 0 || fold.at < cursor || end > text.length) continue
+    atoms.push(...plainAtoms(text.slice(cursor, fold.at), facts))
+    atoms.push({ kind: 'ref', reference: { ...fold.reference, id: text.slice(fold.at, end) } })
+    cursor = end
+  }
+  atoms.push(...plainAtoms(text.slice(cursor), facts))
+  return atoms
+}
+
+/**
+ * 一段**没有折叠**过的文本能认出的原子：`@记号`，以及紧跟其后的坐标标签。
+ *
+ * @param text - plain prompt text.
+ * @param facts - what the caller knows about particular paths.
+ */
+function plainAtoms(
   text: string,
   facts?: Readonly<Record<string, ReferenceFacts>>,
 ): PromptAtom[] {

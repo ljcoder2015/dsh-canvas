@@ -45,6 +45,8 @@ const SUMMARY_PROPERTIES = {
   path: { type: 'string' },
   summary: { type: 'string' },
   outline: { type: 'array', items: { type: 'string' } },
+  // 卡片预览用的原文头部（markdown 专有）；renderSummary 不渲染它，模型看不见。
+  head: { type: 'string' },
   bytes: { type: 'number' },
   updatedAt: { type: 'number' },
 } as const
@@ -161,13 +163,13 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.readSources,
       description:
-        '读取当前卡片取材来源（直接上游产物）的摘要。取材只取上一级：这里不会带回上游的上游，那部分材料应由上游产物自己消化。改动产物前先调用它，避免与上游脱节。',
+        '读取当前卡片引用来源（直接上游产物）的摘要。引用只取上一级：这里不会带回上游的上游，那部分材料应由上游产物自己消化。改动产物前先调用它，避免与上游脱节。',
       parameters: {},
       output: {
         schema: { type: 'array', items: { type: 'object', properties: SUMMARY_PROPERTIES, additionalProperties: false } },
         render: (_args, value) => {
           const list = value as CardSummary[]
-          if (list.length === 0) return text('这张卡片目前没有取材来源。')
+          if (list.length === 0) return text('这张卡片目前没有引用来源。')
           return text(list.map(renderSummary).join('\n\n'))
         },
       },
@@ -183,7 +185,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.linkSource,
       description:
-        '声明当前卡片的产物取材于另一张卡片（建立一条「取材」边：素材 → 产物）。当你的产物确实使用了另一张卡片的产物时调用。',
+        '声明当前卡片的产物引用另一张卡片（建立一条「引用」边：素材 → 产物）。当你的产物确实使用了另一张卡片的产物时调用。',
       parameters: {
         sourceCardId: { type: 'string', description: '作为素材的上游卡片 id（项目内相对路径）', required: true },
       },
@@ -195,7 +197,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         },
         render: (_args, value) => {
           const edge = value as { upstream: string; downstream: string }
-          return text(`已建立取材关系：${edge.downstream} ← ${edge.upstream}`)
+          return text(`已建立引用关系：${edge.downstream} ← ${edge.upstream}`)
         },
       },
       async execute(args, exec) {
@@ -210,7 +212,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
   ctx.tools.register(
     defineTool({
       name: TOOL_NAMES.getSources,
-      description: '获取当前卡片的取材链：直接上游、间接上游与下游卡片 id。用于判断改动会影响谁、依赖了谁。',
+      description: '获取当前卡片的引用链：直接上游、间接上游与下游卡片 id。用于判断改动会影响谁、依赖了谁。',
       parameters: {},
       output: {
         schema: {
@@ -228,8 +230,8 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
           return text(
             [
               `本卡：${chain.cardId}`,
-              `取材来源（直接）：${chain.direct.join('、') || '无'}`,
-              `取材来源（间接）：${chain.indirect.join('、') || '无'}`,
+              `引用来源（直接）：${chain.direct.join('、') || '无'}`,
+              `引用来源（间接）：${chain.indirect.join('、') || '无'}`,
               `下游产物：${chain.downstream.join('、') || '无'}`,
             ].join('\n'),
           )
@@ -269,7 +271,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.referenceFiles,
       description:
-        '把当前卡片的取材来源（直接上游产物）以「文件引用」交给本会话：注入的是上游产物的 @路径（模型自己用 read 工具按需读取），不是内容副本。只报上一级，不做穿透引用。想知道上游文件在哪、按需取用时用它；想把上游内容摘要直接拿到上下文里，用 canvas_read_sources 或 canvas_inject_card。',
+        '把当前卡片的引用来源（直接上游产物）以「文件引用」交给本会话：注入的是上游产物的 @路径（模型自己用 read 工具按需读取），不是内容副本。只报上一级，不做穿透引用。想知道上游文件在哪、按需取用时用它；想把上游内容摘要直接拿到上下文里，用 canvas_read_sources 或 canvas_inject_card。',
       parameters: {},
       output: {
         schema: {
@@ -299,7 +301,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         render: (_args, value) => {
           const named = value as ReferencedFiles
           if (named.files.length === 0) {
-            return text(named.skipped.length === 0 ? '本卡片没有取材来源，没有可引用的文件。' : '没有可引用的文件（见 skipped）。')
+            return text(named.skipped.length === 0 ? '本卡片没有引用来源，没有可引用的文件。' : '没有可引用的文件（见 skipped）。')
           }
           const lines = [
             `已把 ${named.files.length} 个上游产物以文件引用注入本会话（读取由你决定）：`,
@@ -401,7 +403,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
   ctx.tools.register(
     defineTool({
       name: TOOL_NAMES.readBoard,
-      description: '读取画布当前座次、卡片清单与取材边。用于了解整个项目有哪些产物、它们如何互相取材。',
+      description: '读取画布当前座次、卡片清单与引用边。用于了解整个项目有哪些产物、它们如何互相引用。',
       parameters: {},
       output: {
         schema: {
@@ -420,7 +422,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
             [
               `项目：${board.project}（${board.root}）`,
               `卡片 ${board.cards.length} 张：${board.cards.join('、') || '无'}`,
-              `取材边 ${board.sources.length} 条：${board.sources.join('、') || '无'}`,
+              `引用边 ${board.sources.length} 条：${board.sources.join('、') || '无'}`,
             ].join('\n'),
           )
         },
@@ -430,7 +432,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         return {
           project: board.project.name,
           root: board.project.root,
-          cards: board.cards.map((card) => `${card.id}(${card.kind} → 文件 ${card.file})`),
+          cards: board.cards.map((card) => `${card.id}(${card.kind}「${card.name}」→ 文件 ${card.file})`),
           sources: board.sources.map((source) => `${source.downstream} ← ${source.upstream}`),
         }
       },
@@ -441,7 +443,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.arrangeOnBoard,
       description:
-        '按语义重新摆位画布。strategy=source-chain 沿取材链从左到右分层（素材在左、产物在右）；grid 平铺；organize 把游离卡片归纳到链条下方。只改座次，不改产物。',
+        '按语义重新摆位画布。strategy=source-chain 沿引用链从左到右分层（素材在左、产物在右）；grid 平铺；organize 把游离卡片归纳到链条下方。只改座次，不改产物。',
       parameters: {
         strategy: { type: 'string', enum: ['source-chain', 'grid', 'organize'], description: '摆位策略，默认 source-chain' },
       },
@@ -460,7 +462,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
   ctx.tools.register(
     defineTool({
       name: TOOL_NAMES.organizeBoard,
-      description: '归纳收纳画布：把参与取材链的卡片按链条摆好，把游离卡片打包到下方，让画布重新可读。',
+      description: '归纳收纳画布：把参与引用链的卡片按链条摆好，把游离卡片打包到下方，让画布重新可读。',
       parameters: {},
       output: {
         schema: { type: 'object', properties: { moved: { type: 'number' } }, additionalProperties: false },
@@ -482,7 +484,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
         type: { type: 'string', enum: ['note', 'card', 'webapp', 'design'], description: '创建类型', required: true },
         content: {
           type: 'string',
-          description: 'note 为便利贴文字；card 为产物文件的项目内相对路径（卡片 id 由画布铸出并在返回值里给出）；webapp / design 为显示名（落盘名字由它生成）',
+          description: 'note 为便利贴文字；card 为产物文件的项目内相对路径（卡片 id 与卡片名由画布铸出并在返回值里给出）；webapp / design 为显示名（落盘名字由它生成）',
           required: true,
         },
         kind: { type: 'string', description: 'type=card 时的形态 id；省略则按文件证据认定' },
@@ -492,15 +494,16 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
       output: {
         schema: {
           type: 'object',
-          properties: { type: { type: 'string' }, id: { type: 'string' }, file: { type: 'string' } },
+          properties: { type: { type: 'string' }, id: { type: 'string' }, name: { type: 'string' }, file: { type: 'string' } },
           additionalProperties: false,
         },
         render: (_args, value) => {
-          const created = value as { type: string; id: string; file?: string }
+          const created = value as { type: string; id: string; name?: string; file?: string }
+          const named = created.name === undefined ? '' : `「${created.name}」`
           if (created.type === 'note') return text(`已创建便利贴 ${created.id}。`)
-          if (created.type === 'webapp') return text(`已创建应用 ${created.id}（入口 index.html，文件夹内含脚手架）。`)
-          if (created.type === 'design') return text(`已创建设计 ${created.id}（.design，含空白画板）。`)
-          return text(`已创建卡片 ${created.id}（文件 ${created.file ?? ''}）。`)
+          if (created.type === 'webapp') return text(`已创建应用${named}（id ${created.id}，入口 index.html，文件夹内含脚手架）。`)
+          if (created.type === 'design') return text(`已创建设计${named}（id ${created.id}，.design，含空白画板）。`)
+          return text(`已创建卡片${named}（id ${created.id}，文件 ${created.file ?? ''}）。`)
         },
       },
       async execute(args, exec) {
@@ -523,7 +526,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
             { x: x ?? 48, y: y ?? 170 },
             exec.signal,
           )
-          return { type: 'webapp', id: card.id }
+          return { type: 'webapp', id: card.id, name: card.name }
         }
         if (args.type === 'design') {
           const card = await deps.card.scaffoldDesign(
@@ -532,11 +535,11 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
             { x: x ?? 48, y: y ?? 170 },
             exec.signal,
           )
-          return { type: 'design', id: card.id }
+          return { type: 'design', id: card.id, name: card.name }
         }
         const kind = typeof args.kind === 'string' ? args.kind : 'file'
         const card = await deps.card.createCard(projectId, String(args.content), kind, { x: x ?? 48, y: y ?? 170 }, exec.signal)
-        return { type: 'card', id: card.id, file: card.file }
+        return { type: 'card', id: card.id, name: card.name, file: card.file }
       },
     }),
   )
@@ -544,7 +547,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
   ctx.tools.register(
     defineTool({
       name: TOOL_NAMES.linkSourceOnBoard,
-      description: '在画布上直接画一条取材线：from 是素材（上游），to 是产物（下游）。',
+      description: '在画布上直接画一条引用线：from 是素材（上游），to 是产物（下游）。',
       parameters: {
         from: { type: 'string', description: '上游卡片 id（素材）', required: true },
         to: { type: 'string', description: '下游卡片 id（产物）', required: true },

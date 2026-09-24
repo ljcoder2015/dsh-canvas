@@ -12,12 +12,13 @@
  * 钉住的理由相同——坏掉的时候不报错，只是画错。
  */
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_KINDS, DIRECT_TEXT_KINDS, HTML_KINDS, isDirectTextKind } from '../../../src/core/artifact/kind-registry.ts'
+import { BUILTIN_KINDS, DIRECT_TEXT_KINDS, HTML_KINDS, detectKind, isDirectTextKind } from '../../../src/core/artifact/kind-registry.ts'
 import { VIEW_TEXT_CAP, mediaMimeOf } from '../../../src/core/artifact/artifact-io.ts'
 import { artifactViewSchema } from '../../../src/contract.ts'
 import { VIEWER_REGISTRY, viewerIdFor } from '../../../src/client/artifact/registry.ts'
 import { claimFirst } from '../../../src/client/artifact/chrome-stack.ts'
-import { writablePayload } from '../../../src/client/artifact/editing/writable.ts'
+import { writablePayload, needsBlankText } from '../../../src/client/artifact/editing/writable.ts'
+import { seedBlankText } from '../../../src/client/artifact/editing/seed-blank.ts'
 import {
   AUTOSAVE_BACKOFF_CAP_MS,
   AUTOSAVE_BACKOFF_MS,
@@ -121,6 +122,72 @@ describe('in-place text editing', () => {
     // 另一半与上面那组同源。
     expect(writablePayload({ kind: 'data', present: true, truncated: false })).toBe(false)
     expect(writablePayload({ kind: 'folder', present: true, truncated: false })).toBe(false)
+  })
+
+  it('classifies a file that is not there yet from its name alone', () => {
+    // 空座位（F1.11）上没有可读的东西，`view.kind` 也照样有答案——按路径的扩展名。
+    // 下面那条判据就靠它，不然「手动输入」还是会恰好在没东西可写的时候隐身。
+    const absent = { path: '文本1.md', basename: '文本1.md', extension: 'md', directory: false, head: '', children: [] }
+    expect(detectKind(absent)).toBe('markdown')
+    expect(detectKind({ ...absent, path: 'notes.txt', basename: 'notes.txt', extension: 'txt' })).toBe('file')
+    expect(detectKind({ ...absent, path: 'photo.png', basename: 'photo.png', extension: 'png' })).toBe('image')
+  })
+})
+
+describe('「手动输入」落到还没有产物的文本卡上（F3.12 × F3.14）', () => {
+  it('writes the first blank file, and only for the door that means "I want to write"', () => {
+    // 用户的原话：文本卡片点「手动输入」时，如果还没有创建文本，就先建一个空白文本文件
+    // 再打开编辑。这枚按钮的意思是「我要写字」，而座位上还没有产物（F1.11）恰恰是这条路
+    // 的起点——缺了这一条，它点下去只会得到一句「产物不存在」。
+    const seated = { kind: 'markdown', present: false }
+    expect(needsBlankText(seated, true)).toBe(true)
+    // 纯文本兜底 kind 也在「产物就是它自己的文字」那一族里。
+    expect(needsBlankText({ kind: 'file', present: false }, true)).toBe(true)
+  })
+
+  it('stays out of the way of the three cases it must not touch', () => {
+    const seated = { kind: 'markdown', present: false }
+    // 看一眼预览不该把文件写出来——那是把「读」变成「写」。
+    expect(needsBlankText(seated, false)).toBe(false)
+    // 空文件是**在**的：那是用户自己清空的结果，不是我们要补的缺。
+    expect(needsBlankText({ kind: 'markdown', present: true }, true)).toBe(false)
+    // 给别的形态补一份空文本就是把那个文件改成文本。
+    for (const kind of ['data', 'html-deck', 'site', 'webapp', 'image', 'video', 'folder', '']) {
+      expect(needsBlankText({ kind, present: false }, true)).toBe(false)
+    }
+  })
+
+  it('creates the file first and reads the result back, in that order', async () => {
+    // 次序是那三行的全部内容：先有文件才有「产物」，而编辑面吃的是**回读回来的**那一份
+    // ——不是我们以为自己写了什么。写在不该写的位置、或者读在写之前，界面上都只是「没反应」。
+    const calls: string[] = []
+    const fresh = { cardId: 'seat', file: '文本1.md', name: '', kind: 'markdown', present: true, text: '', dataUrl: '', truncated: false, bytes: 0, updatedAt: 1 }
+    const wire = {
+      writeText: async (projectId: string, cardId: string, content: string) => {
+        calls.push(`write ${projectId}/${cardId} ${JSON.stringify(content)}`)
+        return {}
+      },
+      readArtifact: async (projectId: string, cardId: string) => {
+        calls.push(`read ${projectId}/${cardId}`)
+        return fresh
+      },
+    }
+    const view = await seedBlankText(wire, 'flow-test', 'seat')
+    expect(calls).toEqual(['write flow-test/seat ""', 'read flow-test/seat'])
+    expect(view).toBe(fresh)
+  })
+
+  it('lets a refused write through, rather than pretending the file is there', async () => {
+    // 写不进去（只读模式、沙箱拒绝）要说写不进去：退回「产物不存在」会让人以为是自己点错了。
+    const wire = {
+      writeText: async () => {
+        throw new Error('EPERM: operation not permitted')
+      },
+      readArtifact: async () => {
+        throw new Error('unreachable')
+      },
+    }
+    await expect(seedBlankText(wire, 'flow-test', 'seat')).rejects.toThrow('EPERM')
   })
 })
 
@@ -388,7 +455,7 @@ describe('delimited parsing', () => {
 
 describe('wire payload validation', () => {
   it('accepts a text view and a data-URL view', () => {
-    const base = { cardId: 'a.md', file: 'a.md', kind: 'markdown', present: true, truncated: false, bytes: 3, updatedAt: 1 }
+    const base = { cardId: 'a.md', file: 'a.md', name: 'a', kind: 'markdown', present: true, truncated: false, bytes: 3, updatedAt: 1 }
     expect(artifactViewSchema.parse({ ...base, text: 'abc', dataUrl: '' }).present).toBe(true)
     expect(artifactViewSchema.parse({ ...base, cardId: 'a.png', kind: 'image', text: '', dataUrl: 'data:image/png;base64,AAAA' }).kind).toBe('image')
   })
@@ -397,6 +464,10 @@ describe('wire payload validation', () => {
     const view = artifactViewSchema.parse({
       cardId: 'a.md',
       file: 'a.md',
+      // F1.12: a reader that did not know the card sends no name. Empty is the
+      // agreed shape for that — the client then falls back to the path — so the
+      // empty string has to stay a legal payload, not an error.
+      name: '',
       kind: 'markdown',
       present: false,
       text: '',

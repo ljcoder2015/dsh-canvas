@@ -40,13 +40,14 @@ import {
   PICK_BOX_HEIGHT,
   PICK_BOX_WIDTH,
   buildEditPrompt,
+  cutEditPrompt,
   frameMoved,
   placePickBox,
-  splitEditPrompt,
   type PickRect,
   type PickTarget,
 } from '../../../core/artifact/preview-picker.ts'
 import type { ArtifactView } from '../../../types.ts'
+import type { PromptFold } from '../../../core/artifact/prompt-blocks.ts'
 import type { ArtifactChrome } from '../chrome.tsx'
 import { PromptInput } from '../../ui/prompt-input.tsx'
 import type { PromptInputHandle } from '../../ui/prompt-input.tsx'
@@ -67,6 +68,15 @@ interface HeldPick {
    * tracked in state — the two facts are both already at hand.
    */
   viewText: string
+  /**
+   * 定位那半截**原文**：生成草稿那一次调用（`buildEditPrompt`，空要求）的返回值。
+   *
+   * 留着它，是因为输入面要把这几十行折成一枚标签，而「折哪一段」必须是**草稿自己**
+   * 那一段——不是照着 `file` / `target` 再拼一份。这两者曾经是两个来源（草稿按
+   * `view.file` 生成、切分时递的是 `cardId`），于是标签在真机上一次也没画出来过。
+   * 谁生成的草稿，谁就把这段原文留着。
+   */
+  head: string
 }
 
 /**
@@ -152,7 +162,16 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
   const [kept] = useState(() => readPending(key))
   const [armed, setArmed] = useState(false)
   const [held, setHeld] = useState<HeldPick | undefined>(() =>
-    kept === undefined ? undefined : { target: kept.target, frame: kept.frame, viewText: kept.viewText },
+    kept === undefined
+      ? undefined
+      : {
+          target: kept.target,
+          frame: kept.frame,
+          viewText: kept.viewText,
+          // 重开时按同一套输入重算——与生成草稿那次是同一个纯函数、同一份 file/target，
+          // 得出的就是同一段原文（推不出来时前缀自然对不上，输入面退回纯文本）。
+          head: buildEditPrompt({ file: view.file, target: kept.target, request: '' }),
+        },
   )
   /** 提示词框里的全文。节点源码已经嵌在里面，用户接着往下写。 */
   const [draft, setDraft] = useState(() => kept?.draft ?? '')
@@ -174,8 +193,6 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
   const awaitingFrom = useRef(kept?.from ?? '')
   /** 提示词框里的正文，用来把光标放到末尾（用户接在「改动要求：」后面补写）。 */
   const boxRef = useRef<PromptInputHandle | null>(null)
-  /** 定位块展开了吗：展开就露出块里打包的那段定位提示词（文件、节点、位置、源码）。 */
-  const [expanded, setExpanded] = useState(false)
   /**
    * 最新的 `draft` / `sent`，专给回读那个 effect 读。
    *
@@ -257,9 +274,10 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
       // 新的一笔顶掉上一笔：上一笔的草稿与「等产物」都不再是屏幕上这个东西的事。
       setSent('')
       setAwaiting(false)
-      setExpanded(false)
-      setHeld({ target, frame, viewText: view.text })
-      setDraft(buildEditPrompt({ file: view.file, target, request: '' }))
+      // 定位原文在这里算**一次**：它就是草稿开头那一段，留着给输入面折标签用。
+      const locator = buildEditPrompt({ file: view.file, target, request: '' })
+      setHeld({ target, frame, viewText: view.text, head: locator })
+      setDraft(locator)
     },
     [view.file, view.text],
   )
@@ -395,9 +413,27 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
     // 高亮框只在「这一笔还对得上现在这一页」时画：产物被重写过（帧已经换了一页），旧坐标
     // 指着的是别的东西，圈错人比不圈更糟。
     const holdLive = view.text === held.viewText
-    // 定位块：草稿还能对上「这一笔该写出的形状」就切成「定位块 + 要求」两段展示；对不上
-    // （有人动过原文）就整段按普通文本编辑——展示让路，提示词一个字不动。
-    const split = splitEditPrompt({ file: cardId, target: held.target, text: draft })
+    // 定位那半截折成一枚**元素标签**（多模态引用的第四种长相）：几十行原文收成一行
+    // 「◫ section.hero」，用户只看见自己在改哪个节点、随手就能整枚删掉。折的只是画法——
+    // 发出去的提示词与从前逐字相同。切的是 `held.head`：**生成草稿那一次留下的原文**，
+    // 不是照 file/target 再拼一份（那正是标签一直没画出来的原因）。对不上就整段按普通
+    // 文本编辑：展示让路，值不动。
+    const split = cutEditPrompt({ head: held.head, text: draft })
+    const folds: PromptFold[] | undefined =
+      split === undefined
+        ? undefined
+        : [
+            {
+              at: 0,
+              length: split.head.length,
+              reference: {
+                id: split.head,
+                type: 'element',
+                label: held.target.label,
+                detail: t('canvas.pick.blockDetail', { label: held.target.label, file: view.file }),
+              },
+            },
+          ]
 
     overlay = (
       <>
@@ -427,59 +463,23 @@ export function useElementPick(input: { view: ArtifactView; chrome: ArtifactChro
               ×
             </button>
           </div>
-          {split === undefined ? (
-            <PromptInput
-              className="dsh-canvas-pickbox-input"
-              handleRef={boxRef}
-              value={draft}
-              spellCheck={false}
-              onChange={setDraft}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                  event.preventDefault()
-                  send()
-                }
-              }}
-            />
-          ) : (
-            <>
-              {/* 定位块：节点源码、选择器路径这些「模型定位用」的内容打包成一枚块，
-                  用户只看见是哪个节点、哪个文件——点开能看到块里装的全部原文。它只是
-                  draft 里既有内容的另一种画法：发出去的提示词与从前逐字相同。 */}
-              <div className="dsh-canvas-pickblock">
-                <button
-                  className="dsh-canvas-pickblock-row"
-                  onClick={() => setExpanded((value) => !value)}
-                  aria-expanded={expanded}
-                  title={t('canvas.pick.blockToggle')}
-                >
-                  <span className="dsh-canvas-pickblock-glyph" aria-hidden="true">
-                    ◆
-                  </span>
-                  <span className="dsh-canvas-pickblock-name">{held.target.label}</span>
-                  <span className="dsh-canvas-pickblock-file">{view.file}</span>
-                  <span className="dsh-canvas-pickblock-chev" aria-hidden="true">
-                    {expanded ? '▾' : '▸'}
-                  </span>
-                </button>
-                {expanded ? <pre className="dsh-canvas-pickblock-detail">{split.head}</pre> : null}
-              </div>
-              <PromptInput
-                className="dsh-canvas-pickbox-input"
-                handleRef={boxRef}
-                value={split.request}
-                spellCheck={false}
-                placeholder={t('canvas.pick.requestPlaceholder')}
-                onChange={(text) => setDraft(split.head + text)}
-                onKeyDown={(event) => {
-                  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                    event.preventDefault()
-                    send()
-                  }
-                }}
-              />
-            </>
-          )}
+          {/* 一个输入框装两样东西：**折起来的元素定位**（一枚内联标签，整枚可删）与用户
+              写的要求。定位在值里就是那几十行原文，只是没画出来——所以「◫ 节点名」后面
+              接的那句话，就是发出去的提示词末尾那一句。 */}
+          <PromptInput
+            className="dsh-canvas-pickbox-input"
+            handleRef={boxRef}
+            value={draft}
+            folds={folds}
+            spellCheck={false}
+            onChange={setDraft}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault()
+                send()
+              }
+            }}
+          />
           {error === '' ? null : (
             <div className="dsh-canvas-pickbox-error">{t('canvas.pick.failed', { message: error })}</div>
           )}

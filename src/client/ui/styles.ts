@@ -130,22 +130,26 @@ body[data-ds-dark-theme] .dsh-canvas-root{
   background-image:radial-gradient(circle,var(--dsh-hairline) 1px,transparent 1px);
   background-size:calc(28px * var(--dsh-z)) calc(28px * var(--dsh-z));
   background-position:calc(var(--dsh-px) + 14px) calc(var(--dsh-py) + 14px)}
-/* 空格按住：整块表面连同卡片都变抓手（端口除外——它是取材的手势，别被覆盖）。 */
+/* 空格按住：整块表面连同卡片都变抓手（端口除外——它是引用的手势，别被覆盖）。 */
 .dsh-canvas-surface.is-space,.dsh-canvas-surface.is-space .dsh-canvas-card{cursor:grab}
+/* 输入框正文那枚 I 型光标在按住空格时也让开：那时整块表面都是抓手，指到提示词框上也是
+   「拖的是取景框」（按压在捕获阶段就被画布收走了，所以这一枚光标说的正是接下来会发生
+   的事）。 */
+.dsh-canvas-surface.is-space .dsh-canvas-promptbox-field{cursor:grab}
 .dsh-canvas-surface.is-panning,.dsh-canvas-surface.is-panning .dsh-canvas-card{cursor:grabbing}
 .dsh-canvas-surface.is-linking{cursor:crosshair}
 .dsh-canvas-layer{position:absolute;left:0;top:0;transform-origin:0 0}
 
 /* ── card ───────────────────────────────────────────────────────────────── */
 /* 节点样式对齐参考稿：标题行在顶（只有名字，没有状态点），预览铺满其余全部，
-   取材端口悬在左右两侧的垂直中点。卡上不解释状态——运行由流光说，静止就是
+   引用端口悬在左右两侧的垂直中点。卡上不解释状态——运行由流光说，静止就是
    「没事发生」；边框只归用户自己的两个动作（悬停、选中）。 */
 /* 卡片自身的圆角写在 --dsh-card-r 上，因为贴在它内缘的两层（标题行与预览）必须用
    **同心**的圆角，而「同心」这件事只有把半径算出来才是真的：两层都铺满卡片的内容
    盒、都没有边框，所以它们的盒角正好压在边框的内缘上——半径各减掉一个边框宽度
    （8 − 1 = 7），圆心才落在同一点。少了这一步，凡是有底色的那层就会在圆角处**盖掉
    卡片的边框**：后代的背景画在祖先的边框之上（CSS 绘制顺序：祖先的边框先画，流内
-   块级后代后画），而卡片按设计不能 overflow:hidden（两个取材端口悬在卡外）。左下、
+   块级后代后画），而卡片按设计不能 overflow:hidden（两个引用端口悬在卡外）。左下、
    右下两角的边框整段消失就是这么来的——标题行没有底色，所以上两角安然无恙。 */
 .dsh-canvas-card{--dsh-card-r:8px;--dsh-card-inner-r:calc(var(--dsh-card-r) - 1px);
   position:absolute;width:200px;height:140px;box-sizing:border-box;display:flex;flex-direction:column;
@@ -160,20 +164,55 @@ body[data-ds-dark-theme] .dsh-canvas-root{
    边框不变色：边框归悬停与选中，随运行变色会让卡片看起来像被框起来警告。
 
    光带画在独立的子层 .dsh-canvas-shimmer 上，不用卡片自己的 ::after：卡片不能
-   overflow:hidden——两个取材端口是悬在卡外的，裁了就没法拖线了。 */
+   overflow:hidden——两个引用端口是悬在卡外的，裁了就没法拖线了。 */
 .dsh-canvas-card.is-working{background:var(--dsh-slot)}
 .dsh-canvas-shimmer{position:absolute;inset:0;overflow:hidden;border-radius:inherit;pointer-events:none}
 .dsh-canvas-shimmer::after{content:'';position:absolute;top:0;left:0;width:100%;height:100%;
   background:linear-gradient(90deg,transparent 0%,var(--dsh-sheen) 40%,
     var(--dsh-sheen-peak) 50%,var(--dsh-sheen) 60%,transparent 100%);
   transform:skewX(-25deg) translateX(-120%);animation:dsh-canvas-shimmer 1.8s linear infinite}
-.dsh-canvas-card-head{flex:none;display:flex;align-items:center;gap:6px;padding:7px 10px 5px;min-width:0;
+.dsh-canvas-card-head{flex:none;display:flex;align-items:center;gap:6px;padding:5px 10px;min-width:0;
   border-top-left-radius:var(--dsh-card-inner-r);border-top-right-radius:var(--dsh-card-inner-r)}
 .dsh-canvas-card-name{flex:1 1 auto;min-width:0;font:500 12px/16px var(--dsh-font);color:var(--dsh-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 就地改名（F1.12）：名条上按下即抬手就切进输入框，回车或失焦提交，Esc 撤回。
+   输入框与名字**同高同字**（16px，border-box：14px 行高 + 上下各 1px 边框），
+   于是切换那一刻卡片上别的东西一个像素都不动；底色与发丝边框只是说「这里能写」。
+   卡片整体是 user-select:none，输入框必须自己把它要回来，否则选不中已经写着的字。 */
+.dsh-canvas-card-namefield{flex:1 1 auto;min-width:0;box-sizing:border-box;height:16px;padding:0 4px;
+  font:500 12px/14px var(--dsh-font);color:var(--dsh-fg);background:var(--dsh-surface);
+  border:1px solid var(--dsh-mid);border-radius:4px;outline:none;
+  -webkit-user-select:text;user-select:text}
+.dsh-canvas-card-namefield:focus{border-color:var(--dsh-breeze)}
 .dsh-canvas-card-preview{flex:1 1 auto;min-height:0;box-sizing:border-box;padding:0 10px 8px;overflow:hidden;background:var(--dsh-card);
   border-bottom-left-radius:var(--dsh-card-inner-r);border-bottom-right-radius:var(--dsh-card-inner-r)}
 .dsh-canvas-card-preview-line{font:11px/16px var(--dsh-mono);color:var(--dsh-fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-canvas-card-preview-line:first-child{color:var(--dsh-fg-2)}
+/* 文本卡片的 markdown 预览：原文头部渲染后的样子。字号压到 11px 一档，块级边距全部
+   收紧——卡面只有约 106px 高，字号与留白都按「多看两行」预算。链接不出手（pointer-events:none）：
+   卡片整体是拖拽把柄，预览里的链接点下去只会跟拖卡片打架。 */
+.dsh-canvas-card-md{max-height:100%;overflow:hidden;font:11px/15px var(--dsh-font);color:var(--dsh-fg-3)}
+.dsh-canvas-card-md p{margin:0 0 3px}
+.dsh-canvas-card-md h1,.dsh-canvas-card-md h2,.dsh-canvas-card-md h3{margin:3px 0;font:600 11px/15px var(--dsh-font);color:var(--dsh-fg-2)}
+.dsh-canvas-card-md :first-child{margin-top:0}
+.dsh-canvas-card-md ul,.dsh-canvas-card-md ol{margin:0 0 3px;padding-left:15px}
+.dsh-canvas-card-md li{margin:0}
+.dsh-canvas-card-md blockquote{margin:0 0 3px;padding-left:7px;border-left:2px solid var(--dsh-mid)}
+.dsh-canvas-card-md pre{margin:0 0 3px;padding:2px 5px;border-radius:3px;background:var(--dsh-soft);overflow:hidden}
+.dsh-canvas-card-md pre code{font:10px/14px var(--dsh-mono);color:var(--dsh-fg-2)}
+.dsh-canvas-card-md code{font:10px/14px var(--dsh-mono);color:var(--dsh-fg-2)}
+.dsh-canvas-card-md a{color:var(--dsh-breeze);pointer-events:none}
+.dsh-canvas-card-md hr{border:0;border-top:1px solid var(--dsh-mid);margin:3px 0}
+/* 设计卡片的截图与应用卡片的迷你帧：两者都从预览区的内边距里破格而出——截图就该铺满
+   卡面（负边距抵掉 10px 左右与 8px 底），下缘的两只圆角继承卡片的内圆角变量。 */
+.dsh-canvas-card-shot{display:block;width:calc(100% + 20px);margin:0 -10px -8px;
+  border-bottom-left-radius:var(--dsh-card-inner-r);border-bottom-right-radius:var(--dsh-card-inner-r);background:var(--dsh-card)}
+.dsh-canvas-card-frame{width:calc(100% + 20px);height:calc(100% + 8px);margin:0 -10px -8px;overflow:hidden;
+  border-bottom-left-radius:var(--dsh-card-inner-r);border-bottom-right-radius:var(--dsh-card-inner-r);
+  opacity:0;transition:opacity .25s ease}
+.dsh-canvas-card-frame.is-loaded{opacity:1}
+/* 帧按 2x 视口渲染再缩回 0.5：页面以两倍尺寸排版，缩下后文字仍然锐——这正是截图的清晰度。 */
+.dsh-canvas-card-frame iframe{display:block;width:200%;height:200%;border:0;pointer-events:none;
+  transform:scale(.5);transform-origin:0 0}
 .dsh-canvas-card-meta{font:10px/14px var(--dsh-mono);letter-spacing:.6px;color:var(--dsh-fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 状态点只剩左侧的实时卡片（tool-view.tsx）在用——画布卡片上那枚已经去掉：
    那边用流光说「在跑」，不再用灯。 */
@@ -194,7 +233,7 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 
 /* ── edges ──────────────────────────────────────────────────────────────── */
 .dsh-canvas-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
-/* 取材线只有一副样子：1px 细线、实线、无箭头、breeze 色。**拖拽中的那一根也是这副
+/* 引用线只有一副样子：1px 细线、实线、无箭头、breeze 色。**拖拽中的那一根也是这副
    样子**——它就是这条线本身，只是另一头还跟着手，所以这里没有 pending 变体（那个类
    只作工具标记）。整层 pointer-events:none：线只负责看，永远不拦指针。 */
 .dsh-canvas-edge{fill:none;stroke:var(--dsh-breeze);stroke-width:1;stroke-linecap:round;opacity:.85}
@@ -237,9 +276,15 @@ body[data-ds-dark-theme] .dsh-canvas-root{
    标签那一行是 18px（内边距 2+2、行高 14），与正文行高**等高**——一枚标签不许把行撑开，
    否则插进一句话中间就把整段的行距改了。 */
 .dsh-canvas-promptbox{position:relative;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden}
+/* cursor:text 必须自己说：cursor 是继承属性，而画布表面（.dsh-canvas-surface）钉着
+   cursor:default——整块表面都是选择箭头（见上面 surface 那一段），于是继承下来的默认
+   值会压掉浏览器给「可编辑」内容自动出的 I 型光标（宿主那一套只对 input / textarea 的
+   UA 样式生效，contenteditable 靠的是「cursor 仍是 auto」才会露出文本光标）。少了这一
+   句，鼠标移进提示词框看着就像移在一张图或一块静态文字上——而这是本插件里唯一一处
+   contenteditable。 */
 .dsh-canvas-promptbox-field{flex:1 1 auto;min-height:0;box-sizing:border-box;width:100%;padding:6px 10px;
   border:none;outline:none;background:transparent;color:var(--dsh-fg);caret-color:var(--dsh-fg);
-  font:inherit;tab-size:2;white-space:pre-wrap;overflow-wrap:break-word;overflow:auto}
+  font:inherit;tab-size:2;white-space:pre-wrap;overflow-wrap:break-word;overflow:auto;cursor:text}
 .dsh-canvas-promptbox-placeholder{position:absolute;inset:0;box-sizing:border-box;padding:6px 10px;
   pointer-events:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:break-word;color:var(--dsh-fg-3)}
 /* 引用标签：@文件 记号的那张脸——底色只给这一段，名字亮出来，图标与徽标轻下去。
@@ -265,8 +310,8 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 /* 徽标：代码类是行号、标记类是坐标——两种读数共用这一格。 */
 .dsh-canvas-ref-chip-badge{flex:none;font:11px/14px var(--dsh-mono);color:var(--dsh-fg-3)}
 
-/* 选中卡片下方的那条控制带：取材 chips 与 ⊕ 引入入口 → 提示词输入框 → 模型席位、
-   状态点与发送。chips 是「一条 chip = 一条取材边」，所以每枚右上角都挂着自己的删除钮
+/* 选中卡片下方的那条控制带：引用 chips 与 ⊕ 引入入口 → 提示词输入框 → 模型席位、
+   状态点与发送。chips 是「一条 chip = 一条引用边」，所以每枚右上角都挂着自己的删除钮
    （卡片上没有 overflow:hidden，角标才探得出去；文字的截断交给内部的 label）。 */
 .dsh-canvas-composer{display:flex;flex-direction:column;gap:8px}
 /* position:relative：@ 候选菜单按这一行锚定（它浮在材料行之上，见下面 .dsh-canvas-refmenu）。 */
@@ -429,29 +474,15 @@ body[data-ds-dark-theme] .dsh-canvas-root{
   font:500 11px/16px var(--dsh-mono);color:var(--dsh-breeze)}
 .dsh-canvas-pickbox-file{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font:11px/16px var(--dsh-mono);color:var(--dsh-fg-3)}
-/* 框里装的就是要发出去的那段提示词（节点源码已嵌在里面），所以它是等宽的正文区，
-   不是一行输入框：用户要能看见自己改的是哪一段。内边距同样归正文（这一条只是把皮肤
-   那一档说清：框里比控制带松一点，10/12 而不是 6/10）。 */
+/* 框里装的就是要发出去的那段提示词，只是**前半个身子没画出来**：元素定位与节点源码
+   （几十行）折成了框内第一枚标签（.dsh-canvas-ref-chip，那几十行原文仍是值的一部分，
+   整枚可删）。剩下的是用户自己写的要求。等宽正文区与内边距照旧——框里比控制带松一档，
+   10/12 而不是 6/10。 */
 .dsh-canvas-pickbox-input{flex:1 1 auto;min-height:0;box-sizing:border-box;width:100%;
   border:none;background:transparent;color:var(--dsh-fg);
   font:12px/18px var(--dsh-mono);tab-size:2}
 .dsh-canvas-pickbox-input .dsh-canvas-promptbox-field,
 .dsh-canvas-pickbox-input .dsh-canvas-promptbox-placeholder{padding:10px 12px}
-/* 定位块（F3.14）：节点定位与源码打包成的一枚块。它只是草稿的另一种画法——发出去的
-   提示词逐字不变——所以块上没有删除、没有编辑，只有「点开看原文」这一条路。 */
-.dsh-canvas-pickblock{flex:none;border-bottom:1px solid var(--dsh-hairline)}
-.dsh-canvas-pickblock-row{display:flex;align-items:center;gap:7px;width:100%;box-sizing:border-box;
-  padding:7px 12px;border:none;background:transparent;cursor:pointer;text-align:left}
-.dsh-canvas-pickblock-row:hover{background:var(--dsh-soft)}
-.dsh-canvas-pickblock-glyph{flex:none;color:var(--dsh-breeze);font:10px/16px var(--dsh-mono)}
-.dsh-canvas-pickblock-name{flex:none;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font:500 11px/16px var(--dsh-mono);color:var(--dsh-fg)}
-.dsh-canvas-pickblock-file{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font:11px/16px var(--dsh-mono);color:var(--dsh-fg-3)}
-.dsh-canvas-pickblock-chev{flex:none;color:var(--dsh-fg-3);font:10px/16px var(--dsh-mono)}
-.dsh-canvas-pickblock-detail{flex:1 1 auto;min-height:0;overflow:auto;margin:0;padding:8px 12px;
-  border-top:1px solid var(--dsh-hairline);background:var(--dsh-slot);
-  font:11px/16px var(--dsh-mono);color:var(--dsh-fg-2);white-space:pre-wrap;overflow-wrap:break-word;tab-size:2}
 .dsh-canvas-pickbox-error{flex:none;max-height:52px;overflow:auto;padding:6px 12px;
   border-top:1px solid var(--dsh-hairline);font:11px/16px var(--dsh-font);color:var(--dsh-sunset)}
 .dsh-canvas-pickbox-foot{flex:none;display:flex;align-items:center;gap:8px;padding:7px 8px 7px 12px;

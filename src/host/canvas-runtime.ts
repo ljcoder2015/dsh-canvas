@@ -35,6 +35,7 @@ import type { BoardFile } from './board-file.ts'
 import { arrangeSeats } from '../core/canvas/board.ts'
 import { planEdges, planIdentity, planNotes, planSeats } from '../core/canvas/board-file.ts'
 import { mintCardId, projectIdOf } from '../core/canvas/ids.ts'
+import { cardNameOf } from '../core/canvas/card-name.ts'
 import { cardFileOf, cardIdOfKey, cardKeyOf, SessionManager } from '../core/session/session-manager.ts'
 import { kindLabel } from '../core/artifact/kind-registry.ts'
 import { claimCanvasWorkspace } from '../core/canvas/workspace.ts'
@@ -72,6 +73,8 @@ interface CardRecord {
   seatedEmpty?: boolean | undefined
   /** Artifact path relative to the project root; absent on pre-split records, where the id *is* the path. */
   file?: string | undefined
+  /** The card's own name (F1.12), when it says more than its artifact's path does. */
+  name?: string | undefined
 }
 
 /** The artifact path a record names — `file`, falling back to a legacy path-shaped id. */
@@ -215,6 +218,9 @@ export class CanvasRuntime extends TypertRemoteService {
         // artifact is simply gone was **never** an empty seat, and marking it
         // one would make it permanently un-cleanable (F1.11).
         ...(seat.empty === true ? { seatedEmpty: true } : {}),
+        // A carried name travels with the board (F1.12): it is the user's word
+        // for the work, not a fact about this machine.
+        ...(seat.name === undefined ? {} : { name: seat.name }),
       })
     }
 
@@ -334,6 +340,7 @@ export class CanvasRuntime extends TypertRemoteService {
         return {
           id: cardId,
           file,
+          name: cardNameOf({ file, kind: record.kind, name: record.name }),
           project: projectId,
           kind: record.kind,
           kindLabel: kindLabel(record.kind),
@@ -386,6 +393,7 @@ export class CanvasRuntime extends TypertRemoteService {
     return {
       id: cardId,
       file: fileOf(record, cardId),
+      name: cardNameOf({ file: fileOf(record, cardId), kind: record.kind, name: record.name }),
       project: projectId,
       kind: record.kind,
       kindLabel: kindLabel(record.kind),

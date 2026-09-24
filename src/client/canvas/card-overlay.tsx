@@ -31,10 +31,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import { formatFileMention } from '../../core/artifact/file-reference.ts'
 import { isDirectTextKind } from '../../core/artifact/kind-registry.ts'
 import { referenceTypeOf, scanFileMentions } from '../../core/artifact/prompt-blocks.ts'
-import type { ReferenceFacts, ReferenceType } from '../../core/artifact/prompt-blocks.ts'
+import type { ReferenceFacts } from '../../core/artifact/prompt-blocks.ts'
 import type { BoardCard, CardSummary } from '../../types.ts'
 import type { CanvasBridge, CatalogModel, ModelCatalog } from '../wire/bridge.ts'
 import {
@@ -49,27 +48,10 @@ import type { Translate } from '../ui/locales.ts'
 import { PromptInput } from '../ui/prompt-input.tsx'
 import type { PromptInputHandle } from '../ui/prompt-input.tsx'
 import { composerSizeOf, resizedComposerSize, type ComposerSize } from './composer-size.ts'
+import { referenceOptions } from './reference-options.ts'
+import type { ReferenceCandidate, ReferenceOption } from './reference-options.ts'
 
-/** `@` 候选最多摆几枚：提示词框是个小地方，够挑就行，翻找交给继续打字。 */
-const REFERENCE_LIMIT = 8
-
-/**
- * 菜单里的一枚候选——它就是提示词里那枚 `@路径` 的由来。
- *
- * `mention` 里那串字**已经过宿主记号语法的安检**（`formatFileMention`）：带不动的路径
- * （含引号或控制字符）宁可不出现，也不插一枚读不出来的引用进去。
- */
-interface ReferenceOption {
-  /** 工作区相对路径（卡片 id 就是它）。 */
-  path: string
-  mention: string
-  /** 显示名：路径最后一段（与取材 chips 同一套写法）。 */
-  label: string
-  /** 引用类型——按扩展名定（`referenceTypeOf`），决定标签的长相。 */
-  type: ReferenceType
-  /** 这张卡已经取材的来源，还是画布上别的卡片。 */
-  fromMaterial: boolean
-}
+/** `@` 候选的挑选与过滤在 `reference-options.ts`（纯，node 环境可测）；这里只剩展示。 */
 
 /** 类型的中文名，给候选行右侧那枚小注用（与标签自己的长相是同一件事）。 */
 const REFERENCE_TYPE_LABEL = {
@@ -79,41 +61,8 @@ const REFERENCE_TYPE_LABEL = {
   audio: 'canvas.ref.type.audio',
   mark: 'canvas.ref.type.mark',
   region: 'canvas.ref.type.region',
+  element: 'canvas.ref.type.element',
 } as const
-
-/**
- * `@` 能引用哪些东西：**这张卡已有的取材来源在前**（它们的关系是板上画着的），画布其余
- * 卡片在后。两处去重、按查询过滤，再截到上限。
- *
- * 与 ⊕ 菜单同一份数据、同一个念头：能引用的是**文件**，而卡片 id 就是它在工作区里的路径。
- * 区别只在动作——⊕ 是替本卡会话把上游的路径报一遍，这里是往提示词里插一枚引用。
- */
-function referenceOptions(
-  materials: readonly MaterialRef[],
-  others: readonly BoardCard[],
-  query: string,
-): ReferenceOption[] {
-  const seen = new Set<string>()
-  const all: ReferenceOption[] = []
-  const add = (path: string, fromMaterial: boolean): void => {
-    if (seen.has(path)) return
-    seen.add(path)
-    const mention = formatFileMention({ path, kind: 'file' })
-    if (mention === undefined) return
-    all.push({
-      path,
-      mention,
-      label: path.split('/').pop() ?? path,
-      type: referenceTypeOf(path),
-      fromMaterial,
-    })
-  }
-  for (const entry of materials) add(entry.cardId, true)
-  for (const other of others) add(other.id, false)
-  const needle = query.trim().toLowerCase()
-  if (needle === '') return all.slice(0, REFERENCE_LIMIT)
-  return all.filter((option) => option.mention.toLowerCase().includes(needle)).slice(0, REFERENCE_LIMIT)
-}
 
 /**
  * 一次最多取几枚缩略图。
@@ -139,6 +88,10 @@ export interface MaterialRef {
   id: string
   /** The upstream card id. */
   cardId: string
+  /** The upstream card's own name (F1.12) — what the chip shows. */
+  name: string
+  /** The upstream artifact path — what `@` 候选 inserts (v1.49 之后 id 不再是路径). */
+  file: string
   /** Bounded digest of the upstream artifact; `''` when it could not be read. */
   summary: string
 }
@@ -524,9 +477,22 @@ export function ComposerBody(props: ComposerBodyProps) {
   /** 输入框那只把手。调用方给了槽位就用它，没给（放大态）就自己揣一只。 */
   const own = useRef<PromptInputHandle | null>(null)
   const slot = inputRef ?? own
+  /**
+   * 能被 `@` 的卡片，按候选那一侧需要的三件事报过去（id / 产物路径 / 卡片名）。
+   *
+   * 这张卡已有的引用来源在前，画布其余卡片在后——材料行那条边只带 id，路径与名字
+   * 是 `MaterialRef` 一起捎来的。
+   */
+  const candidates = useMemo(
+    () => ({
+      owned: materials.map((entry): ReferenceCandidate => ({ id: entry.cardId, file: entry.file, name: entry.name })),
+      others: others.map((other): ReferenceCandidate => ({ id: other.id, file: other.file, name: other.name })),
+    }),
+    [materials, others],
+  )
   const options = useMemo(
-    () => (query === null ? [] : referenceOptions(materials, others, query)),
-    [materials, others, query],
+    () => (query === null ? [] : referenceOptions(candidates.owned, candidates.others, query)),
+    [candidates, query],
   )
   /** 高亮那一枚；候选变短时收回界内，免得越界。 */
   const at = options.length === 0 ? 0 : Math.min(picked, options.length - 1)
@@ -538,6 +504,12 @@ export function ComposerBody(props: ComposerBodyProps) {
    */
   const [thumbs, setThumbs] = useState<Record<string, string>>({})
   const pendingThumbs = useRef(new Set<string>())
+  /** 路径 → 座位 id：读产物的通道只认 id，而草稿与菜单里写的是路径。 */
+  const cardIdByFile = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const candidate of [...candidates.owned, ...candidates.others]) map.set(candidate.file, candidate.id)
+    return map
+  }, [candidates])
   /**
    * 该给谁取缩略图：**草稿里已经引用的**（用户正在看的那几枚标签）+ **菜单候选里的**。
    *
@@ -566,7 +538,9 @@ export function ComposerBody(props: ComposerBodyProps) {
       const loaded: [string, string][] = []
       for (const path of missing) {
         try {
-          const view = await bridge.readArtifact(card.project, path)
+          // 读产物那条通道认的是**卡**：路径只是草稿与菜单里的记号，cardId 要按路径
+          // 换算回来（v1.49 之后两者不再是同一个字符串；换不回来的路径没有缩略图）。
+          const view = await bridge.readArtifact(card.project, cardIdByFile.get(path) ?? path)
           if (view.dataUrl !== '') loaded.push([path, view.dataUrl])
         } catch {
           // 读不到就没有缩略图（图标照样画）：它是锦上添花，不是引用的前提。
@@ -580,14 +554,19 @@ export function ComposerBody(props: ComposerBodyProps) {
     return () => {
       cancelled = true
     }
-  }, [bridge, card.project, thumbs, wantedKey])
+  }, [bridge, card.project, cardIdByFile, thumbs, wantedKey])
 
-  /** 交给输入框的「文件之外的事实」：今天只有缩略图这一项（行号还没有哪个界面知道）。 */
+  /** 交给输入框的「文件之外的事实」：缩略图，加上**卡片名**（F1.12）——应用卡的产物是
+   *  「一个目录带 index.html」，按路径现推的标签会是 index.html，名字必须由这里覆盖。 */
   const refs = useMemo<Record<string, ReferenceFacts>>(() => {
     const facts: Record<string, ReferenceFacts> = {}
     for (const [path, url] of Object.entries(thumbs)) facts[path] = { thumbnail: url }
+    for (const candidate of [...candidates.owned, ...candidates.others]) {
+      const known = facts[candidate.file]
+      facts[candidate.file] = { ...known, label: candidate.name }
+    }
     return facts
-  }, [thumbs])
+  }, [thumbs, candidates])
   /** 选中一枚：插进输入框（插完查询那半枚已被顶掉），菜单收起。 */
   const choose = (option: ReferenceOption | undefined): void => {
     if (option === undefined) return
@@ -604,8 +583,12 @@ export function ComposerBody(props: ComposerBodyProps) {
     <>
       <div className="dsh-canvas-composer-materials">
         {materials.map((entry) => (
-          <span className="dsh-canvas-chip" key={entry.id} title={entry.summary === '' ? entry.cardId : entry.summary}>
-            <span className="dsh-canvas-chip-label">{entry.cardId.split('/').pop() ?? entry.cardId}</span>
+          <span className="dsh-canvas-chip" key={entry.id} title={entry.summary === '' ? entry.file : entry.summary}>
+            {/* 显示的是卡片名（F1.12），不是座位 id——id 是 6 位随机字母，给机器对账用，
+                不给人读；产物路径悬停即见（tooltip），没有名字时退回路径最后一段。 */}
+            <span className="dsh-canvas-chip-label">
+              {entry.name !== '' ? entry.name : (entry.file.split('/').pop() ?? entry.cardId)}
+            </span>
             <button
               className="dsh-canvas-chipdrop"
               title={t('canvas.composer.drop')}
@@ -627,7 +610,7 @@ export function ComposerBody(props: ComposerBodyProps) {
           </button>
           {menu ? (
             <div className="dsh-canvas-menu is-raised">
-              {/* 文件引用不是「挑一张卡片」：它交的是本卡片**已有**取材来源的 @路径，
+              {/* 文件引用不是「挑一张卡片」：它交的是本卡片**已有**引用来源的 @路径，
                   所以它是一枚独立入口，而不是给每一行再加一个更弱的按钮。 */}
               <button
                 className="dsh-canvas-row"
@@ -646,12 +629,13 @@ export function ComposerBody(props: ComposerBodyProps) {
                   <button
                     className="dsh-canvas-row"
                     key={other.id}
+                    title={other.file}
                     onClick={() => {
                       setMenu(false)
                       onAddMaterial(other.id)
                     }}
                   >
-                    {other.id.split('/').pop() ?? other.id}
+                    {other.name !== '' ? other.name : (other.file.split('/').pop() ?? other.id)}
                     <span className="dsh-canvas-row-meta">{other.kindLabel}</span>
                   </button>
                 ))
@@ -672,7 +656,7 @@ export function ComposerBody(props: ComposerBodyProps) {
 
         {/* `@` 候选：在输入框里打一个 `@`，光标前那半枚查询就是过滤条件（内容随打字变，
             所以菜单不用自己收——查询一散它就散了）。候选是**能引用的文件**：这张卡已经
-            取材的上游在前、画布别的卡片在后，与 ⊕ 菜单同一份数据。选中插进去的是一枚
+            引用的上游在前、画布别的卡片在后，与 ⊕ 菜单同一份数据。选中插进去的是一枚
             **引用标签**，而它落到提示词里的仍只是那串 `@路径`——发出去的逐字不变。 */}
         {query === null ? null : (
           <div className="dsh-canvas-menu dsh-canvas-refmenu" role="listbox" aria-label={t('canvas.composer.reference')}>
@@ -855,7 +839,12 @@ export function CardSelection(props: CardSelectionProps) {
   // 形态上出现——文件夹、图片、Deck 都没有可打字的地方，给它们一枚按钮只是一枚点了没
   // 反应（或更糟：把别的形态覆盖成文本）的按钮。这个事实住在宿主的 kind 表上
   // （`isDirectTextKind`），弹窗里的编辑面读的是同一份，两边不会各说各话。
-  const canEditText = isDirectTextKind(summary?.kind ?? '')
+  //
+  // 摘要读不到时（产物还没写过、或者已经丢了，两种都没有可摘要的东西）回落问**卡片自己**
+  // 那个 kind：座位可以在产物之前就存在（F1.11），而建卡时记下的形态本来就说得清它将来
+  // 该是文本。少了这半句，卡片上最该出现的那枚按钮会恰好在「还没有东西可写」的时候隐身
+  // ——而「手动输入」要开的那条路，本来就是从无到有地写第一行字。
+  const canEditText = isDirectTextKind(summary?.kind ?? card.kind)
 
   return (
     <>

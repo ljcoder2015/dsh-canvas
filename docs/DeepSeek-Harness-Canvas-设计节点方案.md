@@ -15,7 +15,7 @@ dock 上替换原「矢量图片」为**设计节点**：产物是一个 `.desig
 | 元素选择复用探针（iframe 注入） | 自研命中测试（CanvasKit + 逆变换） | 画布不是 DOM 页面，探针不适用；但 chrome 插槽、两摞协商、流光、一笔跨关闭等**预览器级机制全部复用** |
 | 模型用文件工具直写文本 | 模型用**结构化编辑工具**改文档 | 二进制不可直写；结构化 op 也是改稿质量的保障（改哪个图层是显式的，不靠模型重猜全篇） |
 
-保持不变的：文件即产物（产物就是那个 `.design` 文件）、kind 由文件证据认定、卡片-会话绑定、取材/连线/F5 摘要通道、预览器外壳的插槽与协商机制、导出与发布框架。
+保持不变的：文件即产物（产物就是那个 `.design` 文件）、kind 由文件证据认定、卡片-会话绑定、引用/连线/F5 摘要通道、预览器外壳的插槽与协商机制、导出与发布框架。
 
 ## 二、数据层：Kiwi 存储
 
@@ -78,7 +78,7 @@ CanvasKit 画文本需要内嵌字体（无系统字体访问）。中文场景�
 2. **契约**：`contract.ts` 加 `dsh-canvas#card/scaffold_design`（新建设计卡：Host 写入最小合法 Kiwi 文档——一块 1024×1024 空画板）。dock 的 `DOCK_SPECS` 第 4 项替换：`label: 'canvas.dock.design'`、`extension: 'design'`、`kind: 'design'`、走 `scaffoldDesign`——与 `webapp: true` 同款特例路径（**seed 是文本机制，装不下二进制**，这正是 v1 seed 方案作废的原因）。locales 加 `canvas.dock.design`，删 `canvas.dock.vector`。
 3. **Host 侧 Kiwi 服务**：`src/core/artifact/design/`（纯逻辑：schema 编译产物 + 文档模型 + 编辑 op 应用器，零宿主依赖、可单测）；`card-runtime` 挂 scaffold 与读写。
 4. **Client 预览器**：`viewers/design-viewer.tsx`（CanvasKit 初始化、渲染循环、视口、命中测试、overlay、文本覆盖层）；`registry.ts` 认领 `design` kind；图层树面板（折叠/选中双向联动）M2 末尾加。
-5. **工具注册**：`tools.ts` 加 `canvas_design_read` / `canvas_design_edit`（卡片作用域，身份解析沿用前六项规则，`additionalProperties:false` 逐字对齐）；prompt 补设计预设——画板模板清单：App 页 375×812、官网首屏 1440×900、海报 1242×1660、社交图 1080×1080、PPT 1920×1080，**都是文档内画板预设**，一句指令可加画板。
+5. **工具注册**：`tools.ts` 加 `canvas_design_read` / `canvas_design_edit`（卡片作用域，身份解析沿用前六项规则，`additionalProperties:false` 逐字对齐）；prompt 补设计预设——**宽度**模板清单：手机 375 宽、平板 834 宽、桌面 / 官网 1440 宽，另有固定规格整块给出的稿件（海报 1242×1660、社交图 1080×1080、PPT 1920×1080、横幅 1920×600），**都是文档内画板预设**，一句指令可加画板。**v1.55 补上高度规矩**：网页与应用的长页面**高度随内容**（一屏高不是上限），一块画板装一整页、连续往下排，不按「屏」切成多块画板；多块画板只留给「用户点名多屏并排」与「本身是序列的交付物（PPT 每页、海报系列）」。分屏是**产出侧**的事，渲染器那边画布与预览本来就摆在同一条可平移的画布上。
 6. **导出**：`canvas_export` 加 design→PNG（CanvasKit `makeImageSnapshot`，1x/2x/4x 倍率参数）。SVG/PPTX（矢量网络→路径、画板序列→可编辑形状）**远期**。
 7. **测试**：Kiwi 编解码 roundtrip、编辑 op 语义、文档摘要（纯模块单测）；E2E `design-editor.js`（渲染冒烟、选择框、文本编辑、结构化改稿闭环、导出像素）；dock 文案断言改名；`npm run check` 全绿。
 

@@ -91,9 +91,15 @@ export const PICK_ESCAPE_KIND = 'pick-escape'
  */
 export const PICK_SNIPPET_CAP = 2000
 
-/** 提示词框的尺寸（px）。**它就是 {@link placePickBox} 的输入**，所以与样式同源。 */
+/**
+ * 提示词框的尺寸（px）。**它就是 {@link placePickBox} 的输入**，所以与样式同源。
+ *
+ * 高从 268 收到 160（v1.49）：从前框里摊着整段节点源码，得留出一屏给文本；现在那几十行
+ * 折成了一枚元素标签（`PromptFold`），框里只剩「一枚标签 + 用户写的几行要求」——268 的
+ * 框会有大半是空的，而框越大、`placePickBox` 越容易被迫把元素挪到看不见的那一侧去。
+ */
 export const PICK_BOX_WIDTH = 420
-export const PICK_BOX_HEIGHT = 268
+export const PICK_BOX_HEIGHT = 160
 
 /** 一个矩形，两边共用的最小形状：帧坐标系与窗口坐标系都用它。 */
 export interface PickRect {
@@ -330,11 +336,32 @@ export interface EditPromptSplit {
 }
 
 /**
+ * Cut a written edit prompt by **the very head it was built from**.
+ *
+ * 这是切分唯一的那一半真本事：拿一段已知原文当**前缀**去量草稿，对上就切、对不上就
+ * 返回 `undefined`（调用方退回纯文本编辑，不猜「要求」从哪儿开始）。
+ *
+ * 之所以要有这个「直接把 head 递进来」的入口，是因为 {@link splitEditPrompt} 那副长相
+ * 里藏着一个已经踩过的坑：它要调用方**再交代一次**这是哪个产物、哪个节点，而那份交代与
+ * 生成草稿时那份是两个来源——元素选择当场就是拿 `view.file` 生成的草稿、切分时却递了
+ * `cardId`（卡片的 6 位 id，与产物路径根本不是一回事），于是前缀永远对不上，标签在真机
+ * 上一次也没画出来过。凡是「同一个东西有两个来源」的地方，早晚会有一个是错的；所以谁
+ * **生成的**草稿，谁就把那段 head **留着**，切分时原样递回来——两份值在结构上就是同一份。
+ *
+ * @param input.head - the locator half as {@link buildEditPrompt} wrote it (empty request).
+ * @param input.text - the draft as written (locator and request together).
+ */
+export function cutEditPrompt(input: { head: string; text: string }): EditPromptSplit | undefined {
+  if (!input.text.startsWith(input.head)) return undefined
+  return { head: input.head, request: input.text.slice(input.head.length) }
+}
+
+/**
  * Cut a written edit prompt into its locator block and the user's request.
  *
- * The prompt box displays the locator as **one packed element block** and lets
- * the user edit only the request — a display change, never a prompt change. The
- * cut is therefore not a text heuristic: the head is rebuilt by calling
+ * The prompt box displays the locator as **one folded element tag** and lets the
+ * user edit only the request — a display change, never a prompt change. The cut
+ * is therefore not a text heuristic: the head is rebuilt by calling
  * {@link buildEditPrompt} with an empty request and matched as a **prefix** of
  * the written text. That is exact by construction — the head is whatever this
  * module would have written for the same pick — and a draft that no longer
@@ -342,7 +369,11 @@ export interface EditPromptSplit {
  * `undefined`, the caller's cue to fall back to plain editing rather than to
  * guess where the request begins.
  *
- * @param input.file - the card id the prompt was built with.
+ * 调用方手里**已经**有那段 head 时（元素选择就是在生成草稿的那一次调用里拿到的），
+ * 用 {@link cutEditPrompt} 直接递 head——别再在这里把 `file` / `target` 交代第二遍。
+ *
+ * @param input.file - the artifact the prompt was built with. **不是卡片 id**：这两者
+ *   自 v1.49 起就是两件事，拿 id 来切一份按路径生成的草稿，前缀一定对不上。
  * @param input.target - the pick the prompt was built with.
  * @param input.text - the draft as written (locator and request together).
  */
@@ -351,9 +382,10 @@ export function splitEditPrompt(input: {
   target: PickTarget
   text: string
 }): EditPromptSplit | undefined {
-  const head = buildEditPrompt({ file: input.file, target: input.target, request: '' })
-  if (!input.text.startsWith(head)) return undefined
-  return { head, request: input.text.slice(head.length) }
+  return cutEditPrompt({
+    head: buildEditPrompt({ file: input.file, target: input.target, request: '' }),
+    text: input.text,
+  })
 }
 
 /** What {@link placePickBox} needs to know. */

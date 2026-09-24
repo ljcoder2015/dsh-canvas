@@ -99,7 +99,7 @@ export function CardFace({ located, facts, t, children }: CardFaceProps) {
   return (
     <div className="dsh-canvas-panel">
       <div className="dsh-canvas-panel-head">
-        <span className="dsh-canvas-panel-title">{basenameOf(card.file)}</span>
+        <span className="dsh-canvas-panel-title">{card.name}</span>
         <span className="dsh-canvas-card-meta">{card.kindLabel}</span>
       </div>
 

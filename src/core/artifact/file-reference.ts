@@ -2,7 +2,7 @@
  * dsh-canvas — the harness's `@file` mention grammar, at the half a board needs
  * (F5.3).
  *
- * A 取材 edge says "this artifact builds on that artifact", and the harness
+ * A source edge (引用) says "this artifact builds on that artifact", and the harness
  * already owns the vocabulary for naming an artifact inside a prompt: an `@`
  * token whose payload is a workspace-relative path, with `@"..."` quoting when
  * the path contains whitespace. Card sessions carry that convention today —

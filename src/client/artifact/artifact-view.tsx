@@ -33,11 +33,13 @@
  * 跳回预览也不丢，所以「看一眼渲染结果」从来不必付掉手上的工作，而未保存的关闭会先问一句
  * 而不是默默丢掉。
  */
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { Translate } from '../ui/locales.ts'
 import { ArtifactChromeProvider, useArtifactShell, type ArtifactModalBridge } from './chrome.tsx'
+import { needsBlankText } from './editing/writable.ts'
 import type { ViewerMode } from './editing/mode.ts'
+import { seedBlankText } from './editing/seed-blank.ts'
 import { viewerFor } from './registry.ts'
 import { useArtifactPayload } from './use-artifact-payload.ts'
 
@@ -106,13 +108,58 @@ export function ArtifactModal(props: {
     onClose()
   }
 
-  const { view, error } = payload
+  const { view, error, adopt } = payload
+
+  /**
+   * 「手动输入」落到一张还没有产物的文本卡上：先把那个文件造出来，再开编辑面。
+   *
+   * 卡片可以先于它的产物存在（F1.11），而这枚按钮的**含义**是「我要写字」——用户点它是
+   * 想写，不是想看一句「产物不存在」。所以这里替他落一份空文件（真源仍是他自己敲的字），
+   * 回读一次，编辑面自然就画出来了。判据在 `needsBlankText`（三条同时成立才落）。
+   *
+   * 三个细节都不是随便定的：
+   *
+   * - **只在这是第一次**（`seeded`）。落盘之后回读仍说不在（写被静默丢掉的极端情形）也
+   *   不许再试第二遍：那会变成一次写盘循环，而用户手里并没有按任何东西。
+   * - **落盘期间画的是「加载中」**，不是「产物不存在」：效果跑在首次绘制之后，不挡这一帧
+   *   就会闪一句本来不成立的话。
+   * - **写完叫一次 `onSaved`**：板上这张卡的「产物丢了」（F1.11）该跟着消掉，卡面也该重读。
+   */
+  const seeded = useRef(false)
+  const [seeding, setSeeding] = useState(false)
+  const [seedError, setSeedError] = useState('')
+  useEffect(() => {
+    if (view === undefined || seeded.current || !needsBlankText(view, initialMode === 'edit')) return
+    seeded.current = true
+    let cancelled = false
+    setSeeding(true)
+    setSeedError('')
+    void (async () => {
+      try {
+        // 落空文件 + 回读的那两步在 `seed-blank.ts` 里（判据能拿假 wire 真跑一遍）。
+        const next = await seedBlankText(bridge, projectId, cardId)
+        if (cancelled) return
+        adopt(next)
+        onSaved?.()
+      } catch (reason: unknown) {
+        // 写不进去就说写不进去。退回「产物不存在」会让人以为是自己点错了。
+        if (!cancelled) setSeedError(reason instanceof Error ? reason.message : t('canvas.error.unknown'))
+      } finally {
+        if (!cancelled) setSeeding(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [adopt, bridge, cardId, initialMode, onSaved, projectId, t, view])
+
   let body: ReactElement
-  if (error !== '') {
-    body = <div className="dsh-canvas-viewer-note">{t('canvas.error', { message: error })}</div>
-  } else if (view === undefined) {
+  if (error !== '' || seedError !== '') {
+    body = <div className="dsh-canvas-viewer-note">{t('canvas.error', { message: error !== '' ? error : seedError })}</div>
+  } else if (seeding || view === undefined) {
     // 唯一的加载态。它还有第二个用处：换一张卡时正文先回到这里，于是**预览器随之卸载**
     // ——草稿、选择模式这些跟着它的东西不会走到另一张卡上（见 `use-text-editing.ts`）。
+    // 落一份空白的那一瞬也走这里：见上面那个效果（不挡这一帧就会闪一句「产物不存在」）。
     body = <div className="dsh-canvas-viewer-note">{t('canvas.viewer.loading')}</div>
   } else if (!view.present) {
     body = <div className="dsh-canvas-viewer-note">{t('canvas.viewer.absent')}</div>
@@ -144,7 +191,7 @@ export function ArtifactModal(props: {
       >
         <div className="dsh-canvas-dialog dsh-canvas-viewer">
           <div className="dsh-canvas-dialog-head">
-            {(view?.file ?? cardId).split('/').pop()}
+            {view?.name !== undefined && view.name !== '' ? view.name : (view?.file ?? cardId).split('/').pop()}
             <span className="dsh-canvas-card-meta">{view?.kind ?? ''}</span>
             <span className="dsh-canvas-spacer" />
             {/* 头部插槽：头部的布局在这里，头部里的按钮属于各个预览器。 */}

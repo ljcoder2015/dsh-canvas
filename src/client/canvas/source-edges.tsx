@@ -1,7 +1,7 @@
 /**
  * dsh-canvas — the source edges (F4.1).
  *
- * There is exactly one relation on this board: 取材. A downstream artifact
+ * There is exactly one relation on this board: 引用 — a **source edge**. A downstream artifact
  * takes its material from an upstream one, so the line runs material → product.
  *
  * The line has exactly one look: a thin solid stroke in the breeze accent, no
@@ -173,7 +173,7 @@ export function SourceEdges(props: SourceEdgesProps) {
         : (() => {
             const start = seatOf(pending.cardId)
             if (start === undefined) return null
-            // 从锚点（端口圆心）起笔、终点就是指针本身。样式与落定的取材线同款（细线、
+            // 从锚点（端口圆心）起笔、终点就是指针本身。样式与落定的引用线同款（细线、
             // 无箭头），`is-pending` 这个类不挂样式，只留给工具区分「手上这根」。
             return (
               <path

@@ -118,6 +118,9 @@ export class BoardFile {
           // Only when it differs from the id: a legacy record (path-shaped id,
           // no `file`) renders exactly as it did before the split.
           file: record.file !== undefined && record.file !== id ? record.file : undefined,
+          // Only when the record carries one, i.e. when it is not simply what
+          // the artifact's own path says (F1.12).
+          name: record.name !== undefined && record.name !== '' ? record.name : undefined,
           // `undefined` rather than `false`, so a board with no empty seats
           // renders exactly as it did before this field existed.
           empty: record.seatedEmpty === true ? true : undefined,

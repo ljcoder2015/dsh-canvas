@@ -9,7 +9,7 @@
  * `<root>/.dsh-canvas/board.json`：
  *
  * - `id`：这张画布是谁。目录改名、搬家之后，绑定先读它，于是认回同一张画布、同一批
- *   座位与取材（F1.9）。没有它时退回 `projectIdOf(root)`，所以**已经存在的画布一个字节
+ *   座位与引用（F1.9）。没有它时退回 `projectIdOf(root)`，所以**已经存在的画布一个字节
  *   都不用迁**——第一次重新绑定会照着老身份把文件补出来。
  * - `cards` / `sources` / `notes` / `style` / `name`：人读得懂、可 diff、可手改的板面快照。
  *   换一台机器、或把目录拷给同事，绑定它就能把板面重建出来（F1.10）。
@@ -54,6 +54,13 @@ export interface BoardFileCard {
    * only when it differs from the id, so a legacy board is unchanged on disk.
    */
   file?: string
+  /**
+   * The user's own name for the card (F1.12), when it says something the path
+   * does not. Carried for the same reason the seats are: a name is the user's
+   * word for the work, so a folder opened elsewhere — or handed to a colleague
+   * — must show the board they named, not its file names.
+   */
+  name?: string
   /**
    * The seat was created without an artifact and has not been seen with one
    * since (F1.11). Carried so the exemption survives leaving this machine: a
@@ -118,6 +125,7 @@ export function composeBoardFile(content: BoardFileContent): string {
       id: card.id,
       position: card.position,
       ...(card.file !== undefined && card.file !== card.id ? { file: card.file } : {}),
+      ...(card.name !== undefined && card.name !== '' ? { name: card.name } : {}),
       ...(card.empty === true ? { empty: true } : {}),
     }))
   const sources = [...content.sources].sort(
@@ -173,11 +181,15 @@ export function parseBoardFile(text: string): BoardFileRead {
         const position = point(entry['position'])
         if (cardId === '' || position === undefined) return []
         const file = text1(entry['file'])
+        const name = text1(entry['name'])
         return [
           {
             id: cardId,
             position,
             ...(file !== '' && file !== cardId ? { file } : {}),
+            // Empty reads as "no name of its own": the display name falls back
+            // to the artifact, exactly as it did before this field existed.
+            ...(name !== '' ? { name } : {}),
             ...(entry['empty'] === true ? { empty: true } : {}),
           },
         ]
@@ -300,6 +312,8 @@ export interface SeatPlanInput {
  */
 export interface PlannedSeat extends Seat {
   file: string
+  /** The card's own name, when the file carried one (F1.12). */
+  name?: string
   empty?: boolean
 }
 
@@ -335,7 +349,13 @@ export function planSeats(input: SeatPlanInput): PlannedSeat[] {
     known.add(card.id)
     const file = card.file ?? card.id
     const position = { ...card.position }
-    fresh.push({ id: card.id, file, position, ...(card.empty === true ? { empty: true } : {}) })
+    fresh.push({
+      id: card.id,
+      file,
+      position,
+      ...(card.name === undefined ? {} : { name: card.name }),
+      ...(card.empty === true ? { empty: true } : {}),
+    })
     seats.push({ id: card.id, file, position })
     if (!ownerOf.has(file)) ownerOf.set(file, card.id)
   }

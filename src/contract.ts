@@ -110,6 +110,8 @@ export const boardCardSchema = z
     id: cardIdSchema,
     /** Artifact path relative to the project root — the card's file, not its id. */
     file: cardFileSchema,
+    /** What the card is called (F1.12): the user's name, or its artifact's own. */
+    name: z.string().max(120),
     project: projectIdSchema,
     kind: z.string(),
     kindLabel: z.string(),
@@ -155,6 +157,7 @@ export const cardSummarySchema = z
     path: z.string(),
     summary: z.string(),
     outline: z.array(z.string()),
+    head: z.string(),
     bytes: z.number(),
     updatedAt: z.number(),
   })
@@ -165,6 +168,8 @@ export const artifactViewSchema = z
     cardId: cardIdSchema,
     /** Artifact path the view was read from, relative to the project root. */
     file: cardFileSchema,
+    /** What the card is called (F1.12); `''` when the reader did not know the card. */
+    name: z.string().max(120),
     kind: z.string(),
     present: z.boolean(),
     text: z.string().max(2_000_000),
@@ -380,6 +385,7 @@ const P = {
   intentImage: json('image', 'image', '@ljcoder2015/dsh-canvas#IntentImage', z.string().max(4_000_000)),
   prompt: json('prompt', 'prompt', '@ljcoder2015/dsh-canvas#PromptText', z.string().trim().min(1).max(32_000)),
   file: json('file', 'file', '@ljcoder2015/dsh-canvas#CardFile', cardFileSchema),
+  cardName: json('name', 'name', '@ljcoder2015/dsh-canvas#CardName', z.string().max(120)),
   version: json('version', 'version', '@ljcoder2015/dsh-canvas#FsVersion', z.string().min(1).max(200)),
   designOps: json('ops', 'ops', '@ljcoder2015/dsh-canvas#DesignOps', z.array(designOpSchema).min(1).max(200)),
   style: json('style', 'style', '@ljcoder2015/dsh-canvas#StyleProfile', styleProfileSchema),
@@ -520,6 +526,10 @@ export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.designOps], cancellation: signal, result: R.designEdit,
   },
   {
+    id: '@ljcoder2015/dsh-canvas#card/rename_card', service: 'card', namespace: 'card', method: 'renameCard',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.cardName], cancellation: signal, result: R.card,
+  },
+  {
     id: '@ljcoder2015/dsh-canvas#card/remove_card', service: 'card', namespace: 'card', method: 'removeCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.boolean,
   },
@@ -625,5 +635,12 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'card/stale-version': { readonly cardId: string; readonly expected: string; readonly actual: string }
     /** The artifact is absent, or is a directory where a file is required. */
     'card/artifact-absent': { readonly cardId: string; readonly path: string }
+    /**
+     * A rename this deployment will not perform (F1.12): the name carries no
+     * path segment, the card's artifact *is* the canvas folder, or the backend
+     * serves another execution world whose paths this process may not touch.
+     * The reason travels as text because the set grows with the refusal cases.
+     */
+    'card/rename-refused': { readonly cardId: string; readonly name: string; readonly reason: string }
   }
 }

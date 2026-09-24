@@ -40,6 +40,7 @@ function card(kind: string): BoardCard {
   return {
     id: 'untitled.md',
     file: 'untitled.md',
+    name: 'untitled',
     project: 'p',
     kind,
     kindLabel: kind,
@@ -51,7 +52,7 @@ function card(kind: string): BoardCard {
 
 /** A digest with only the kind read. */
 function summary(kind: string): CardSummary {
-  return { cardId: 'untitled.md', kind, path: '/p/untitled.md', summary: '', outline: [], bytes: 0, updatedAt: 0 }
+  return { cardId: 'untitled.md', kind, path: '/p/untitled.md', summary: '', outline: [], head: '', bytes: 0, updatedAt: 0 }
 }
 
 describe('node-type model memory', () => {

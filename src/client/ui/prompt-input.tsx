@@ -37,7 +37,7 @@ import type {
   MutableRefObject,
 } from 'react'
 import { promptAtoms } from '../../core/artifact/prompt-blocks.ts'
-import type { ReferenceFacts } from '../../core/artifact/prompt-blocks.ts'
+import type { PromptFold, ReferenceFacts } from '../../core/artifact/prompt-blocks.ts'
 import { caretFlat, selection, serializeHost, setCaret, writeAtoms } from './prompt-dom.ts'
 
 /**
@@ -91,6 +91,14 @@ export type PromptInputProps = {
    * 额外的信息（缩略图尤其：它让「引用了哪张图」一眼看得见）。
    */
   refs?: Readonly<Record<string, ReferenceFacts>>
+  /**
+   * 调用方**已经知道**是引用的那几段原文（元素选择的定位就是这样一整段）。
+   *
+   * `@文件` 记号是从字符里认出来的，而元素定位写不出记号语法——它是几十行原文。调用方
+   * 知道它从第几个字符起、有多长（就是它自己刚写进去的），于是由它声明，输入面照着画
+   * 一枚标签。**折叠只改画法**：序列化时它吐回那 N 个字符本身，提示词一个字不变。
+   */
+  folds?: readonly PromptFold[]
   spellCheck?: boolean
   style?: CSSProperties
 } & Record<`data-${string}`, string | undefined>
@@ -129,6 +137,30 @@ function factsKey(facts: Readonly<Record<string, ReferenceFacts>> | undefined): 
 }
 
 /**
+ * 折叠段的指纹：位置、长度、长相。
+ *
+ * 与 {@link factsKey} 同一个理由——它决定「这次重渲染要不要重画 DOM」。值与折叠**未必**
+ * 同步：同一段原文换了一枚标签的长相（元素换了名字而源码没变），值一个字节没动，画法
+ * 却得跟上。不把它算进去，那种变化会静默地不生效。
+ */
+function foldsKey(folds: readonly PromptFold[] | undefined): string {
+  if (folds === undefined || folds.length === 0) return ''
+  return folds
+    .map((fold) =>
+      [fold.at, fold.length, fold.reference.type, fold.reference.label, fold.reference.detail ?? ''].join(':'),
+    )
+    .join('|')
+}
+
+/** 内容指纹：值与事实、折叠两样都算。 */
+function contentKey(
+  refs: Readonly<Record<string, ReferenceFacts>> | undefined,
+  folds: readonly PromptFold[] | undefined,
+): string {
+  return `${factsKey(refs)}|${foldsKey(folds)}`
+}
+
+/**
  * 光标前那枚 `@查询` 是什么；不成半边记号就是 `null`。
  *
  * 与 `prompt-blocks.ts` 认记号的边界同一条：`@` 必须在词首（串首或前一字符是空白），
@@ -153,7 +185,7 @@ function queryStart(text: string, caret: number): number {
 export function PromptInput(props: PromptInputProps) {
   const {
     value, onChange, placeholder, className, handleRef, autoFocus, onKeyDown, onQueryChange,
-    refs, spellCheck, style, ...data
+    refs, folds, spellCheck, style, ...data
   } = props
   const hostRef = useRef<HTMLDivElement | null>(null)
   /**
@@ -177,9 +209,9 @@ export function PromptInput(props: PromptInputProps) {
    * 回调与行号的最新一份，专给那些**不是**由这次渲染发起的事情读（`apply`、输入法、
    * 剪贴板）。它们不能进依赖表：`onChange` 每次渲染都是新的，进去等于每次渲染都重排一遍。
    */
-  const latest = useRef({ value, onChange, onQueryChange, refs })
-  const key = factsKey(refs)
-  const atoms = useMemo(() => promptAtoms(value, refs), [value, refs])
+  const latest = useRef({ value, onChange, onQueryChange, refs, folds })
+  const key = contentKey(refs, folds)
+  const atoms = useMemo(() => promptAtoms(value, refs, folds), [value, refs, folds])
 
   /**
    * 写一份新值：DOM、光标、回调一起走，**不经过 React 的重渲染**。
@@ -189,13 +221,14 @@ export function PromptInput(props: PromptInputProps) {
    */
   const apply = useCallback((next: string, caret: number, end?: number) => {
     const host = hostRef.current
-    markRef.current = { text: next, key: factsKey(latest.current.refs) }
+    const now = latest.current
+    markRef.current = { text: next, key: contentKey(now.refs, now.folds) }
     if (host !== null) {
-      writeAtoms(host, promptAtoms(next, latest.current.refs))
+      writeAtoms(host, promptAtoms(next, now.refs, now.folds))
       setCaret(host, caret, end)
     }
     caretRef.current = { start: caret, end: end ?? caret }
-    latest.current.onChange(next)
+    now.onChange(next)
   }, [])
 
   /** 光标现在在值里的哪儿（读 DOM）；读不到就用上一次记住的。 */
@@ -240,7 +273,7 @@ export function PromptInput(props: PromptInputProps) {
       if (caret === undefined) return false
       const text = latest.current.value
       let at = 0
-      for (const atom of promptAtoms(text, latest.current.refs)) {
+      for (const atom of promptAtoms(text, latest.current.refs, latest.current.folds)) {
         const length = atom.kind === 'text' ? atom.text.length : atom.reference.id.length
         if (atom.kind === 'ref' && key === 'Backspace' && at + length === caret) {
           apply(text.slice(0, at) + text.slice(caret), at)
@@ -304,7 +337,7 @@ export function PromptInput(props: PromptInputProps) {
    * 一整个选区，不只是折叠的光标（用户可能正选着半句话）。
    */
   useLayoutEffect(() => {
-    latest.current = { value, onChange, onQueryChange, refs }
+    latest.current = { value, onChange, onQueryChange, refs, folds }
     const host = hostRef.current
     if (host === null) return
     const mark = markRef.current
@@ -323,7 +356,7 @@ export function PromptInput(props: PromptInputProps) {
       setCaret(host, held.start, held.end === held.start ? undefined : held.end)
       caretRef.current = held
     }
-  }, [atoms, key, onChange, onQueryChange, refs, value])
+  }, [atoms, folds, key, onChange, onQueryChange, refs, value])
 
   /** 放大态打开时接住焦点（`autoFocus` 对 `contenteditable` 不生效，得自己做）。 */
   useLayoutEffect(() => {
@@ -343,7 +376,7 @@ export function PromptInput(props: PromptInputProps) {
     const host = hostRef.current
     if (host === null) return
     const text = serializeHost(host)
-    markRef.current = { text, key: factsKey(latest.current.refs) }
+    markRef.current = { text, key: contentKey(latest.current.refs, latest.current.folds) }
     latest.current.onChange(text)
     const caret = caretFlat(host)
     latest.current.onQueryChange?.(queryAt(text, caret ?? text.length))

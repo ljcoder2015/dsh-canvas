@@ -48,13 +48,16 @@ const UPSTREAM_CONTEXT_ORDER = 130
 /**
  * The design preset: what a design card's conversation knows without asking
  * (F3.16). Board sizes come first because "什么尺寸" is the first decision
- * every design instruction implies, then the layer discipline that keeps a
+ * every design instruction implies — the menu gives the ***width***, the
+ * ***height*** follows the content, because one page is one continuous board
+ * (v1.55: no per-screen split) — then the layer discipline that keeps a
  * document navigable — semantic names, text as text — and finally the
  * edit-loop etiquette: read before writing, batch the ops.
  */
 const DESIGN_PRESET = [
-  'Board-size menu (use viewBox-like nodes on an artboard of these sizes unless the user says otherwise):',
-  '手机屏 375×812（@2x 导出 750×1624）、官网首屏 1440×900、海报 1242×1660、社交方图 1080×1080、幻灯片 1920×1080、横幅 1920×600.',
+  'Artboard sizes (scene-graph frames). Take the **width** from this menu and let the **height follow the content**, unless the user names a size:',
+  '手机屏 375 宽、平板 834 宽、桌面 / 官网 1440 宽——网页与应用的长页面**高度按内容给**（1440×2600、375×3200 都是常态，一屏高不是上限）。固定规格的稿件照旧整块给出：海报 1242×1660、社交方图 1080×1080、幻灯片 1920×1080、横幅 1920×600.',
+  'No pagination: a web page or an app lives on **one artboard** — everything below the fold stays in that same continuous column, exactly how the browser will scroll it, never compressed to fit one screen. Do not split one page into per-screen boards (首屏 / 第二屏 / 第三屏): the user scrolls one page, they do not flip between screens. Several artboards are right only when the user asks for screens side by side (多屏对比 / 流程走查) or when the deliverable is a sequence by nature (幻灯片的每一页、海报系列).',
   'Layer discipline: name every layer in plain language (name), group by function — artboards are frames (parentId \'\'), child layers live inside; text stays type `text` with its string in `text`, never flattened; keep one frame per board and no stray root nodes.',
   'Edit loop: `canvas_design_read` first (ops must reference real node ids), then one `canvas_design_edit` batch of upsert/setProps/move/delete/reorder — small batches, geometry in layer coordinates (x/y is the top-left), colors as #RRGGBB[AA].',
 ].join(' ')
@@ -76,9 +79,9 @@ export function registerGlobalPrompt(ctx: Context): void {
       '',
       `This deployment has the canvas plugin (${PLUGIN_ID}). A canvas project is a directory on disk; every artifact in it is a card, and every card owns one conversation.`,
       '',
-      'Vocabulary: a **card** is one artifact plus its board seat; a **session** is that card\'s conversation; a **source** (取材) is the statement "this artifact builds on that artifact" — material at the upstream end, product at the downstream end. There is exactly one relationship type, and it is directed.',
+      'Vocabulary: a **card** is one artifact plus its board seat; a **session** is that card\'s conversation; a **source** (引用) is the statement "this artifact builds on that artifact" — material at the upstream end, product at the downstream end. There is exactly one relationship type, and it is directed.',
       '',
-      'A source edge (取材) carries material in two forms, and they answer different questions. The upstream **artifact** can be *named* as a file reference (`canvas_reference_files`): the board injects its workspace-relative path as an `@` token and you read it with the ordinary file tools when it matters — that is the cheap, always-current form. The same artifact can also be *summarized into this conversation* on demand (`canvas_read_sources`, `canvas_inject_card`), which costs context whether or not you wanted it but puts the material in front of you without a read.',
+      'A source edge (引用) carries material in two forms, and they answer different questions. The upstream **artifact** can be *named* as a file reference (`canvas_reference_files`): the board injects its workspace-relative path as an `@` token and you read it with the ordinary file tools when it matters — that is the cheap, always-current form. The same artifact can also be *summarized into this conversation* on demand (`canvas_read_sources`, `canvas_inject_card`), which costs context whether or not you wanted it but puts the material in front of you without a read.',
       '',
       `The \`${TOOL_NAMES.readCard}\`, \`${TOOL_NAMES.readSources}\`, \`${TOOL_NAMES.referenceFiles}\`, \`${TOOL_NAMES.linkSource}\`, \`${TOOL_NAMES.getSources}\` and \`${TOOL_NAMES.injectCard}\` tools act on *the card whose conversation is calling them*. Outside a card conversation they are refused — that is the intended behavior, not a fault, and the fix is to open the card first rather than to retry.`,
       `\`${TOOL_NAMES.readBoard}\`, \`${TOOL_NAMES.arrangeOnBoard}\`, \`${TOOL_NAMES.organizeBoard}\`, \`${TOOL_NAMES.createOnBoard}\`, \`${TOOL_NAMES.linkSourceOnBoard}\`, \`${TOOL_NAMES.generateImage}\`, \`${TOOL_NAMES.export}\` and \`${TOOL_NAMES.publish}\` are board-wide: they answer for the canvas the user has open — and inside a card conversation, where the project is certain, for that card's canvas.`,
@@ -130,7 +133,7 @@ export function installCardScope(agentCtx: Context, input: CardScopeInput): void
       '',
       '### Material this artifact sources from',
       '',
-      'The block below names the artifacts this one is declared to source from (取材) — **one hop**: the material it builds on directly, as workspace-relative paths, which is exactly what the `@file` grammar denotes. Read any of them with the ordinary file tools: they are references, not content, and nothing has been copied into this conversation on your behalf.',
+      'The block below names the artifacts this one is declared to source from (引用) — **one hop**: the material it builds on directly, as workspace-relative paths, which is exactly what the `@file` grammar denotes. Read any of them with the ordinary file tools: they are references, not content, and nothing has been copied into this conversation on your behalf.',
       '',
       'Nothing further up the chain is listed, on purpose. Those artifacts are upstream of *your* upstream, and the product in between is expected to have absorbed them — so work from what is named here, and from that artifact\'s own content, rather than guessing at its ancestors. If an instruction really reaches past them, `canvas_get_sources` names the whole chain, and `canvas_read_card` reads any one artifact on it.',
       '',
@@ -197,7 +200,7 @@ export function referenceMessage(
       kind: 'plugin',
       plugin: PLUGIN_ID,
       form: 'notice',
-      summary: boundContextSummary(`取材 ${references.map((reference) => reference.cardId).join(' / ')}`),
+      summary: boundContextSummary(`引用 ${references.map((reference) => reference.cardId).join(' / ')}`),
     },
   })
 }
@@ -253,7 +256,7 @@ export function injectionMessage(source: CardSummary, mode: 'summary' | 'full', 
       kind: 'plugin',
       plugin: PLUGIN_ID,
       form: 'notice',
-      summary: boundContextSummary(`取材 ${source.cardId}`),
+      summary: boundContextSummary(`引用 ${source.cardId}`),
     },
   })
 }

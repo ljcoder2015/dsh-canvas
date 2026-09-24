@@ -296,6 +296,10 @@ function glyphFor(document: Document, type: ReferenceType): SVGSVGElement {
         'M2.8 6V2.8H6M10 2.8h3.2V6M13.2 10v3.2H10M6 13.2H2.8V10',
       ),
     )
+  } else if (type === 'element') {
+    // 元素是「产物里的一个节点」：一枚实心方框加它自己的那条横线（像个块），与
+    // region 那圈四角括号分得开——那说的是「图上框出来的区域」，不是 DOM 里的节点。
+    svg.append(stroke(document, 'M2.8 3.2h10.4v9.6H2.8z'), stroke(document, 'M2.8 6h10.4'))
   } else {
     svg.append(stroke(document, 'M4.2 1.8h4.9L12.8 5.5V14a.6.6 0 0 1-.6.6H4.2a.6.6 0 0 1-.6-.6V2.4a.6.6 0 0 1 .6-.6Z'), stroke(document, 'M9 1.9v3.7h3.7'))
   }
@@ -321,7 +325,7 @@ function badgeOf(reference: PromptReference): string | undefined {
 /**
  * 一枚标签：图标（或缩略图）+ 名字 + 可选徽标，整体不可分隔。
  *
- * 名字只取最后一段（`hero/index.html` → `index.html`），与画布上取材 chips 的写法一致；
+ * 名字只取最后一段（`hero/index.html` → `index.html`），与画布上引用 chips 的写法一致；
  * 整条路径挂在 `title` 上——两枚同名文件靠悬停分辨，而标签本身始终只有一枚的可读宽度。
  * 名字写的是**文件名而不是序号**：本插件的锚点就是路径，两枚同名图片因此在提示词里也还
  * 分得清谁是谁（文档那套 `@图片1` 编号属于「图片另走一路」的设计，见 `PromptReference`）。
@@ -332,7 +336,7 @@ function chipElement(document: Document, reference: PromptReference): HTMLElemen
   chip.setAttribute('contenteditable', 'false')
   chip.setAttribute(CHIP_TOKEN_ATTR, reference.id)
   chip.setAttribute(CHIP_TYPE_ATTR, reference.type)
-  chip.title = reference.filePath ?? reference.target ?? reference.label
+  chip.title = reference.detail ?? reference.filePath ?? reference.target ?? reference.label
   if (reference.filePath !== undefined) chip.setAttribute(CHIP_PATH_ATTR, reference.filePath)
   chip.append(
     reference.type === 'image' && reference.thumbnail !== undefined

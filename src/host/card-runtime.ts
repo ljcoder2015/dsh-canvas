@@ -33,6 +33,7 @@ import type {
 import type { CanvasDomain } from '../domain.ts'
 import type { CanvasCapabilities } from '../capabilities.ts'
 import type { ArtifactIo } from '../core/artifact/artifact-io.ts'
+import { missingOf } from '../core/artifact/artifact-io.ts'
 import { cardFileOf, cardIdOfKey, cardKeyOf, SessionManager, type CardSession } from '../core/session/session-manager.ts'
 import { mintCardId, slugify } from '../core/canvas/ids.ts'
 import { cardPreset, composeCardAgent } from '../core/session/agent-preset.ts'
@@ -50,6 +51,13 @@ import {
 } from './prompt.ts'
 import { attachCanvasSession } from '../core/canvas/workspace.ts'
 import { planCleanup, type CleanupCandidate } from '../core/canvas/cleanup.ts'
+import {
+  cardNameOf,
+  renameStep,
+  RENAME_REFUSAL_TEXT,
+  settleRename,
+  storedNameOf,
+} from '../core/canvas/card-name.ts'
 import { materialUpstreams } from '../core/canvas/source-store.ts'
 import type { BoardFile } from './board-file.ts'
 import { nameFileReferences, nameWithoutProbe, type FileReferenceTarget } from '../core/artifact/file-reference.ts'
@@ -90,6 +98,8 @@ interface CardRecord {
   seatedEmpty?: boolean | undefined
   /** Artifact path relative to the project root; absent on pre-split records, where the id *is* the path. */
   file?: string | undefined
+  /** The card's own name (F1.12), when it says more than its artifact's path does. */
+  name?: string | undefined
 }
 
 /**
@@ -172,6 +182,7 @@ export class CardRuntime extends TypertRemoteService {
     return {
       id: cardId,
       file,
+      name: cardNameOf({ file, kind: resolved }),
       project: projectId,
       kind: resolved,
       kindLabel: kindLabel(resolved),
@@ -180,6 +191,80 @@ export class CardRuntime extends TypertRemoteService {
       // Never missing: the file is either there, or the seat has just recorded
       // that it was born without one.
       missing: false,
+    }
+  }
+
+  /**
+   * 给卡片起个名字（F1.12）。
+   *
+   * 名字有两处：**记录上的 `name`**（用户自己起的，与产物推出来的默认名不一致时才写）
+   * 与**磁盘上那一项**（文件的改文件、目录的改目录——判据在 `core/canvas/card-name.ts`：
+   * 应用与站点的产物是「一个目录带 index.html」，所以改的是那个目录，入口页跟着搬）。
+   *
+   * 三条次序上的规矩：
+   *
+   * 1. **撞名从 `-2` 起往下试**，判据在磁盘上而不是板上——与建卡、脚手架同一个规矩，且
+   *    一张已经不在板上的旧卡留下的文件同样算占位（它确实还占着那个名字）。
+   * 2. **先动磁盘、后写记录。** 反过来会留下一条指向不存在路径的记录；磁盘失败时板面
+   *    原样不动，用户看到的就是一次没发生过的改名。
+   * 3. **源不存在就不搬，只改绑定。** 产物确实丢了的卡片（F3.5）与还没写过产物的空座位
+   *    都不是异常状态：改名把它们指到新路径上，会话与引用关系一个字都不动。
+   *
+   * 形态不重新判定：改名不是改形态——`.md` 还是 markdown、`myapp/index.html` 挪进
+   * `市场分析/` 之后还是 webapp。真去探一次反而会在产物缺失时把形态错读成兜底的
+   * `file`。
+   */
+  @Remote
+  async renameCard(projectId: ProjectId, cardId: CardId, name: string, signal?: AbortSignal): Promise<BoardCard> {
+    signal?.throwIfAborted()
+    const project = this.requireProject(projectId)
+    const record = this.requireCard(projectId, cardId)
+    const file = fileOf(record, cardId)
+
+    const plan = await settleRename({
+      file,
+      kind: record.kind,
+      name,
+      // 撞名的判据在磁盘上（与建卡、脚手架同一条），板上一张已经拿掉的旧卡留下的文件
+      // 同样算占位——它确实还占着那个名字。
+      taken: async (candidate) => (await this.deps.io.presenceOf(project.root, candidate, signal)) === 'present',
+    })
+    if (plan.kind === 'refused') {
+      throw new RemoteError('card/rename-refused', `卡片改名被拒：${RENAME_REFUSAL_TEXT[plan.reason]}`, {
+        cardId,
+        name,
+        reason: plan.reason,
+      })
+    }
+
+    const step = renameStep({
+      plan,
+      // The source may be gone: a ghost card (F3.5) or a seat that has not been
+      // written yet (F1.11). Either way the rename is a re-point, not an error.
+      sourcePresent: (await this.deps.io.presenceOf(project.root, plan.from, signal)) === 'present',
+    })
+    if (step.kind === 'move') await this.deps.io.renameEntry(project.root, step.from, step.to, signal)
+
+    const stored = storedNameOf({ file: step.file, kind: record.kind, name })
+    await this.cards.put(cardKeyOf(projectId, cardId), {
+      ...record,
+      file: step.file,
+      name: stored,
+      updatedAt: Date.now(),
+    })
+    await this.persist(projectId, project, signal)
+
+    const presence = await this.deps.io.presenceOf(project.root, step.file, signal)
+    return {
+      id: cardId,
+      file: step.file,
+      name: cardNameOf({ file: step.file, kind: record.kind, name: stored }),
+      project: projectId,
+      kind: record.kind,
+      kindLabel: kindLabel(record.kind),
+      position: record.position,
+      sessionId: record.sessionId,
+      missing: missingOf(presence, record.seatedEmpty),
     }
   }
 
@@ -339,8 +424,8 @@ export class CardRuntime extends TypertRemoteService {
    */
   async readDesign(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<DesignDocumentWire> {
     const project = this.requireProject(projectId)
-    this.requireCard(projectId, cardId)
-    const { doc } = await this.deps.io.readDesign(project.root, cardId, signal)
+    const record = this.requireCard(projectId, cardId)
+    const { doc } = await this.deps.io.readDesign(project.root, fileOf(record, cardId), signal)
     return {
       cardId,
       formatVersion: DESIGN_FILE_VERSION,
@@ -364,7 +449,7 @@ export class CardRuntime extends TypertRemoteService {
   ): Promise<{ cardId: CardId; applied: number; errors: string[]; version: string }> {
     const project = this.requireProject(projectId)
     const record = this.requireCard(projectId, cardId)
-    const { doc, version } = await this.deps.io.readDesign(project.root, cardId, signal)
+    const { doc, version } = await this.deps.io.readDesign(project.root, fileOf(record, cardId), signal)
     const result = applyDesignOps(doc, ops)
     if (result.errors.length > 0 && result.applied === 0) {
       // Nothing in the batch landed; fail loudly so the model re-reads instead
@@ -382,13 +467,20 @@ export class CardRuntime extends TypertRemoteService {
 
   // ── digests ─────────────────────────────────────────────────────────────
 
-  /** Bounded digest of one artifact (F5.2). */
+  /**
+   * Bounded digest of one artifact (F5.2).
+   *
+   * The IO layer is handed the card's **file**, never its seat id — since
+   * v1.49 the two are different things, and an id passed here would be read as
+   * a path (`<root>/qkxwvd`), which used to answer "no such artifact" for every
+   * card whose id was not itself a path.
+   */
   @Remote
   async readSummary(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<CardSummary> {
     signal?.throwIfAborted()
     const project = this.requireProject(projectId)
-    this.requireCard(projectId, cardId)
-    return this.deps.io.summarize(project.root, cardId, this.deps.summaryBudget, signal)
+    const record = this.requireCard(projectId, cardId)
+    return this.deps.io.summarize(project.root, fileOf(record, cardId), this.deps.summaryBudget, signal)
   }
 
   /**
@@ -404,8 +496,16 @@ export class CardRuntime extends TypertRemoteService {
     signal?.throwIfAborted()
     const project = this.requireProject(projectId)
     const record = this.requireCard(projectId, cardId)
-    const view = await this.deps.io.view(project.root, fileOf(record, cardId), signal)
-    return { ...view, cardId, file: fileOf(record, cardId) }
+    const file = fileOf(record, cardId)
+    const view = await this.deps.io.view(project.root, file, signal)
+    // The IO layer knows the artifact; only the record knows what the card is
+    // called (F1.12), so the two deck-side values are stamped on here.
+    return {
+      ...view,
+      cardId,
+      file,
+      name: cardNameOf({ file, kind: record.kind, name: record.name }),
+    }
   }
 
   /**
@@ -474,7 +574,7 @@ export class CardRuntime extends TypertRemoteService {
   /**
    * Hand this card's material over as **file references** (F5.3).
    *
-   * A 取材 edge says "this artifact builds on that artifact", and the harness
+   * A source edge (引用) says "this artifact builds on that artifact", and the harness
    * already has a way to say that inside a prompt: an `@` token holding a
    * workspace-relative path. Every card names its artifact by its own `file`
    * — which sits at `<project root>/<file>`, the card session's working
@@ -734,7 +834,7 @@ export class CardRuntime extends TypertRemoteService {
     signal?.throwIfAborted()
     const project = this.requireProject(projectId)
     const record = this.requireCard(projectId, cardId)
-    const outcome = await this.deps.io.write(project.root, cardId, content, undefined, signal)
+    const outcome = await this.deps.io.write(project.root, fileOf(record, cardId), content, undefined, signal)
     await this.touch(projectId, cardId, record)
     return { cardId, ...outcome }
   }
@@ -758,7 +858,7 @@ export class CardRuntime extends TypertRemoteService {
     signal?.throwIfAborted()
     const project = this.requireProject(projectId)
     const record = this.requireCard(projectId, cardId)
-    const current = await this.deps.io.readText(project.root, cardId, signal)
+    const current = await this.deps.io.readText(project.root, fileOf(record, cardId), signal)
     if (String(current.version) !== version) {
       throw new RemoteError(
         'card/stale-version',
@@ -766,7 +866,7 @@ export class CardRuntime extends TypertRemoteService {
         { cardId, expected: version, actual: String(current.version) },
       )
     }
-    const outcome = await this.deps.io.write(project.root, cardId, content, { version: current.version }, signal)
+    const outcome = await this.deps.io.write(project.root, fileOf(record, cardId), content, { version: current.version }, signal)
     await this.touch(projectId, cardId, record)
     await this.notifyDownstream(project, cardId)
     return { cardId, ...outcome }
@@ -901,7 +1001,10 @@ export class CardRuntime extends TypertRemoteService {
       return { cardId, format, ok: false, path: '', reason: '部署未提供导出能力（服务键 dsh-canvas.capabilities）' }
     }
     try {
-      const artifact = await this.deps.io.facts(project.root, cardId, signal)
+      // 与导出、发布同一条规矩：能力拿到的是**路径**，不是座位 id。
+      const record = this.cards.get(cardKeyOf(project.id, cardId))
+      const file = record === undefined ? cardId : fileOf(record, cardId)
+      const artifact = await this.deps.io.facts(project.root, file, signal)
       if (!artifact.present) {
         throw new RemoteError('card/artifact-absent', `artifact ${cardId} is not on disk`, {
           cardId,
@@ -1049,7 +1152,9 @@ export class CardRuntime extends TypertRemoteService {
       let digest = ''
       if (this.deps.upstreamPolicy === 'pull') {
         try {
-          digest = (await this.deps.io.summarize(project.root, cardId, this.deps.summaryBudget)).summary
+          const record = this.cards.get(cardKeyOf(project.id, cardId))
+          const file = record === undefined ? cardId : fileOf(record, cardId)
+          digest = (await this.deps.io.summarize(project.root, file, this.deps.summaryBudget)).summary
         } catch {
           // A digest that cannot be produced still leaves a useful notice.
           digest = ''

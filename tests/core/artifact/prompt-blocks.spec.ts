@@ -30,7 +30,7 @@ import {
   type PromptReference,
   type ReferenceFacts,
 } from '../../../src/core/artifact/prompt-blocks.ts'
-import { buildEditPrompt, splitEditPrompt, type PickTarget } from '../../../src/core/artifact/preview-picker.ts'
+import { buildEditPrompt, cutEditPrompt, splitEditPrompt, type PickTarget } from '../../../src/core/artifact/preview-picker.ts'
 
 /** Joined segments are the original text — the scanner's invariant. */
 function expectRoundTrip(text: string): void {
@@ -392,5 +392,106 @@ describe('splitEditPrompt', () => {
   it('refuses a draft built for a different file', () => {
     const text = buildEditPrompt({ file: 'other/index.html', target: TARGET, request: 'x' })
     expect(splitEditPrompt({ file: 'site/index.html', target: TARGET, text })).toBeUndefined()
+  })
+})
+
+describe('cutEditPrompt — 拿草稿自己那段原文来切', () => {
+  it('只吃一段 head：切出来的两半拼回去还是原文', () => {
+    const head = buildEditPrompt({ file: '应用1/index.html', target: TARGET, request: '' })
+    const text = head + '把标题改小一号'
+    const split = cutEditPrompt({ head, text })
+    expect(split).toEqual({ head, request: '把标题改小一号' })
+    expect(split!.head + split!.request).toBe(text)
+  })
+
+  it('对不上就不切（有人动过定位原文）', () => {
+    const head = buildEditPrompt({ file: '应用1/index.html', target: TARGET, request: '' })
+    expect(cutEditPrompt({ head, text: head.slice(3) })).toBeUndefined()
+    expect(cutEditPrompt({ head, text: '随便一句话' })).toBeUndefined()
+  })
+
+  it('换了 head 就切不动——「卡片 id ≠ 产物路径」踩的正是这一脚', () => {
+    // 真机上就是这个样子：草稿按产物路径生成，切分时却递了卡片 id（`qkxwvd`）。前缀永远
+    // 对不上，于是标签一次也没画出来过、用户看见的始终是纯文本。换成「谁生成的草稿谁把
+    // head 留着、切分时原样递回」，同一个东西就不再有两个来源。
+    const text = buildEditPrompt({ file: '应用1/index.html', target: TARGET, request: '改成蓝色' })
+    const byCardId = buildEditPrompt({ file: 'qkxwvd', target: TARGET, request: '' })
+    expect(cutEditPrompt({ head: byCardId, text })).toBeUndefined()
+    const same = buildEditPrompt({ file: '应用1/index.html', target: TARGET, request: '' })
+    expect(cutEditPrompt({ head: same, text })!.request).toBe('改成蓝色')
+  })
+})
+
+/** 一枚元素标签，只给长相：`id` 一律由原文覆盖（下面第一条判据就是它）。 */
+const ELEMENT: PromptReference = { id: '', type: 'element', label: 'section.hero' }
+
+/**
+ * 折叠（`PromptFold`）：元素选择那条路把「产物 + 节点 + 位置 + 源码」一整段定位写进提示词，
+ * 输入面把它折成一枚**元素标签**——多模态引用的第四种长相。这里钉住三件事：
+ *
+ * 1. 折进去的那一段，序列化时吐回**原文那一段**（往返逐字节），折叠因此与 `@记号` 一样
+ *    只是画法，提示词一个字不动；
+ * 2. token **取 `text` 上那一段，不取调用方给的 `id`**——这条不变量因此是**结构性**的，
+ *    调用方 id 写错也伤不到发出去的提示词；
+ * 3. 对不上的折叠（越界、长度非正、两枚重叠）按普通文本画：宁可少一枚标签，也不能把不
+ *    相干的字符折进去。
+ */
+describe('folds — a stretch the caller already knows is a reference', () => {
+  it('turns the declared stretch into one element reference, the rest stays text', () => {
+    const text = '定位那一段要求改成蓝色'
+    const atoms = promptAtoms(text, undefined, [{ at: 0, length: 4, reference: ELEMENT }])
+    expect(atoms.map((atom) => atom.kind)).toEqual(['ref', 'text'])
+    expect((atoms[0] as { kind: 'ref'; reference: PromptReference }).reference).toMatchObject({
+      type: 'element',
+      id: '定位那一',
+    })
+    expect(atomsText(atoms)).toBe(text)
+  })
+
+  it('round-trips the real thing: a whole built locator folds into one atom', () => {
+    // 元素选择那条路的真实形状——几十行定位（含节点源码、反引号、换行、围栏）折成一枚。
+    const text = buildEditPrompt({ file: 'site/index.html', target: TARGET, request: '把标题改小' })
+    const head = splitEditPrompt({ file: 'site/index.html', target: TARGET, text })!.head
+    const atoms = promptAtoms(text, undefined, [{ at: 0, length: head.length, reference: ELEMENT }])
+    expect(atoms).toHaveLength(2)
+    expect(atoms[0]!.kind).toBe('ref')
+    expect(atoms[1]).toEqual({ kind: 'text', text: '把标题改小' })
+    expect(atomsText(atoms)).toBe(text)
+  })
+
+  it('takes the token from the text, never from the id the caller passed', () => {
+    const folds = [{ at: 0, length: 4, reference: { ...ELEMENT, id: '@wrong.ts' } }]
+    const atoms = promptAtoms('定位原文尾巴', undefined, folds)
+    expect((atoms[0] as { kind: 'ref'; reference: PromptReference }).reference.id).toBe('定位原文')
+    expect(atomsText(atoms)).toBe('定位原文尾巴')
+  })
+
+  it('still reads @mentions outside the folded stretch', () => {
+    const text = '定位段然后 @a.ts 拿去看'
+    const atoms = promptAtoms(text, undefined, [{ at: 0, length: 3, reference: ELEMENT }])
+    expect(atoms.map((atom) => atom.kind)).toEqual(['ref', 'text', 'ref', 'text'])
+    expect(atomsText(atoms)).toBe(text)
+  })
+
+  it('ignores a fold that does not fit the text it is given', () => {
+    const text = '短短一句'
+    const cases = [
+      { what: '长度为零', folds: [{ at: 0, length: 0, reference: ELEMENT }] },
+      { what: '越过末尾', folds: [{ at: 0, length: 99, reference: ELEMENT }] },
+      { what: '起点为负', folds: [{ at: -1, length: 2, reference: ELEMENT }] },
+      {
+        what: '两枚重叠',
+        folds: [
+          { at: 2, length: 2, reference: ELEMENT },
+          { at: 3, length: 2, reference: ELEMENT },
+        ],
+      },
+    ]
+    for (const one of cases) {
+      const atoms = promptAtoms(text, undefined, one.folds)
+      expect(atomsText(atoms), one.what).toBe(text)
+      // 越界的那些一枚都不折；重叠那一对被先到的那枚吃掉，后面的按文本画。
+      expect(atoms.filter((atom) => atom.kind === 'ref').length, one.what).toBeLessThanOrEqual(1)
+    }
   })
 })

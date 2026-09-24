@@ -21,7 +21,16 @@
  * whose kind came out `site` rather than `webapp` reached the iframe with a
  * `styles.css` it had no way to resolve — rendered unstyled, with nothing in
  * the payload saying why.
+ *
+ * The third is the one operation that does *not* go through the seam at all
+ * (F1.12): `renameEntry` hands the OS a path, so the two guards that make that
+ * safe — "this process provably names the same file" and "this deployment
+ * permits a mutation here" — are what get pinned, along with the refusal that
+ * fires instead of moving somebody else's file.
  */
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { isAbsolute, join, normalize } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { FsVersion } from '@deepseek-ai/dsh-fs'
@@ -225,5 +234,112 @@ describe('artifact view inlining', () => {
 
     expect(view.kind).toBe('markdown')
     expect(view.text).toContain('href="s.css"')
+  })
+})
+
+// ── renameEntry：唯一一次绕开 seam 的调用（F1.12）─────────────────────────────
+
+/** The `FsError` code a rejected call carried, or `'no error'`. */
+async function refusalOf(call: Promise<unknown>): Promise<string> {
+  try {
+    await call
+    return 'no error'
+  } catch (error) {
+    return String((error as { code?: unknown }).code)
+  }
+}
+
+/**
+ * An `ArtifactIo` over a real temp directory.
+ *
+ * The rename cannot be faked: its whole point is that a *path* leaves the
+ * process, so the only honest test moves a real file. The stub seam mimics the
+ * local backend — targets are absolute paths in that directory, and the host
+ * path round trip is the identity — which is exactly the composition the
+ * guards are calibrated against.
+ */
+function renameHarness(options: { readonly readOnly?: boolean; readonly mapped?: boolean } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-canvas-rename-'))
+  const local = (path: string, cwd?: string): string => normalize(isAbsolute(path) ? path : join(cwd ?? root, path))
+  const ctx = {
+    fs: {
+      resolve: (path: string, opts?: { cwd?: string }) => {
+        const key = local(path, opts?.cwd)
+        return Promise.resolve({ targetKey: key, displayPath: key })
+      },
+      contains: (parent: { targetKey: string }, child: { targetKey: string }) =>
+        child.targetKey === parent.targetKey || child.targetKey.startsWith(`${parent.targetKey}/`),
+      processPath: (target: { targetKey: string }) => target.targetKey,
+      // A backend that serves another execution world answers `undefined` here
+      // — which is what the base class itself does, and what the refusal is for.
+      processPathFromHostPath: (path: string) =>
+        options.mapped === false || !isAbsolute(path) ? undefined : path,
+    },
+    get: (name: string) =>
+      name === 'sandboxPolicy' && options.readOnly === true ? { resolve: () => ({ mode: 'read-only', workspaceRoot: root }) } : undefined,
+  } as unknown as Context
+  return { io: new ArtifactIo(ctx), root, clean: () => rmSync(root, { recursive: true, force: true }) }
+}
+
+describe('artifact rename', () => {
+  it('moves a file, extension and all, inside the project root', async () => {
+    const h = renameHarness()
+    writeFileSync(join(h.root, 'brief.md'), '# 简报\n')
+
+    await h.io.renameEntry(h.root, 'brief.md', '市场分析.md')
+
+    expect(existsSync(join(h.root, 'brief.md'))).toBe(false)
+    expect(readFileSync(join(h.root, '市场分析.md'), 'utf8')).toBe('# 简报\n')
+    h.clean()
+  })
+
+  it('moves a whole app folder, entry page and all', async () => {
+    const h = renameHarness()
+    mkdirSync(join(h.root, 'myapp'))
+    writeFileSync(join(h.root, 'myapp/index.html'), '<!doctype html>')
+    writeFileSync(join(h.root, 'myapp/styles.css'), 'h1{}')
+
+    await h.io.renameEntry(h.root, 'myapp', '市场分析')
+
+    expect(existsSync(join(h.root, 'myapp'))).toBe(false)
+    expect(readFileSync(join(h.root, '市场分析/index.html'), 'utf8')).toBe('<!doctype html>')
+    expect(existsSync(join(h.root, '市场分析/styles.css'))).toBe(true)
+    h.clean()
+  })
+
+  it('refuses to touch a path when this process cannot prove it names the same file', async () => {
+    // A backend serving another execution world: the path it reports belongs to
+    // that world, and handing it to this OS would rename whatever sits there.
+    const h = renameHarness({ mapped: false })
+    writeFileSync(join(h.root, 'brief.md'), '# 简报\n')
+
+    expect(await refusalOf(h.io.renameEntry(h.root, 'brief.md', '市场分析.md'))).toBe('FS_NOT_OBSERVED')
+    expect(existsSync(join(h.root, 'brief.md'))).toBe(true)
+    h.clean()
+  })
+
+  it('refuses to leave the project root', async () => {
+    const h = renameHarness()
+    writeFileSync(join(h.root, 'brief.md'), '# 简报\n')
+
+    expect(await refusalOf(h.io.renameEntry(h.root, 'brief.md', '../escaped.md'))).toBe('FS_PERMISSION_DENIED')
+    expect(existsSync(join(h.root, 'brief.md'))).toBe(true)
+    h.clean()
+  })
+
+  it('refuses under a read-only deployment, exactly as a write is refused', async () => {
+    const h = renameHarness({ readOnly: true })
+    writeFileSync(join(h.root, 'brief.md'), '# 简报\n')
+
+    expect(await refusalOf(h.io.renameEntry(h.root, 'brief.md', '市场分析.md'))).toBe('FS_SANDBOX_DENIED')
+    expect(existsSync(join(h.root, 'brief.md'))).toBe(true)
+    h.clean()
+  })
+
+  it('reports a missing source in the seam’s own vocabulary', async () => {
+    const h = renameHarness()
+
+    expect(await refusalOf(h.io.renameEntry(h.root, 'gone.md', '市场分析.md'))).toBe('FS_NOT_FOUND')
+    h.clean()
   })
 })

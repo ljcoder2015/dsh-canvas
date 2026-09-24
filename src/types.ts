@@ -71,6 +71,13 @@ export interface Card {
   position: Point
   /** Bound Agent session; empty until the session is created through the agent lifecycle. */
   sessionId: SessionId
+  /**
+   * The card's own name (F1.12), when the user gave it one that the path does
+   * not already say. Absent means "call it whatever its artifact is called" —
+   * see `core/canvas/card-name.ts`, which derives the display name from the
+   * file and the kind.
+   */
+  name?: string
   /** Epoch millis of the last observed write, used for staleness hints. */
   updatedAt: number
 }
@@ -112,6 +119,13 @@ export interface BoardCard {
   id: CardId
   /** Path of the bound artifact, relative to the project root — never the id itself on new cards. */
   file: string
+  /**
+   * What the card is called on the board (F1.12) — the user's name for it, or,
+   * when they never gave it one, the name derived from its artifact: the folder
+   * for a directory-backed kind, the file without its extension otherwise.
+   * Always populated: the board never has to know which of the two it is.
+   */
+  name: string
   project: ProjectId
   kind: string
   /** Human label of the kind, for the card's caption. */
@@ -159,6 +173,8 @@ export interface CardSummary {
   summary: string
   /** Structural outline — headings, slide titles, top-level keys. */
   outline: string[]
+  /** Raw head of the artifact text for the board preview; markdown only, '' for every other kind. */
+  head: string
   /** Byte size, or 0 when unknown. */
   bytes: number
   updatedAt: number
@@ -176,6 +192,8 @@ export interface ArtifactView {
   cardId: CardId
   /** Path of the artifact the view was read from, relative to the project root. */
   file: string
+  /** What the card is called (F1.12); `''` at the IO layer, stamped by the card runtime. */
+  name: string
   /** Kind id as the artifact classifier resolved it at read time. */
   kind: string
   /** Whether the bound file exists on disk. */

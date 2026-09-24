@@ -6,14 +6,23 @@
  * the seam's version guards, sandbox policy parameters and the
  * `fs/write-intent` / `fs/edit-intent` waterfalls that F8.4 hooks into.
  *
+ * The one operation the seam has no verb for is {@link ArtifactIo.renameEntry}
+ * (F1.12): the seam writes *content* to a target, so a rename would have to be
+ * expressed as "write the file elsewhere, then delete the original" — and there
+ * is no delete either. That method is therefore the single place this plugin
+ * reaches past the seam, and it does so with a proof in hand (the backend must
+ * map the path straight back into its own world) plus the same sandbox refusal
+ * every other mutation gets.
+ *
  * Every method here takes the artifact's path *relative to the project root*
  * (§2.2) — the card record's `file`, not the card id — and resolves it against
  * the project root rather than concatenating strings: the seam owns the join
  * and the containment rules.
  */
+import { rename } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import { FsError } from '@deepseek-ai/dsh-fs'
-import type { FsTarget, FsVersion, FsWriteIntent } from '@deepseek-ai/dsh-fs'
+import type { FsErrorCode, FsTarget, FsVersion, FsWriteIntent } from '@deepseek-ai/dsh-fs'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { ArtifactView, CardId, CardSummary, FolderEntry } from '../../types.ts'
 import { PROBE_HEAD_LIMIT, digestOf, detectKind, isHtmlKind, kindLabel, outlineOf, type KindProbe } from './kind-registry.ts'
@@ -34,6 +43,14 @@ export interface ArtifactFacts {
   /** Freshness token of the content the facts were read from. */
   version: string
 }
+
+/**
+ * 卡片预览用的原文头部字符数（markdown 专有）。
+ *
+ * 画布卡片只有 200×140，几百字符渲染出来已经填满整张卡面；再多只是把
+ * `CardSummary` 撑大，往来的每一趟 wire 都在付这几十行的运费。
+ */
+export const PREVIEW_HEAD_CHARS = 600
 
 /** A directory that can host a project, as the folder picker lists it. */
 export interface ProjectCandidate {
@@ -83,6 +100,27 @@ export function fsErrorCodeOf(error: unknown): string | undefined {
 /** Whether a caught value is the seam's own typed error (see {@link fsErrorCodeOf}). */
 function isSeamError(error: unknown): boolean {
   return error instanceof Error && fsErrorCodeOf(error) !== undefined
+}
+
+/**
+ * The seam's code for a failure the OS reported on a rename (F1.12).
+ *
+ * `ArtifactIo.renameEntry` is the one call that reaches the platform directly,
+ * so it is also the one place that has to translate `errno` back into the
+ * vocabulary the rest of the plugin branches on. Anything unrecognised is an
+ * I/O failure rather than a guess: the caller shows the message and the user
+ * decides.
+ */
+function renameErrorCodeOf(error: unknown): FsErrorCode {
+  switch ((error as { code?: unknown } | null)?.code) {
+    case 'ENOENT':
+      return 'FS_NOT_FOUND'
+    case 'EACCES':
+    case 'EPERM':
+      return 'FS_PERMISSION_DENIED'
+    default:
+      return 'FS_IO_ERROR'
+  }
 }
 
 /**
@@ -295,6 +333,7 @@ export class ArtifactIo {
           path: facts.displayPath,
           summary,
           outline,
+          head: '',
           bytes: facts.bytes,
           updatedAt: Date.now(),
         }
@@ -323,6 +362,9 @@ export class ArtifactIo {
         ? `${facts.kindLabel} · ${String(facts.bytes)} B`
         : digestOf(facts.kind, text, budget),
       outline: outlineOf(facts.kind, text),
+      // 预览的原文头部只对 markdown 有意义：它是「文件即文本」的 kind（F3.12），
+      // 卡片直接渲染头部就是渲染产物本身；其余 kind 的 text 是标记或数据，渲染出来是噪音。
+      head: facts.kind === 'markdown' ? text.trim().slice(0, PREVIEW_HEAD_CHARS) : '',
       bytes: facts.bytes,
       updatedAt: Date.now(),
     }
@@ -437,8 +479,9 @@ export class ArtifactIo {
     const base = {
       cardId,
       // `cardId` is the artifact path at this layer; the runtime overrides it
-      // with the card's real id and stamps `file` with the path.
+      // with the card's real id and stamps `file` and `name`.
       file: cardId,
+      name: '',
       kind: facts.kind,
       present: facts.present,
       text: '',
@@ -509,6 +552,80 @@ export class ArtifactIo {
     // this layer has no mandate to make.
     if (standing.mode !== 'workspace-write') return standing
     return { ...standing, workspaceRoot: root }
+  }
+
+  /**
+   * Move one directory entry inside the project root — a file, or a folder
+   * (F1.12, the rename behind a card's name).
+   *
+   * **Why this is not a `ctx.fs` call.** The seam's mutation vocabulary is
+   * "atomically publish this *content* at this target" (`writeText`) and "edit
+   * this text in place" (`editText`); a rename changes no content at all, and
+   * its other half — the original must stop existing — has no verb either. So
+   * the only way to express a rename through the seam would be a copy that
+   * leaves the original behind, which is not a rename. This method therefore
+   * hands the OS the path the backend itself reports, and pays for that with
+   * two guards:
+   *
+   * 1. **It must be *this* file.** `processPath` names a path in the backend's
+   *    execution world, which is only the local filesystem when the backend
+   *    says so. A backend that serves another world (a remote, a container)
+   *    answers `processPathFromHostPath` with `undefined`, or maps the path back
+   *    somewhere else — and a rename that cannot be round-tripped to the same
+   *    target key is refused rather than applied to whatever happens to sit at
+   *    that path on this machine.
+   * 2. **The deployment must allow a mutation here.** The mode comes from the
+   *    same standing policy {@link write} hands the seam, so a `read-only`
+   *    composition refuses a rename exactly as it refuses a write.
+   *
+   * Both ends are canonically inside `root` (the seam's own containment, not a
+   * string prefix), so neither the source nor the destination can leave the
+   * canvas folder even if a record was hand-edited to say otherwise.
+   */
+  async renameEntry(root: string, from: string, to: string, signal?: AbortSignal): Promise<void> {
+    const source = await this.targetOf(root, from, signal)
+    const destination = await this.targetOf(root, to, signal)
+    const boundary = await this.ctx.fs.resolve(root, { signal })
+    if (!this.ctx.fs.contains(boundary, source) || !this.ctx.fs.contains(boundary, destination)) {
+      throw new FsError(`a rename may not leave the canvas folder: ${from} -> ${to}`, 'FS_PERMISSION_DENIED')
+    }
+    if (this.policyFor(root)?.mode === 'read-only') {
+      throw new FsError(`this deployment is read-only, so nothing under ${root} may be renamed`, 'FS_SANDBOX_DENIED')
+    }
+
+    const sourcePath = await this.processPathOf(source, signal)
+    const destinationPath = await this.processPathOf(destination, signal)
+    if (sourcePath === undefined || destinationPath === undefined) {
+      // Another execution world, or a path the OS below would not be naming the
+      // same file. Nothing is attempted: a wrong guess here renames somebody
+      // else's file.
+      throw new FsError(
+        `the filesystem backend serves another execution world, so ${from} cannot be renamed from this process`,
+        'FS_NOT_OBSERVED',
+      )
+    }
+
+    try {
+      await rename(sourcePath, destinationPath)
+    } catch (error) {
+      throw new FsError(`rename failed: ${from} -> ${to}`, renameErrorCodeOf(error), { cause: error })
+    }
+  }
+
+  /**
+   * The OS path of a target, but only when this process provably names the same
+   * file with it (see {@link renameEntry}).
+   */
+  private async processPathOf(target: FsTarget, signal?: AbortSignal): Promise<string | undefined> {
+    const path = this.ctx.fs.processPath(target)
+    const mapped = this.ctx.fs.processPathFromHostPath(path)
+    if (mapped === undefined) return undefined
+    try {
+      const back = await this.ctx.fs.resolve(mapped, { signal })
+      return back.targetKey === target.targetKey ? path : undefined
+    } catch {
+      return undefined
+    }
   }
 
   /**

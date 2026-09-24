@@ -103,6 +103,7 @@ describe('dsh-canvas wire contract', () => {
         {
           id: 'brief.md',
           file: 'brief.md',
+          name: 'brief',
           project: 'p1',
           kind: 'markdown',
           kindLabel: 'Markdown',

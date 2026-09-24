@@ -296,6 +296,17 @@ export class CanvasBridge {
     return unwrap(this.card.scaffoldDesign(projectId, name, position, this.signal))
   }
 
+  /**
+   * Give a card a name (F1.12), and move its artifact with it.
+   *
+   * The host settles everything that can only be settled against the disk — the
+   * path the artifact lands on, and the `-2` suffix when that path is taken — so
+   * the card that comes back is the truth, not the request.
+   */
+  renameCard(projectId: string, cardId: string, name: string): Promise<BoardCard> {
+    return unwrap(this.card.renameCard(projectId, cardId, name, this.signal))
+  }
+
   /** Take a card off the board. The file stays. */
   removeCard(projectId: string, cardId: string): Promise<boolean> {
     return unwrap(this.card.removeCard(projectId, cardId, this.signal))

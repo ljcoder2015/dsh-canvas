@@ -93,6 +93,23 @@ describe('board file envelope', () => {
     expect(parseBoardFile(composeBoardFile(legacy))).toEqual({ kind: 'parsed', content: legacy })
   })
 
+  it('carries the name a user gave a card (F1.12), and stays silent when they gave none', () => {
+    // A name is the user's word for the work, so it travels like the seating
+    // does: a folder handed to a colleague shows the board they named. A card
+    // whose name is simply what its artifact is called stores nothing, which is
+    // why every board written before this field existed still round-trips
+    // byte-identically (the test above).
+    const named = board({ cards: [{ id: 'market-2.md', file: '市场分析-2.md', name: '市场分析', position: { x: 48, y: 170 } }] })
+    const text = composeBoardFile(named)
+    expect(text).toContain('"name": "市场分析"')
+    expect(parseBoardFile(text)).toEqual({ kind: 'parsed', content: named })
+
+    const derived = board({ cards: [{ id: 'ab', file: 'brief.md', position: { x: 48, y: 170 } }] })
+    const card = (JSON.parse(composeBoardFile(derived)) as { cards: Record<string, unknown>[] }).cards[0] ?? {}
+    expect(Object.keys(card)).not.toContain('name')
+    expect(parseBoardFile(composeBoardFile(derived))).toEqual({ kind: 'parsed', content: derived })
+  })
+
   it('is plain JSON a person can read and edit', () => {
     const text = composeBoardFile(board())
     const raw = JSON.parse(text) as { format: string; version: number; cards: unknown[] }
@@ -277,6 +294,19 @@ describe('planSeats', () => {
     expect(seats).toEqual([
       { id: 'untitled.md', file: 'untitled.md', position: { x: 1, y: 2 }, empty: true },
       { id: 'gone.md', file: 'gone.md', position: { x: 300, y: 2 } },
+    ])
+  })
+
+  it('carries a card’s own name into the seat it restores (F1.12)', () => {
+    const seats = planSeats({
+      seated: [],
+      filed: [{ id: 'ab', file: '市场分析-2.md', name: '市场分析', position: { x: 1, y: 2 } }],
+      scanned: ['市场分析-2.md'],
+      gap: 88,
+      mint,
+    })
+    expect(seats).toEqual([
+      { id: 'ab', file: '市场分析-2.md', name: '市场分析', position: { x: 1, y: 2 } },
     ])
   })
 })

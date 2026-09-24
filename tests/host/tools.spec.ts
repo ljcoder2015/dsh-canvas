@@ -39,6 +39,7 @@ const DIGEST: CardSummary = {
   path: '/tmp/flow-test/brief.md',
   summary: 'A short brief.',
   outline: ['Goal'],
+  head: '',
   bytes: 12,
   updatedAt: 0,
 }
@@ -47,6 +48,7 @@ const DIGEST: CardSummary = {
 const CARD: BoardCard = {
   id: 'deck.html',
   file: 'deck.html',
+  name: 'deck',
   project: PROJECT.id,
   kind: 'html-deck',
   kindLabel: 'Deck',

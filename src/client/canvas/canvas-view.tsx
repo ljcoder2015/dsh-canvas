@@ -32,17 +32,19 @@
  * rows `shortcuts.ts` dispatches, so what it says is what the keys do.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { InjectFace, PropsRuntime, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BoardCard, BoardSnapshot, CardSummary, LastPrompt, Point, Project, Viewport } from '../../types.ts'
-import { kindById } from '../../core/artifact/kind-registry.ts'
+import { kindById, kindLabel } from '../../core/artifact/kind-registry.ts'
+import { autoNameOf } from '../../core/canvas/card-name.ts'
 import type { CanvasBridge } from '../wire/bridge.ts'
 import type { CanvasKey, Translate } from '../ui/locales.ts'
 import { activityOf, cardStateOf, summaryOf } from '../wire/session-read.ts'
 import { CardTile } from './card-tile.tsx'
 import { CardSelection, ComposerBody, type MaterialRef } from './card-overlay.tsx'
 import type { ComposerSize } from './composer-size.ts'
+import { SELF_SCROLLING, wheelOwner, wheelSwallowed } from './wheel-owner.ts'
 import { SourceEdges, seatAtAnchor, type PendingEdge } from './source-edges.tsx'
 import { FolderPicker } from './folder-picker.tsx'
 import { referenceNotice } from './material-notice.ts'
@@ -102,8 +104,11 @@ interface DockSpec {
   readonly extension: string
   /** The kind passed to `card.create_card` while no file exists yet. */
   readonly kind: string
-  /** Seed content for the artifact; absent means the card is seated without one. */
-  readonly seed?: string
+  /**
+   * 正文种子。参数是新卡的名字（类型名 + 序号，v1.54）——种子跟名字走：卡上写着
+   * `文本1`，打开来正文的第一行也是 `# 文本1`，两处说的是同一张卡。
+   */
+  readonly seed?: (name: string) => string
   /**
    * 应用节点：不是种一个文件，而是建一个文件夹、写入 web 应用脚手架
    * （web components + shadcn 风格），入口 `index.html` 落成卡片。创建走
@@ -120,35 +125,40 @@ interface DockSpec {
 
 /** The dock's creation options, in menu order. */
 const DOCK_SPECS: readonly DockSpec[] = [
-  { label: 'canvas.dock.text', extension: 'md', kind: 'markdown', seed: '# 未命名\n' },
+  { label: 'canvas.dock.text', extension: 'md', kind: 'markdown', seed: (name) => `# ${name}\n` },
   { label: 'canvas.dock.webapp', extension: 'webapp', kind: 'webapp', webapp: true },
   { label: 'canvas.dock.design', extension: 'design', kind: 'design', design: true },
 ]
 
-/** 一个还不存在的产物文件名：以扩展名为后缀，撞名就加序号——绝不覆盖已有产物。
- *  卡片 id 由 host 铸出（6 位随机字母），与文件名无关，所以这里只对文件查重。 */
-function freeFileName(cards: readonly BoardCard[], extension: string): string {
-  let file = `untitled.${extension}`
-  for (let n = 2; cards.some((card) => card.file === file); n += 1) file = `untitled-${n}.${extension}`
-  return file
+/** 一个还不存在的产物文件名：**类型名 + 序号**（v1.54）——`Markdown-1.md`、`Markdown-2.md`。
+ *  名字就是文件名（F1.12 的「名字与磁盘对齐」从出生成立），所以查重查的是文件；判据照旧
+ *  只对**画布上已坐的卡**负责，磁盘上真正的撞名由 host 在落盘时再兜。 */
+function freeFileName(cards: readonly BoardCard[], extension: string, label: string): string {
+  const taken = new Set(cards.map((card) => card.file))
+  for (let n = 1; ; n += 1) {
+    const file = `${autoNameOf(label, n)}.${extension}`
+    if (!taken.has(file)) return file
+  }
 }
 
 /**
- * 一个还没被占用的应用文件夹名。
+ * 一个还没被占用的应用文件夹名：同一条类型序号（`应用1`、`应用2`），判据是「有没有
+ * 卡片的产物落在这个文件夹里」。
  *
  * 预判只对**画布上已坐的卡**负责——磁盘上真正的撞名由 host 在落盘时再兜一遍
  * （撞了会自动加序号并回报实际 id），这里先挑一个大概率干净的名字，让连线
  * 能在发起前就指向正确的一端。
  */
-function freeAppFolder(cards: readonly BoardCard[]): string {
+function freeAppFolder(cards: readonly BoardCard[], label: string): string {
   const taken = (folder: string) => cards.some((card) => card.file.startsWith(`${folder}/`))
-  let folder = 'app'
-  for (let n = 2; taken(folder); n += 1) folder = `app-${n}`
-  return folder
+  for (let n = 1; ; n += 1) {
+    const folder = autoNameOf(label, n)
+    if (!taken(folder)) return folder
+  }
 }
 
 /**
- * 取材线拖到空白处放手时，就地弹出的「新增节点」。
+ * 引用线拖到空白处放手时，就地弹出的「新增节点」。
  *
  * `at` 是放手的那一点（画布坐标）：新卡片会按它落位，让它的端口正好接在这条线
  * 的线头上；`flip` 是弹层往哪一侧张开，在放手那一刻按屏上空间算定——线头因此
@@ -293,7 +303,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
   const [view, setView] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const [dragging, setDragging] = useState<{ cardId: string; position: Point } | undefined>()
   const [linkFrom, setLinkFrom] = useState<{ cardId: string; side: 'in' | 'out' } | undefined>()
-  /** 取材线拖到空白处放手后开着的那张「新增节点」；undefined = 没在等落笔。 */
+  /** 引用线拖到空白处放手后开着的那张「新增节点」；undefined = 没在等落笔。 */
   const [dropNode, setDropNode] = useState<DropNode | undefined>()
   const [pointer, setPointer] = useState<Point>({ x: 0, y: 0 })
   const [panning, setPanning] = useState(false)
@@ -647,6 +657,21 @@ export function CanvasBoard(props: CanvasBoardProps) {
     [bridge, projectId, run],
   )
 
+  /**
+   * 改卡片名（F1.12）。
+   *
+   * 不在本地先画那一个字：改名会动磁盘，而 host 回来的才是真话（撞名时它会带
+   * `-2` 序号，名字与路径一起变）。`run` 里的重读负责把卡片名与文件路径一并换过来，
+   * 于是「卡片上写的」与「磁盘上叫的」不会各说各话。
+   */
+  const renameCard = useCallback(
+    (cardId: string, name: string) => {
+      if (projectId === '') return
+      void run(() => bridge.renameCard(projectId, cardId, name))
+    },
+    [bridge, projectId, run],
+  )
+
   /** Resolve a finished linking gesture into one edge, or decline it. */
   const finishLink = useCallback(
     (cardId: string) => {
@@ -667,30 +692,39 @@ export function CanvasBoard(props: CanvasBoardProps) {
    * 一次脚手架调用——文件夹名先在本地预判，实际落定的名字以 host 回报的卡片 id
    * 为准（磁盘撞名时它会带序号），所以后续连线一律用返回的 id。
    */
+  /**
+   * 按一种形态把产物落到画布上：普通形态是「席位 + 种子文件」两步；应用节点是
+   * 一次脚手架调用——文件夹名先在本地预判，实际落定的名字以 host 回报的卡片 id
+   * 为准（磁盘撞名时它会带序号），所以后续连线一律用返回的 id。
+   *
+   * 新卡的名字在这里铸（v1.54）：**类型名 + 序号**（`kindLabel`），并且直接当产物
+   * 文件名用——名字与磁盘从出生就是同一句话，`cardNameOf` 推出来的正是它，记录里
+   * 一个 `name` 都不用多写。
+   */
   const spawnFromSpec = useCallback(
     async (spec: DockSpec, position: Point): Promise<BoardCard> => {
-      if (spec.webapp === true) return bridge.scaffoldWebapp(projectId, freeAppFolder(cards), position)
+      if (spec.webapp === true) return bridge.scaffoldWebapp(projectId, freeAppFolder(cards, kindLabel(spec.kind)), position)
       if (spec.design === true) {
         // The local preview name only has to be *probably* free — the host
         // settles the real name against the disk, and the returned card wins
         // for anything downstream (linking included).
-        const name = freeFileName(cards, 'design').replace(/\.design$/, '')
+        const name = freeFileName(cards, 'design', kindLabel(spec.kind)).replace(/\.design$/, '')
         return bridge.scaffoldDesign(projectId, name, position)
       }
-      const file = freeFileName(cards, spec.extension)
+      const file = freeFileName(cards, spec.extension, kindLabel(spec.kind))
       const card = await bridge.createCard(projectId, file, spec.kind, position)
-      if (spec.seed !== undefined) await bridge.writeText(projectId, card.id, spec.seed)
+      if (spec.seed !== undefined) await bridge.writeText(projectId, card.id, spec.seed(card.name))
       return card
     },
     [bridge, cards, projectId],
   )
 
   /**
-   * 在放手点上建一张新卡片，并把这一笔画成取材线。
+   * 在放手点上建一张新卡片，并把这一笔画成引用线。
    *
    * 建卡与连线是同一个动作的两半，所以放在同一次 `run` 里：新卡片按放手点落位，
    * 于是它的端口正好接住刚才的线头——线因此不是「跳」到卡片上，而是就地由细线
-   * 变成一条正常的取材边。
+   * 变成一条正常的引用边。
    */
   const createLinkedNode = useCallback(
     (spec: DockSpec) => {
@@ -723,7 +757,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
    * 一次清掉板上产物**确实丢了**的卡片（F1.11）。
    *
    * 卡片是**故意比文件活得久**的（座位可能还没有产物，缺文件也是真实状态，F3.5），所以
-   * 清理绝不自作主张：文件会在切分支时回来，而拿掉一张卡会连带忘掉它的对话绑定与取材
+   * 清理绝不自作主张：文件会在切分支时回来，而拿掉一张卡会连带忘掉它的对话绑定与引用
    * 关系。这里补的只是「一次做完」——十几张幽灵卡一张一张走选中面板，最后只会把人逼到
    * 去删整张画布。
    *
@@ -845,12 +879,12 @@ export function CanvasBoard(props: CanvasBoardProps) {
   )
 
   /**
-   * 把上游产物以**文件引用**交给本卡片的会话（F5.3）——取材的名字通道。
+   * 把上游产物以**文件引用**交给本卡片的会话（F5.3）——引用的名字通道。
    *
    * 与 `addMaterial` 的区别不是粒度而是**交付的东西**：那条路把上游产物的**内容摘要**
    * 读出来塞进上下文（本插件自己读盘、自己截断），这条只把上游的**路径**交过去——按
    * Harness 自己的 `@file` 写法，模型要用时自己 `read`。所以它也不选卡片：一张卡片的
-   * 取材来源就是它的取材来源，动作作用在**已有的**连线上。
+   * 它交的就是这张卡已有的引用来源，动作作用在**已有的**连线上。
    *
    * 结果必须说出来。文件引用进的是会话、不是产物，卡面上不留痕迹——不说「已把 N 个
    * 上游产物作为文件引用交给它」，用户就无从知道刚才那一下是否发生了；有路径写不成
@@ -868,7 +902,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
   )
 
   /**
-   * 选中卡片的取材 chips：一条 chip 就是一条边。
+   * 选中卡片的引用 chips：一条 chip 就是一条边。
    *
    * chips 只列画布报出来的**直接边**：一条 chip 就是一条边，右上角那枚删除按钮
    * 必须有确定的删除对象，而边才是存储里的东西。摘要表只用来配 tooltip——取不到就
@@ -879,15 +913,22 @@ export function CanvasBoard(props: CanvasBoardProps) {
     const digests = materials[selectionCard.id] ?? []
     return sources
       .filter((edge) => edge.downstream === selectionCard.id)
-      .map((edge) => ({
-        id: edge.id,
-        cardId: edge.upstream,
-        summary: digests.find((entry) => entry.cardId === edge.upstream)?.summary ?? '',
-      }))
-  }, [materials, selectionCard, sources])
+      .map((edge) => {
+        // 上游卡一定还在板上（拆边随 unseat 一起走），但查找落空时名字退回 id 本身——
+        // 一条悬空边不该把整行材料拖垮。
+        const upstream = cards.find((entry) => entry.id === edge.upstream)
+        return {
+          id: edge.id,
+          cardId: edge.upstream,
+          name: upstream?.name ?? '',
+          file: upstream?.file ?? edge.upstream,
+          summary: digests.find((entry) => entry.cardId === edge.upstream)?.summary ?? '',
+        }
+      })
+  }, [cards, materials, selectionCard, sources])
 
   /**
-   * 删掉一条取材边。
+   * 删掉一条引用边。
    *
    * chip 右上角那枚按钮是画布上唯一的解除入口——线本身不可点（F4.4），所以这里直接
    * 拿边的存储 id 去删。回读沿用所有改动共用的那一个触发器（`run` 成功即 +stamp），
@@ -1011,22 +1052,58 @@ export function CanvasBoard(props: CanvasBoardProps) {
     persistView(view)
   }
 
-  const surfaceWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) {
-      setView((current) => ({ ...current, x: current.x - event.deltaX, y: current.y - event.deltaY }))
-      return
+  /**
+   * 滚轮：画布的取景归画布，**但那几处自己会滚的地方得先让开**。
+   *
+   * 整块表面都是画布的手势面，所以提示词输入框的正文、`@` 候选与模型菜单这些自己会滚
+   * 的地方也一并被卷走：用户在输入框里滚轮，动的是画布。判据只有一句，写在
+   * `wheel-owner.ts` 里——**指针底下是一处自己会滚的地方 ⇒ 那一滚归它**：这里既不
+   * `preventDefault` 也不平移，原样放行给浏览器去滚那个盒子（滚不动就什么都不发生，
+   * 画布仍不动：正在读提示词的人不该被从脚下滑走）。
+   *
+   * 缩放（`ctrl` / `⌘` + 滚轮，触控板捏合也走它）不看这条线——它是画布的手势，指针在
+   * 哪儿都一样。
+   *
+   * **监听是挂在表面上的原生一条、显式 `{ passive: false }`**：React 的 `onWheel` 挂在
+   * 根容器上、而且是**被动**的（`touchstart` / `touchmove` / `wheel` 三兄弟 React 一律
+   * 注册成 passive），在里面 `preventDefault` 是空转——于是 `ctrl` / `⌘` + 滚轮既是画布
+   * 放大，又是**浏览器把整页放大**，用户要看清画布却把宿主也放大了。拦下一个默认动作
+   * 必须用主动监听，所以这一条自己挂（与 `artifact/viewers/design-viewer.tsx` 同一手法：
+   * 那处也是原生的 `{ passive: false }`）。挂在表面上还顺带把它拦在画布这一层：事件不再
+   * 冒到根容器，React 那侧的 `onWheel` 根本不会收到——这也是这里**不再需要**那个 prop 的
+   * 原因，留着只会与这条原生监听把同一滚各算一遍。
+   */
+  useEffect(() => {
+    const surface = surfaceRef.current
+    if (surface === null) return
+    const onWheel = (event: WheelEvent) => {
+      const owner = wheelOwner({
+        zoom: event.ctrlKey || event.metaKey,
+        // 事件落在文字节点上时不作数（`instanceof` 之外没有 `closest`）——那种情况本来
+        // 也只可能是画布自己的元素。
+        selfScrolling: event.target instanceof Element && event.target.closest(SELF_SCROLLING) !== null,
+      })
+      if (!wheelSwallowed(owner)) return
+      // 挡下浏览器自己那一手（`ctrl` / `⌘` + 滚轮 = 页面缩放），也不让它再往外冒一层。
+      event.preventDefault()
+      event.stopPropagation()
+      if (owner === 'board') {
+        setView((current) => ({ ...current, x: current.x - event.deltaX, y: current.y - event.deltaY }))
+        return
+      }
+      const rect = surface.getBoundingClientRect()
+      const px = event.clientX - rect.left
+      const py = event.clientY - rect.top
+      const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08
+      setView((current) => {
+        const zoom = clampZoom(current.zoom * factor)
+        const ratio = zoom / current.zoom
+        return { zoom, x: px - (px - current.x) * ratio, y: py - (py - current.y) * ratio }
+      })
     }
-    const rect = surfaceRef.current?.getBoundingClientRect()
-    if (rect === undefined) return
-    const px = event.clientX - rect.left
-    const py = event.clientY - rect.top
-    const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08
-    setView((current) => {
-      const zoom = clampZoom(current.zoom * factor)
-      const ratio = zoom / current.zoom
-      return { zoom, x: px - (px - current.x) * ratio, y: py - (py - current.y) * ratio }
-    })
-  }
+    surface.addEventListener('wheel', onWheel, { passive: false })
+    return () => surface.removeEventListener('wheel', onWheel)
+  }, [])
 
   /**
    * 以画布中心缩放，于是取景框的中心点留在原地。
@@ -1077,7 +1154,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
 
   /**
    * 自动排版：左下角那枚按钮把画布交给 host 的 `organize` 策略重新摆位——链上的
-   * 卡片按取材深度成列、散卡在下方网格收拢（与 agent 的 `canvas_arrange_on_board`
+   * 卡片按引用深度成列、散卡在下方网格收拢（与 agent 的 `canvas_arrange_on_board`
    * 是同一条通道、同一份算法，只是不经过模型）。排完立刻按**新卡位**取景，否则用户
    * 看到的是「卡片跳走了」而不是「整理好了」。
    */
@@ -1237,7 +1314,6 @@ export function CanvasBoard(props: CanvasBoardProps) {
           onPointerMove={surfacePointerMove}
           onPointerUp={surfacePointerUp}
           onPointerCancel={surfacePointerUp}
-          onWheel={surfaceWheel}
         >
           <div className="dsh-canvas-layer" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
             <SourceEdges
@@ -1266,6 +1342,8 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 card={card}
                 state={statusOf(card)}
                 summary={summaries[card.id]}
+                projectId={projectId}
+                bridge={bridge}
                 selected={selected === card.id}
                 connecting={linkFrom?.side}
                 zoom={view.zoom}
@@ -1280,6 +1358,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
                   setPointer(clientToCanvas(at.clientX, at.clientY))
                 }}
                 onConnectDrop={finishLink}
+                onRename={renameCard}
                 onActivate={() => {
                   setSelected(card.id)
                   setViewing({ cardId: card.id, edit: false })
@@ -1541,7 +1620,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
  *
  * 里面装的还是那三行：**材料行 + 输入框 + 底栏**，由同一个 `ComposerBody` 画出来。
  * 所以「放大之后布局与缩小态一致」不是靠两处对齐出来的，而是**根本没有第二套布局**：
- * 字号、行高、内边距、取材 chips、模型席位、发送钮，两边逐字同一份。
+ * 字号、行高、内边距、引用 chips、模型席位、发送钮，两边逐字同一份。
  *
  * 两处按钮各站各的地盘：行内那条带子右上角是〔放大〕（⤢）——它开合的是带子；这里头
  * 部右上角是〔缩小〕（⤡）——它开合的是**这个壳**，所以站在壳的头上，不必混进那三行
@@ -1588,7 +1667,7 @@ function PromptModal(props: {
     >
       <div className="dsh-canvas-dialog dsh-canvas-promptmodal">
         <div className="dsh-canvas-dialog-head">
-          {card.file.split('/').pop() ?? card.file}
+          {card.name}
           {/* 把壳收回去的那颗（⤡）：它管的是这个弹窗的开合，所以站在壳的头上——三行里
               因此一颗多余的按钮都没有（那边右上角那颗 ⤢ 管的是带子，不是壳）。 */}
           <button

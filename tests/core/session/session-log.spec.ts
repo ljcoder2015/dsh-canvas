@@ -63,7 +63,7 @@ describe('lastUserPromptOfEvents', () => {
         kind: 'plugin',
         plugin: 'dsh-canvas',
         form: 'notice',
-        summary: '取材 a.md',
+        summary: '引用 a.md',
       }),
     ]
     expect(lastUserPromptOfEvents(events)).toEqual({ text: 'write a poem', time: 0 })

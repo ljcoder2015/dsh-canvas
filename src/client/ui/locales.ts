@@ -26,7 +26,7 @@ export const zh = {
   'canvas.guide.preview.description': '以画布卡片的形态查看这份产物',
 
   // Board chrome
-  'canvas.stats': '{cards} 张卡片 · {sources} 条取材',
+  'canvas.stats': '{cards} 张卡片 · {sources} 条引用',
   'canvas.loading': '正在读取画布…',
   'canvas.empty.projects': '还没有画布项目。',
   'canvas.empty.board': '这个文件夹里还没有产物。',
@@ -40,7 +40,7 @@ export const zh = {
   'canvas.dock.webapp': '应用',
   'canvas.dock.design': '设计',
 
-  // 取材线拖到空白处放手时弹出的「新增节点」（F4.8）
+  // 引用线拖到空白处放手时弹出的「新增节点」（F4.8）
   'canvas.drop.title': '新增节点',
   'canvas.drop.hint': '点空白处取消',
 
@@ -66,10 +66,10 @@ export const zh = {
   'canvas.action.pickProject': '选择文件夹',
   'canvas.action.chat': '对话',
   'canvas.action.manual': '手动输入',
-  'canvas.action.link': '建立取材',
+  'canvas.action.link': '建立引用',
   'canvas.action.export': '导出',
   'canvas.action.publish': '发布',
-  'canvas.action.arrange': '按取材链摆位',
+  'canvas.action.arrange': '按引用链摆位',
   'canvas.action.tidy': '归纳整理',
   'canvas.action.grid': '网格整理',
   'canvas.action.reconcile': '引用对账',
@@ -97,7 +97,7 @@ export const zh = {
   'canvas.composer.reference': '引用上游产物文件',
   'canvas.composer.referenceMeta': '文件引用',
   'canvas.composer.noReference': '没有可引用的文件',
-  'canvas.composer.drop': '删除这条取材关系',
+  'canvas.composer.drop': '删除这条引用关系',
   // 引用标签的类型名（候选行右侧那枚小注）。标签的长相按它选：代码是纸页、图片是缩略图、
   // 视频是胶片、音频是波形，标记 / 区域是图上的一个点 / 一个框。
   'canvas.ref.type.code': '文件',
@@ -106,6 +106,7 @@ export const zh = {
   'canvas.ref.type.audio': '音频',
   'canvas.ref.type.mark': '标记',
   'canvas.ref.type.region': '区域',
+  'canvas.ref.type.element': '元素',
   'canvas.composer.placeholder': '输入提示词，发送给这张卡片…',
   'canvas.composer.send': '发送',
   // 右上角那颗按钮的两副面孔：行内是「放大」（⤢），放大态是「缩小」（⤡）。同一颗、
@@ -118,13 +119,14 @@ export const zh = {
   'canvas.composer.modelLoading': '正在加载模型目录…',
   'canvas.composer.modelEmpty': '该提供方暂无可用模型。',
   'canvas.panel.title': '卡片',
+  'canvas.card.rename': '改卡片名（产物会跟着改名）',
   'canvas.panel.path': '产物',
   'canvas.panel.kind': '形态',
   'canvas.panel.size': '大小',
   'canvas.panel.updated': '更新于',
-  'canvas.panel.sources': '取材来源',
-  'canvas.panel.noSources': '还没有取材来源。',
-  'canvas.panel.downstream': '被谁取材',
+  'canvas.panel.sources': '引用来源',
+  'canvas.panel.noSources': '还没有引用来源。',
+  'canvas.panel.downstream': '被谁引用',
   'canvas.panel.intents': '待处理意图',
   'canvas.panel.noIntents': '没有排队中的意图。',
   'canvas.panel.session': '会话',
@@ -160,7 +162,7 @@ export const zh = {
   'canvas.pick.tool': '元素选择',
   'canvas.pick.armed': '元素选择：页面暂时变成只读的——鼠标移到哪儿就圈住哪个元素，单击即选中。页面自己的悬停、按钮、输入都收不到这一下；按 Esc 退出。',
   'canvas.pick.title': '修改这个元素',
-  'canvas.pick.hint': '在「改动要求：」后面写下要改什么，⌘/Ctrl+Enter 发送',
+  'canvas.pick.hint': '接着在框里写下要改什么，⌘/Ctrl+Enter 发送',
   'canvas.pick.send': '发送修改',
   'canvas.pick.sending': '发送中…',
   'canvas.pick.sent': '已把这条要求发给这张卡的会话。产物改好后这里会自动刷新——在那之前，预览还是旧的那一份。',
@@ -169,9 +171,9 @@ export const zh = {
   'canvas.pick.repick': '先关掉提示词框，再重新选元素',
   'canvas.pick.updated': '产物已更新。',
   'canvas.pick.failed': '发送失败：{message}',
-  // 定位块：打包展示节点定位与源码（只是草稿的另一种画法，发出去的提示词不变）。
-  'canvas.pick.blockToggle': '展开/收起已附带的节点定位与源码',
-  'canvas.pick.requestPlaceholder': '改动要求…',
+  // 元素标签：那一枚「◫ 节点名」把附进去的定位与源码收成了一个字——悬停时在这里交代
+  // 它折的是什么（只是草稿的另一种画法，发出去的提示词一个字不变）。
+  'canvas.pick.blockDetail': '元素 {label} · 产物 {file}（已附上节点定位与源码）',
 
   // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': '这份产物不在任何画布项目中。',
@@ -193,7 +195,7 @@ export const zh = {
   'canvas.menu.remove': '删除画布',
   'canvas.menu.remove.title': '删除这张画布？',
   'canvas.menu.remove.pending': '正在删除画布…',
-  'canvas.menu.remove.desc': '只把「{name}」从画布列表里移开：磁盘上的文件夹与文件原样保留，内容不会丢——这个目录里的板面文件也留着，把文件夹重新加成画布，排版与取材关系就从它回来。',
+  'canvas.menu.remove.desc': '只把「{name}」从画布列表里移开：磁盘上的文件夹与文件原样保留，内容不会丢——这个目录里的板面文件也留着，把文件夹重新加成画布，排版与引用关系就从它回来。',
 
   // Folder picker
   'canvas.picker.title': '选择一个文件夹作为画布项目',
@@ -213,7 +215,7 @@ export const zh = {
 
   // 文件引入（F5.3）：把上游产物按 @路径 交给卡片会话，读取由模型决定
   'canvas.reference.files': '已把 {count} 个上游产物作为文件引用交给这张卡的会话（要不要读、读哪一段由它决定）',
-  'canvas.reference.filesEmpty': '这张卡片还没有取材来源，没有可引用的文件。',
+  'canvas.reference.filesEmpty': '这张卡片还没有引用来源，没有可引用的文件。',
   'canvas.reference.filesNone': '上游产物的路径都写不成 @引用，已在消息里说明。',
   'canvas.reference.skipped': '另有 {count} 个上游的路径无法写成 @引用，已在消息里说明。',
 
@@ -324,6 +326,7 @@ export const en = {
   'canvas.ref.type.audio': 'Audio',
   'canvas.ref.type.mark': 'Mark',
   'canvas.ref.type.region': 'Region',
+  'canvas.ref.type.element': 'Element',
   'canvas.composer.placeholder': 'Type a prompt to send to this card…',
   'canvas.composer.send': 'Send',
   // Two faces of the same corner button: 〔enlarge〕(⤢) on the strip, 〔shrink〕(⤡)
@@ -336,6 +339,7 @@ export const en = {
   'canvas.composer.modelLoading': 'Loading the model catalog…',
   'canvas.composer.modelEmpty': 'No models available from this provider.',
   'canvas.panel.title': 'Card',
+  'canvas.card.rename': 'Rename the card (its artifact is renamed with it)',
   'canvas.panel.path': 'Artifact',
   'canvas.panel.kind': 'Kind',
   'canvas.panel.size': 'Size',
@@ -380,7 +384,7 @@ export const en = {
   'canvas.pick.tool': 'Select element',
   'canvas.pick.armed': 'Selecting an element: the page goes read-only — the element under the pointer is outlined, and a click picks it. The page\'s own hover, buttons and inputs never see that click; press Esc to leave.',
   'canvas.pick.title': 'Edit this element',
-  'canvas.pick.hint': 'Write what to change after 改动要求：, then ⌘/Ctrl+Enter',
+  'canvas.pick.hint': 'Write what to change in the box, then ⌘/Ctrl+Enter',
   'canvas.pick.send': 'Send',
   'canvas.pick.sending': 'Sending…',
   'canvas.pick.sent': 'Handed this request to the card\'s conversation. The preview reloads itself once the artifact is rewritten — until then it is still the old one.',
@@ -391,8 +395,9 @@ export const en = {
   'canvas.pick.failed': 'Could not send: {message}',
   // The locator block: the node locator & source, packed for display only — the
   // prompt that goes out is byte-for-byte what it always was.
-  'canvas.pick.blockToggle': 'Show or hide the attached node locator & source',
-  'canvas.pick.requestPlaceholder': 'What to change…',
+  // The element tag: that one 「◫ node」 holds the whole attached locator and source — this
+  // is what hovering it spells out (a display change only, the prompt is untouched).
+  'canvas.pick.blockDetail': 'Element {label} · {file} (locator & source attached)',
 
   // Right-pane artifact tab / fullscreen viewer
   'canvas.view.outside': 'This file is not inside a canvas project.',

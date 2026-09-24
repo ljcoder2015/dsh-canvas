@@ -78,6 +78,8 @@ export interface CardFace {
   scaffoldDesign(projectId: string, name: string, position: Point, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
   readDesign(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<DesignDocumentWire>>
   editDesign(projectId: string, cardId: string, ops: unknown[], signal?: AbortSignal): Promise<RemoteResult<DesignEditResultWire>>
+  /** Rename a card (F1.12): the artifact moves with the name, and the card comes back as it now is. */
+  renameCard(projectId: string, cardId: string, name: string, signal?: AbortSignal): Promise<RemoteResult<BoardCard>>
   removeCard(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<boolean>>
   removeMissingCards(projectId: string, signal?: AbortSignal): Promise<RemoteResult<number>>
   readSummary(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary>>

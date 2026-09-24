@@ -61,7 +61,7 @@ export const BUILTIN_KINDS: readonly KindDefinition[] = [
   },
   {
     id: 'markdown',
-    label: 'Markdown',
+    label: '文本',
     addressPatterns: ['dsh-resource://file/**/*.md'],
     directory: false,
     exportFormats: ['html', 'pdf'],

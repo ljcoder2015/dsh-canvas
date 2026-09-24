@@ -1,7 +1,7 @@
 {
   "name": "@ljcoder2015/dsh-canvas",
   "version": "1.0.0",
-  "description": "DeepSeek Harness 通用创作画布插件：文件即产物、卡片即会话、取材即数据。",
+  "description": "DeepSeek Harness 通用创作画布插件：文件即产物、卡片即会话、引用即数据。",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.17.0",
