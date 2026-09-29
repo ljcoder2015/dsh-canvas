@@ -157,6 +157,18 @@ export const zh = {
   'canvas.viewer.discard.title': '有未保存的修改，仍要关闭吗？',
   'canvas.viewer.discard.confirm': '放弃修改',
   'canvas.viewer.discard.cancel': '继续编辑',
+  // 文本节点的导出（客户端本地生成，不走宿主那条部署能力接缝）。四种格式各有去处，
+  // 没有哪一个能当默认，所以「导出」点开是一张四行的菜单；PDF 那一行是**直接排字节**
+  // 落盘（pdf-lib + 内嵌 Noto Sans SC 子集），不再借打印对话框。
+  'canvas.export.menu': '导出文本',
+  'canvas.export.md': 'Markdown（.md）',
+  'canvas.export.txt': '纯文本（.txt）',
+  'canvas.export.docx': 'Word 文档（.docx）',
+  'canvas.export.pdf': 'PDF 文档（.pdf）',
+  'canvas.export.absent': '产物文件还没生成，没有可导出的内容。',
+  'canvas.export.truncated': '产物过大，这次只读到了前一部分；照这样导出会静默丢掉后面，所以先不导。',
+  'canvas.export.done': '已导出 {name}',
+  'canvas.export.pdfFailed': 'PDF 生成失败：{reason}',
   // 元素选择（F3.14）：在跑起来的页面上点一个元素，把它的源码嵌进提示词交给这张卡
   // 的会话去改。三句话各管一件事——工具叫什么、这一击不会落到页面上、发出去之后呢。
   'canvas.pick.tool': '元素选择',
@@ -379,6 +391,21 @@ export const en = {
   'canvas.viewer.discard.title': 'You have unsaved changes. Close anyway?',
   'canvas.viewer.discard.confirm': 'Discard',
   'canvas.viewer.discard.cancel': 'Keep editing',
+  // Text-node export (produced in the browser; the deployment's export capability is
+  // not involved). Four formats, four destinations and no sensible default, so the
+  // button opens a four-row menu; the PDF row writes real PDF bytes right here
+  // (pdf-lib plus an embedded Noto Sans SC subset) instead of going through a print
+  // dialog.
+  'canvas.export.menu': 'Export text',
+  'canvas.export.md': 'Markdown (.md)',
+  'canvas.export.txt': 'Plain text (.txt)',
+  'canvas.export.docx': 'Word document (.docx)',
+  'canvas.export.pdf': 'PDF document (.pdf)',
+  'canvas.export.absent': 'Nothing to export yet — the artifact has not been written.',
+  'canvas.export.truncated':
+    'The artifact is too large to read whole and only its first part came over; exporting that would silently drop the rest, so nothing was exported.',
+  'canvas.export.done': 'Exported {name}',
+  'canvas.export.pdfFailed': 'Could not build the PDF: {reason}',
   // The element picker (F3.14): click an element on the running page and its own
   // source goes into a prompt handed to this card's conversation.
   'canvas.pick.tool': 'Select element',

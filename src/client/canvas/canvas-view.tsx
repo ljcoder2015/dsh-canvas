@@ -48,6 +48,16 @@ import { SELF_SCROLLING, wheelOwner, wheelSwallowed } from './wheel-owner.ts'
 import { SourceEdges, seatAtAnchor, type PendingEdge } from './source-edges.tsx'
 import { FolderPicker } from './folder-picker.tsx'
 import { referenceNotice } from './material-notice.ts'
+import {
+  docxBytes,
+  downloadBytes,
+  exportFileName,
+  markdownToPlainText,
+  textBlocksOf,
+  utf8Bytes,
+  type TextExportFormat,
+} from './text-export.ts'
+import { loadPdfFontBytes, pdfBytes } from './text-pdf.ts'
 import { ArtifactModal } from '../artifact/artifact-view.tsx'
 import { basenameOf, isInside, parseFileAddress } from '../wire/address.ts'
 import { isTypingTarget, shortcutOf, SHORTCUT_SHEET, SPACE_KEY, type KeyCap } from '../ui/shortcuts.ts'
@@ -117,7 +127,7 @@ interface DockSpec {
   readonly webapp?: boolean
   /**
    * 设计节点（F2.6）：产物是场景图快照（.design v2），文本 seed 装不下，创建走
-   * `card.scaffoldDesign`——host 写入一份含空白画板的 `.design` 文件，
+   * `card.scaffoldDesign`——host 写入一份含空白容器的 `.design` 文件，
    * 名字同样由 host 按磁盘撞名情况落定。
    */
   readonly design?: boolean
@@ -818,6 +828,68 @@ export function CanvasBoard(props: CanvasBoardProps) {
     [bridge, projectId, run, summaries],
   )
 
+  /**
+   * 文本节点的导出：md / txt / docx / pdf，四种都在浏览器里生成。
+   *
+   * 不走宿主那条导出接缝——文本节点的产物就是它自己的文字，转换与落盘客户端都做得了
+   * （md / txt / docx 触发一次下载，PDF 走打印另存，见 `text-export.ts`）。
+   *
+   * 读到半份就**不导出**：导出是「把整份拿走」，拿走的却是半份、还一声不响，比不导出
+   * 更坏。这也是为什么先 `readArtifact` 看清了再动手。
+   */
+  const exportTextCard = useCallback(
+    (card: BoardCard, format: TextExportFormat) => {
+      if (projectId === '') return
+      setError('')
+      setNotice('')
+      void (async () => {
+        const view = await bridge.readArtifact(projectId, card.id)
+        if (!view.present) {
+          setNotice(t('canvas.export.absent'))
+          return
+        }
+        if (view.truncated) {
+          setNotice(t('canvas.export.truncated'))
+          return
+        }
+        const name = exportFileName(view.file === '' ? card.file : view.file, format)
+        const title = card.name !== '' ? card.name : name
+        // 只有 markdown 形态的产物才按标记解；别的文本（.txt / .js / .py）原样带走，
+        // 免得把行首的 `#` 注释当成标题剥掉。
+        const markdown = view.kind === 'markdown'
+        if (format === 'pdf') {
+          // PDF 在客户端直接排字节：矢量、文字可选可搜。字体是宿主资产路由上的
+          // Noto Sans SC，取回来的字节按子集嵌进去，产物只有几 KB。
+          try {
+            const bytes = await pdfBytes({
+              title,
+              blocks: textBlocksOf(view.text, markdown),
+              fontBytes: await loadPdfFontBytes(),
+            })
+            downloadBytes(name, bytes, format)
+            setNotice(t('canvas.export.done', { name }))
+          } catch (error) {
+            // 这条路上多了一次资产取字体，失败得说清楚是哪一步——不要只丢一句
+            // 「导出失败」出去。
+            setNotice(
+              t('canvas.export.pdfFailed', {
+                reason: error instanceof Error ? error.message : String(error),
+              }),
+            )
+          }
+          return
+        }
+        const bytes =
+          format === 'docx'
+            ? docxBytes({ title, blocks: textBlocksOf(view.text, markdown) })
+            : utf8Bytes(format === 'txt' && markdown ? markdownToPlainText(view.text) : view.text)
+        downloadBytes(name, bytes, format)
+        setNotice(t('canvas.export.done', { name }))
+      })().catch(report)
+    },
+    [bridge, projectId, report, t],
+  )
+
   // ── card composer ─────────────────────────────────────────────────────────
 
   // Read the selected card's material digests for the composer's chips. Re-read
@@ -1459,6 +1531,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 onChat={() => openCardSession(selectionCard)}
                 onManualEdit={() => setViewing({ cardId: selectionCard.id, edit: true })}
                 onExport={() => exportCard(selectionCard)}
+                onExportText={(format) => exportTextCard(selectionCard, format)}
                 onRemove={() => {
                   setPruning(false)
                   setRemoval(selectionCard.id)
@@ -1653,6 +1726,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
             key={`${projectId}/${viewing.cardId}`}
             projectId={projectId}
             cardId={viewing.cardId}
+            sessionId={cards.find((card) => card.id === viewing.cardId)?.sessionId ?? ''}
             bridge={bridge}
             t={t}
             initialMode={viewing.edit ? 'edit' : 'preview'}

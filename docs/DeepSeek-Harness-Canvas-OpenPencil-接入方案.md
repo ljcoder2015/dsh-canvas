@@ -82,7 +82,7 @@ M1 已自研：kiwi.ts（零依赖编解码）+ document.ts（24 字段自定义
 - 读 `core/src/io/formats.ts` 与 `io/formats/fig`，**定格式 v2 的 payload**：优先 plain Kiwi 序列化的 scene-graph（自己掌控），`.fig` 容器只在确有互通刚需时启用。
 
 ### P1 文档模型与格式 v2（core 层）
-- 重写 `src/core/artifact/design/document.ts`：信封结构保留（`dsh-design-` 头 + base64，**版本字段 2**），payload 换 P0 定下的序列化；`scaffoldDesignDocument` 用 scene-graph 默认值建一张空白画板。
+- 重写 `src/core/artifact/design/document.ts`：信封结构保留（`dsh-design-` 头 + base64，**版本字段 2**），payload 换 P0 定下的序列化；`scaffoldDesignDocument` 用 scene-graph 默认值建一张空白容器。
 - **删除 `kiwi.ts`、`ops.ts`** 及其测试；`artifact-io.ts` 的 read/write/digest 改走新格式。
 - **不做 v1 转换器**（破坏性切换已拍板）：读到 v1 信封直接报「旧版设计文件，请让模型重新生成」——设计卡是 AI 产的，重生成成本≈0。
 - 测试重写：信封 v2 round-trip、v1 拒绝、scaffold 形状、digest 走 scene-graph。

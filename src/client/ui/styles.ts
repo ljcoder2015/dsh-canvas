@@ -19,6 +19,27 @@
  */
 const STYLE_ID = 'dsh-canvas-styles'
 
+/**
+ * 旋转手柄的光标：**一段扁椭圆的弧，两端各接一枚箭头**——双向箭头弯成弧形，就是「旋转」那个手势。
+ *
+ * 用弧而不是那枚顺时针单箭头（rotate_right）：光标上只画一个头，方向就被读死成「只能朝这一边
+ * 转」，而这里的拖拽两个方向都作数。取椭圆不取正圆、弧也短（150°）：正圆绕满一圈会顶到光标
+ * 图片的边，而且一个圆环更像「加载中」；扁弧只占了上下很浅的一条，指向明确。
+ *
+ * CSS 没有「旋转」这个光标关键字，只能自己带一张图（手型 grab 说的是「可以拖走」，是另一回事）。
+ * 图里的颜色写死，光标图用不了 CSS 变量；画布底色恒为浅灰（见下面 .dsh-canvas-design），所以取
+ * 近黑。`<` `>` `#` 必须转义，否则 URL 会被截断。兜底 default：图挂了也只是退成普通箭头，拖拽照旧。
+ */
+const ROTATE_CURSOR =
+  'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\'%3E' +
+  '%3Cg fill=\'none\' stroke=\'%23222\' stroke-width=\'2.2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E' +
+  // 弧：椭圆心 (12,12.5)、横半轴 8.6、纵半轴 5.2，从 195° 顺时针 150° 到 345°（两枚箭头就落在两端）。
+  '%3Cpath d=\'M3.69 11.15A8.6 5.2 0 0 1 20.31 11.15\'/%3E' +
+  // 两枚箭头都沿切线朝外（各自背离弧的中点），合成一枚弯过来的双向箭头。
+  '%3Cpath d=\'M3.46 8.09 3.69 11.15 6.12 9.27\'/%3E' +
+  '%3Cpath d=\'M20.54 8.09 20.31 11.15 17.88 9.27\'/%3E' +
+  '%3C/g%3E%3C/svg%3E") 12 12, default'
+
 /** 导出只为测试解析（tests/theme-tokens.spec.ts 把这张表当数据审）；运行时仍走 adoptStyles 注入。 */
 export const css = `
 /* 画布自己那套变量。**两套配色**：亮色写在前面（宿主亮色模式就是「body 上没有
@@ -511,7 +532,7 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-design canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .dsh-canvas-design-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   color:var(--dsh-fg-3);font:13px/19px var(--dsh-font);pointer-events:none}
-/* 视口 HUD（左下角）：缩放控制、适应画板、快捷键提示。中性色走宿主别名令牌，
+/* 视口 HUD（左下角）：缩放控制、适应容器、快捷键提示。中性色走宿主别名令牌，
    暗色自动跟随；键盘快捷键跟聚焦走（画布 tabIndex=0），聚焦不画 outline。 */
 .dsh-canvas-design:focus{outline:none}
 .dsh-canvas-design-hud{position:absolute;left:12px;bottom:12px;display:flex;align-items:center;gap:2px;
@@ -523,6 +544,27 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-design-hud-pct{min-width:52px;text-align:center;font-variant-numeric:tabular-nums}
 .dsh-canvas-design-hud-hint{padding:3px 8px;margin-left:2px;border-left:1px solid var(--dsh-hairline);
   color:var(--dsh-fg-3);font:10px/16px var(--dsh-font);white-space:nowrap}
+/* 编辑态的 dock（画布顶部中间）：撤销 / 重做 / 单选 / 多选。
+   浮层的左右两条边由 design-panels.tsx 按面板宽度给（它才知道两块面板之间那段空当在
+   哪儿），这里只管垂直位置与横向摆正中。浮层本身不吃指针——空当上那点画布还要能点，
+   只有这枚胶囊吃。 */
+.dsh-canvas-design-dock-layer{position:absolute;top:12px;display:flex;justify-content:center;
+  pointer-events:none;z-index:2}
+.dsh-canvas-design-dock{display:inline-flex;align-items:center;gap:2px;padding:3px;border-radius:999px;
+  border:1px solid var(--dsh-hairline);background:var(--dsh-card);box-shadow:0 2px 10px rgba(0,0,0,.16);
+  user-select:none;cursor:default;pointer-events:auto}
+.dsh-canvas-design-dock button{display:inline-flex;align-items:center;justify-content:center;
+  border:none;background:transparent;color:var(--dsh-fg-2);cursor:pointer;
+  font:12px/16px var(--dsh-font);padding:3px 9px;border-radius:999px}
+.dsh-canvas-design-dock button:hover{background:var(--dsh-soft);color:var(--dsh-fg)}
+/* 撤销/重做没得走时是灰的：按钮**在**（位置不跳、含义一眼认得），只是按不动。它俩办完事
+   就走，所以没有持续高亮——只有按不动这一种状态。 */
+.dsh-canvas-design-dock button:disabled{color:var(--dsh-fg-3);opacity:.45;cursor:default}
+.dsh-canvas-design-dock button:disabled:hover{background:transparent;color:var(--dsh-fg-3)}
+/* 单选/多选是「现在在哪一面」：永远有一枚亮着，与模式开关同一副画法。 */
+.dsh-canvas-design-dock-modes{display:inline-flex;align-items:center;gap:2px}
+.dsh-canvas-design-dock-modes button[aria-checked=true]{background:var(--dsh-mid);color:var(--dsh-fg)}
+.dsh-canvas-design-dock-sep{width:1px;height:16px;margin:0 3px;background:var(--dsh-hairline)}
 /* 属性条（底部居中，单选时出现）：字段与 HUD 同一族壳。 */
 .dsh-canvas-design-props{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;
   align-items:center;gap:10px;max-width:calc(100% - 300px);padding:5px 10px;border-radius:8px;
@@ -552,7 +594,65 @@ body[data-ds-dark-theme] .dsh-canvas-root{
   width:180px;box-sizing:border-box;overflow:hidden;overscroll-behavior:contain;
   pointer-events:auto;z-index:1;cursor:default;background:var(--dsh-card)}
 .dsh-canvas-design-side-left{left:0;border-right:1px solid var(--dsh-hairline)}
-.dsh-canvas-design-side-right{right:0;width:200px;border-left:1px solid var(--dsh-hairline)}
+/* 右栏宽度**由 React 写在行内 style 上**（设计页 200px / AI 页 300px，见 design-panels.tsx）：
+   判据是标签页，而标签页的状态就在那一层——宽度跟着状态走，不隔着一条选择器。这里只留那
+   180ms 的伸缩：换标签是**同一个面板**变宽，跳一下就成了另一块东西。 */
+.dsh-canvas-design-side-right{right:0;border-left:1px solid var(--dsh-hairline);
+  transition:width .18s ease}
+/* 改稿在跑（一笔交给会话去改的图层还没落地）：面板只看着。整列不接指针——列表点不动、
+   字段改不了，连滚都不用想（这是锁，不是「禁用几个按钮」）。视觉上只把内容压淡一档，
+   面板自己那句「改稿进行中」仍是可读的。 */
+.dsh-canvas-design-side.is-locked{pointer-events:none}
+.dsh-canvas-design-side.is-locked .dsh-canvas-design-panel-list,
+.dsh-canvas-design-side.is-locked .dsh-canvas-design-form,
+.dsh-canvas-design-side.is-locked .dsh-canvas-design-ai-box{opacity:.5}
+/* 改稿圈：一笔在跑的改稿圈住的那批图层，每层一枚方块。位置由 viewer 的 draw 按当前视口
+   直写（镜头动它跟着动，不付 React 渲染），方块自己 overflow:hidden——光带扫的是**被改
+   的那一块**，不溢到别处。圈与元素选择那一圈同一副视觉语言：光在动 = 正在产出。 */
+.dsh-canvas-design-hold{position:absolute;inset:0;pointer-events:none}
+.dsh-canvas-design-hold-box{position:absolute;box-sizing:border-box;overflow:hidden;border-radius:2px;
+  border:1px solid var(--dsh-breeze);box-shadow:0 0 0 3px var(--dsh-sheen)}
+/* 选中框（编辑态单选中）：八枚缩放手柄 + 顶边正中一枚旋转手柄。
+   框体**不吃指针**——它正好盖住节点本身，吃了就把点选与拖移一起挡在门外；只有手柄吃。
+   几何（left/top/宽高/旋转角）由 viewer 的 paintFrame 每帧直写，所以这里不写任何尺寸。
+   不设 z-index：靠 DOM 次序落在画布之上、左右面板之下（节点滑到面板底下时该被面板盖住）。 */
+.dsh-canvas-design-frame{position:absolute;box-sizing:border-box;pointer-events:none;
+  border:1px solid var(--dsh-breeze);will-change:left,top,width,height,transform}
+.dsh-canvas-design-handle{position:absolute;width:8px;height:8px;box-sizing:border-box;border-radius:1px;
+  border:1px solid var(--dsh-breeze);background:var(--dsh-card);pointer-events:auto}
+.dsh-canvas-design-handle.is-nw{left:-4px;top:-4px;cursor:nwse-resize}
+.dsh-canvas-design-handle.is-n{left:calc(50% - 4px);top:-4px;cursor:ns-resize}
+.dsh-canvas-design-handle.is-ne{right:-4px;top:-4px;cursor:nesw-resize}
+.dsh-canvas-design-handle.is-e{right:-4px;top:calc(50% - 4px);cursor:ew-resize}
+.dsh-canvas-design-handle.is-se{right:-4px;bottom:-4px;cursor:nwse-resize}
+.dsh-canvas-design-handle.is-s{left:calc(50% - 4px);bottom:-4px;cursor:ns-resize}
+.dsh-canvas-design-handle.is-sw{left:-4px;bottom:-4px;cursor:nesw-resize}
+.dsh-canvas-design-handle.is-w{left:-4px;top:calc(50% - 4px);cursor:ew-resize}
+/* 旋转柄浮在顶边之上，用一枚连杆交代它跟谁连着——不连杆会像是悬在别处的一颗点。 */
+.dsh-canvas-design-rotate-arm{position:absolute;left:50%;top:-24px;width:1px;height:24px;
+  background:var(--dsh-breeze);pointer-events:none}
+.dsh-canvas-design-rotate{position:absolute;left:calc(50% - 5px);top:-30px;width:10px;height:10px;
+  box-sizing:border-box;border-radius:50%;border:1px solid var(--dsh-breeze);background:var(--dsh-card);
+  pointer-events:auto;cursor:${ROTATE_CURSOR}}
+/* 容器名称签（Figma 的 frame label）：每份容器一枚，浮在左上角之外。
+   容器不吃指针；名称本身可单击改名。位置由 viewer 的 paintLabels 每帧直写
+   （世界左上角 → 屏幕坐标），名字在屏幕像素里**不随缩放变大**——Figma 也这样。
+   不设 z-index：与选中框同一条理由——靠 DOM 次序落在画布之上、左右面板之下。 */
+.dsh-canvas-design-labels{position:absolute;inset:0;pointer-events:none;user-select:none}
+.dsh-canvas-design-labels.is-locked{opacity:.5}
+.dsh-canvas-design-labels.is-locked .dsh-canvas-design-label-name{pointer-events:none}
+.dsh-canvas-design-label{position:absolute;display:flex;flex-direction:column;align-items:flex-start;
+  transform:translateY(-100%);padding-bottom:5px}
+.dsh-canvas-design-label-name{display:inline-flex;align-items:center;gap:4px;box-sizing:border-box;
+  max-width:220px;padding:0 5px;border:1px solid transparent;border-radius:4px;background:transparent;
+  color:var(--dsh-fg-3);font:12px/16px var(--dsh-font);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  pointer-events:auto;cursor:text}
+.dsh-canvas-design-label-name svg{flex:none}
+.dsh-canvas-design-label-name:hover{border-color:var(--dsh-hairline);color:var(--dsh-fg-2)}
+.dsh-canvas-design-label.is-active .dsh-canvas-design-label-name{color:var(--dsh-breeze);border-color:var(--dsh-breeze)}
+.dsh-canvas-design-label-input{box-sizing:border-box;height:18px;padding:0 4px;border:1px solid var(--dsh-breeze);
+  border-radius:4px;background:var(--dsh-card);color:var(--dsh-fg);font:12px/16px var(--dsh-font);
+  outline:none;pointer-events:auto}
 /* 右栏只有属性一段：吃满整列高度（表单自身滚动）。 */
 .dsh-canvas-design-side-right>.dsh-canvas-design-panel{flex:1 1 auto}
 /* 左栏上段（页面）：限高防吞掉图层树；下段（图层）panel-grow 吃剩余，两段发丝线分段。 */
@@ -588,24 +688,44 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-design-caret{flex:none;width:12px;text-align:center;border:none;background:transparent;
   color:var(--dsh-fg-3);font:9px/16px var(--dsh-font);padding:0;cursor:pointer}
 .dsh-canvas-design-glyph{flex:none;width:14px;text-align:center;color:var(--dsh-fg-3);font:10px/16px var(--dsh-font)}
+.dsh-canvas-design-glyph svg{display:block;margin:0 auto}
 .dsh-canvas-design-row-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font:11px/18px var(--dsh-font);color:var(--dsh-fg-2)}
 .dsh-canvas-design-row-name input[type=text]{box-sizing:border-box;width:100%;min-width:0;
   border:1px solid var(--dsh-hairline);
   border-radius:3px;padding:0 4px;background:var(--dsh-soft);color:var(--dsh-fg);font:11px/18px var(--dsh-font);outline:none}
-.dsh-canvas-design-row-act{flex:none;border:none;background:transparent;color:var(--dsh-fg-3);cursor:pointer;
+/* 行尾两枚开关（锁定 / 显隐）：图标是 14px 线性 SVG，按钮用自己的盒子对齐图标，
+   不吃字体的行高——不然一行里两套「字形」的基线对不上。 */
+.dsh-canvas-design-row-act{flex:none;display:inline-flex;align-items:center;justify-content:center;height:16px;
+  border:none;background:transparent;color:var(--dsh-fg-3);cursor:pointer;
   font:10px/16px var(--dsh-font);padding:0 2px;border-radius:4px;opacity:0}
+.dsh-canvas-design-row-act svg{display:block}
+/* 悬停提示（行内小图标）：气泡**摊在行内**——默认落在元素下方，贴到列表下沿时翻到上方
+   （翻转由 is-up 决定，见 panels 的 placeTip）。横向仍留在面板的裁切边内（侧栏与列表都是
+   overflow:hidden/auto），因此不必 portal 也不会被裁掉一半。文字走 data-tip，开合只切
+   opacity；气泡是按钮/图标的子元素，所以按钮那点 opacity:0（未悬停时藏着）也一起管住它。 */
+.dsh-canvas-design-tip{position:relative}
+.dsh-canvas-design-tip::after{content:attr(data-tip);position:absolute;top:calc(100% + 6px);left:0;z-index:1;
+  padding:1px 6px;border-radius:4px;
+  background:var(--dsh-fg);color:var(--dsh-card);font:11px/16px var(--dsh-font);
+  white-space:nowrap;pointer-events:none;opacity:0}
+/* 行尾两枚开关贴着面板右沿：气泡改从元素右沿向左展开，别顶出面板。 */
+.dsh-canvas-design-tip:not(.is-right)::after{left:auto;right:0}
+.dsh-canvas-design-tip.is-up::after{top:auto;bottom:calc(100% + 6px)}
+.dsh-canvas-design-tip:hover::after{opacity:1}
 .dsh-canvas-design-panel-list li>div:hover .dsh-canvas-design-row-act{opacity:1}
 /* 隐藏图层的眼睛常显——不然盖了眼睛的行看起来像凭空消失。 */
-.dsh-canvas-design-layer.is-hidden .dsh-canvas-design-row-act[title='显示']{opacity:1}
+.dsh-canvas-design-layer.is-hidden .dsh-canvas-design-row-act[data-tip='显示']{opacity:1}
 .dsh-canvas-design-row-act:hover{color:var(--dsh-fg)}
 /* 属性面板表单：两列几何、整行外观，字段壳沿用属性条一族。
    宽度全是**定宽派生**：列宽来自侧栏、字段吃满一行、输入框吃满剩余——谁也不靠
    自己的固有宽度说话。input[type=number] 的固有宽约 125px，一进 1fr 轨道就
    把它顶出去（实测 scrollWidth 362 vs clientWidth 200），所以轨道写 minmax(0,1fr)
    拆掉自动最小尺寸、输入框 width:100% + border-box 由父级宽度定死。 */
-.dsh-canvas-design-form{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;box-sizing:border-box;width:100%;
-  padding:10px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+/* 分块之间留出**一眼能分块**的空当：块内紧、块间松（Figma 的属性栏也是靠空白分块，
+   不靠分隔线）。 */
+.dsh-canvas-design-form{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:16px;box-sizing:border-box;width:100%;
+  padding:12px 10px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
 .dsh-canvas-design-grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}
 .dsh-canvas-design-field{display:flex;align-items:center;gap:6px;min-width:0;box-sizing:border-box;
   font:11px/16px var(--dsh-font);color:var(--dsh-fg-3)}
@@ -631,10 +751,11 @@ body[data-ds-dark-theme] .dsh-canvas-root{
   border-bottom:2px solid transparent;margin-bottom:-1px}
 .dsh-canvas-design-tab:hover{color:var(--dsh-fg-2)}
 .dsh-canvas-design-tab.is-active{color:var(--dsh-fg);border-bottom-color:var(--dsh-breeze)}
-/* 模块小节：小标题行 + 内容；标题行右侧挂「＋添加」。 */
-.dsh-canvas-design-module{display:flex;flex-direction:column;gap:6px}
+/* 模块小节：**加粗标题** + 内容；标题行右侧挂「＋添加」。标题比正文字号大一号、颜色提一档，
+   块与块的间隔由 .dsh-canvas-design-form 的 gap 给。 */
+.dsh-canvas-design-module{display:flex;flex-direction:column;gap:8px}
 .dsh-canvas-design-module-head{display:flex;align-items:center;justify-content:space-between;
-  font:10px/14px var(--dsh-font);color:var(--dsh-fg-3);letter-spacing:.02em}
+  font:600 12px/18px var(--dsh-font);color:var(--dsh-fg-2);letter-spacing:.01em}
 .dsh-canvas-design-module-head button{border:none;background:transparent;color:var(--dsh-fg-2);cursor:pointer;
   font:11px/14px var(--dsh-font);padding:0 4px;border-radius:4px}
 .dsh-canvas-design-module-head button:hover{background:var(--dsh-soft);color:var(--dsh-fg)}
@@ -656,17 +777,27 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-design-check{display:flex;align-items:center;justify-content:space-between;gap:6px;
   font:11px/16px var(--dsh-font);color:var(--dsh-fg-3);cursor:pointer}
 .dsh-canvas-design-check input[type=checkbox]{margin:0;accent-color:var(--dsh-breeze);cursor:pointer}
-/* AI 标签页：提示区 + 纵向撑满的输入框 + 发送按钮；回执/错误各占一行。 */
-.dsh-canvas-design-ai{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;
+/* AI 标签页：一个提示词框（内联的选中图层 + 用户写的要求）+ 底部一行（模型席位、发送）。
+   框与正文分两层，与元素选择那个提示词框同一副做法：框负责边距与底色，正文那层吃内边距。
+   内联标签画在正文里（引用标签那一枚，与画布输入框、元素选择共用），所以「当前选中的
+   图层」不是框外的一句提示，而是**值里那一段的另一种画法**。 */
+.dsh-canvas-design-ai{flex:1 1 auto;min-height:0;width:100%;display:flex;flex-direction:column;gap:8px;
   box-sizing:border-box;padding:10px;overflow-y:auto;overscroll-behavior:contain}
-.dsh-canvas-design-ai-hint{margin:0;font:11px/16px var(--dsh-font);color:var(--dsh-fg-3)}
-.dsh-canvas-design-ai textarea{flex:1 1 auto;min-height:140px;resize:none;box-sizing:border-box;
-  border:1px solid var(--dsh-hairline);border-radius:6px;padding:6px 8px;background:var(--dsh-soft);
-  color:var(--dsh-fg);font:12px/18px var(--dsh-font);outline:none}
-.dsh-canvas-design-ai textarea:focus{border-color:var(--dsh-breeze)}
-.dsh-canvas-design-ai-send{flex:none;border:none;background:var(--dsh-breeze);color:var(--dsh-on-accent);
-  cursor:pointer;font:12px/18px var(--dsh-font);padding:6px 8px;border-radius:6px}
-.dsh-canvas-design-ai-send:disabled{opacity:.45;cursor:default}
+/* 框与正文都吃满可用宽高：宽度写死 100%（面板是定宽列，这一层不该有自己的固有宽度），
+   高度靠 flex:1 从 AI 页身上领——里面那个 contenteditable 自己再 flex:1 吃掉剩余。 */
+.dsh-canvas-design-ai-box{flex:1 1 auto;width:100%;min-height:120px;display:flex;flex-direction:column;
+  box-sizing:border-box;overflow:hidden;border:1px solid var(--dsh-hairline);border-radius:6px;
+  background:var(--dsh-soft)}
+.dsh-canvas-design-ai-box:focus-within{border-color:var(--dsh-breeze)}
+.dsh-canvas-design-ai-input{flex:1 1 auto;min-height:0;box-sizing:border-box;width:100%;
+  border:none;background:transparent;color:var(--dsh-fg);font:12px/18px var(--dsh-font);
+  -webkit-user-select:text;user-select:text}
+.dsh-canvas-design-ai-input .dsh-canvas-promptbox-field,
+.dsh-canvas-design-ai-input .dsh-canvas-promptbox-placeholder{padding:8px 10px}
+.dsh-canvas-design-ai-foot{flex:none;display:flex;align-items:center;gap:8px}
+/* 席位在底栏最左，菜单因此也向上开在那一角（模型菜单的 bottom 由这里定，它在控制带里是
+   26px——那是行高更高的一栏）。 */
+.dsh-canvas-design-ai-foot .dsh-canvas-modelmenu{bottom:24px}
 .dsh-canvas-design-ai-notice{margin:0;font:11px/16px var(--dsh-font);color:var(--dsh-fg-2)}
 .dsh-canvas-design-ai-error{margin:0;font:11px/16px var(--dsh-font);color:var(--dsh-sunset)}
 /* 帧区：帧与「浮在它上面」的提示条共用的一块定位上下文。它接过 viewer-body 里那份
@@ -718,6 +849,11 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-chipbtn[data-primary=true]:hover{filter:brightness(1.08);background:var(--dsh-sunset-solid)}
 .dsh-canvas-chipbtn[disabled]{opacity:.45;cursor:default}
 .dsh-canvas-chipbtn svg{display:block}
+/* 胶囊上那枚〔导出〕的锚：文本节点的格式菜单（md/txt/docx/pdf）从这颗钮下面垂下来。
+   锚是 inline-flex 的一层 span——胶囊那一排是 flex 的行，菜单不能参与它的排版，只能在
+   锚里绝对定位。宽度按内容撑（.dsh-canvas-menu 自己那 150px 下限够用），左缘与钮对齐。 */
+.dsh-canvas-pillmenu{position:relative;display:inline-flex;align-items:center}
+.dsh-canvas-pillmenu>.dsh-canvas-menu{position:absolute;left:0;top:30px;z-index:7}
 .dsh-canvas-zoombar{position:absolute;left:12px;bottom:12px;display:flex;flex-direction:row;align-items:center;gap:2px;padding:4px;border-radius:999px;
   border:1px solid var(--dsh-hairline);background:var(--dsh-card)}
 .dsh-canvas-iconbtn{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;border-radius:50%;
@@ -834,6 +970,8 @@ body[data-ds-dark-theme] .dsh-canvas-root{
      tool-view）仍按用户偏好停掉状态点的脉动。 */
   .dsh-canvas-shimmer::after{animation-duration:3.6s;opacity:.6}
   .dsh-canvas-dot[data-state=running]{animation:none}
+  /* 侧栏换宽也在这条偏好里：直接切，不做那 180ms 的伸缩。 */
+  .dsh-canvas-design-side-right{transition:none}
 }
 
 /* ── sidebar 画布区（F1.7）──────────────────────────────────────────────── */

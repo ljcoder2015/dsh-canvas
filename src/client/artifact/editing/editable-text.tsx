@@ -10,7 +10,7 @@
  */
 import type { ComponentType } from 'react'
 import type { ArtifactView } from '../../../types.ts'
-import { Slot, useChrome } from '../chrome.tsx'
+import { Slot, useChrome, useEscapeSink } from '../chrome.tsx'
 import { modeAfterKey } from './mode.ts'
 import { useTextEditing } from './use-text-editing.ts'
 
@@ -20,6 +20,9 @@ export type TextPreview = ComponentType<{ text: string }>
 /** 文本产物：预览 / 编辑是同一个弹窗的两种样子（F3.12）。 */
 export function EditableText({ view, preview: Preview }: { view: ArtifactView; preview: TextPreview }) {
   const chrome = useChrome()
+  // 文本这一面不用 Esc 关窗：Esc 只退「放弃确认」那一条（下面的 useTextEditing 登记），
+  // 退无可退时停住。它先登记，所以那一条比它优先。
+  useEscapeSink()
   const t = chrome.t
   const editor = useTextEditing({ view, chrome })
 

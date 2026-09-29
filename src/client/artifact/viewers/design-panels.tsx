@@ -5,13 +5,21 @@
  * reka-ui / tanstack-table）。我们只搬它的**信息架构与交互语义**，不搬实现：
  * - 页面面板：列表、切换（`switchPage`，core 异步做字体/layout 准备）、
  *   新建、重命名、删除（最后一页拒删是 core 的规则，UI 也不再出按钮）。
- * - 图层面板：当前页子树、点选（shift 加选）、显隐眼睛、锁定、重命名；
+ * - 图层面板：当前页子树、点选、显隐眼睛、锁定、重命名；点选口径**不在这一层**——
+ *   viewer 拿顶栏那个单选/多选开关统一裁决（这里只报「点了谁、按没按 shift」，
+ *   见 DesignSidePanels 的 onSelectLayer）；
  *   展示顺序取子节点**倒序**（场景图 latter-on-top，图层面板惯例顶层在上）。
  * - 属性面板：顶部「设计 / AI」两个标签页。设计页按模块分组编辑选中图层
- *   （名称、位置 X·Y、形状 W·H/圆角（统一或四角独立）/裁切溢出、外观
+ *   （名称、位置 X·Y/旋转角、形状 W·H/圆角（统一或四角独立）/裁切溢出、外观
  *   填充/不透明、文本/字号、边框动态数组（颜色/宽度/实虚线/内外居中描边/
- *   作用边）、阴影、内阴影、模糊）；AI 页是通用提示词输入框，发送时内联
- *   选中图层（经本卡会话改稿）。
+ *   作用边）、阴影、内阴影、模糊）；AI 页是一个提示词框：**选中的图层折成框内的
+ *   内联标签**（与元素选择同一条折法——值里那一段原文照旧，只是另画一种样子），
+ *   底栏是模型席位与发送。单选模式下框里始终是一枚跟着选区走的标签；多选模式下
+ *   一段段累积（选一批写一句、再选一批再写一句，见 AiChip）。AI 页更宽：框里
+ *   要装得下标签和一整句话。
+ *
+ * 发出去之后这一笔归 viewer：那批图层被圈起来（流光扫过被改的那一块），画布与面板一起
+ * 锁上——改稿在别人手里，这里的每一笔改动都是两个人同时写一份文档。改完落地自动收。
  *
  * 数据流是「拉」不是「推」：面板不做任何订阅，每次渲染时从
  * `engine.snapshot()` / `engine.nodeProps()` 现取；图一变，viewer 的
@@ -20,7 +28,10 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
+import type { PromptFold } from '../../../core/artifact/prompt-blocks.ts'
 import { useChrome } from '../chrome.tsx'
+import { ModelPicker } from '../../ui/model-picker.tsx'
+import { PromptInput } from '../../ui/prompt-input.tsx'
 import type {
   DesignEffectItem,
   DesignEngine,
@@ -40,34 +51,345 @@ export interface DesignPanelsProps {
 }
 
 /**
+ * 一笔改稿（AI 页把选中的图层交给会话去改）在两头的说法：面板这边报「起手了」，viewer
+ * 那边据此收走编辑权、圈住那几个图层。
+ */
+export interface DesignHoldProps {
+  /** 改稿在跑：面板只看着（整列不接指针，见 styles.ts 的 is-locked）。 */
+  locked: boolean
+  /** 起手：把这一批图层报给 viewer（圈住它们、锁住编辑，等改稿落地自动收）。 */
+  onHold: (ids: readonly string[]) => void
+}
+
+/**
+ * 画布的点选口径——dock 上那对单选/多选按钮。
+ *
+ * 它管两件事，两件都落在「一次点击意味着什么」上：**选区**（换人还是加上一个）与 **AI 框里
+ * 那几段标签的写法**（重瞄最后一段，还是另起一段）。
+ */
+export type DesignSelectMode = 'single' | 'multi'
+
+/**
  * 侧栏容器的类名。viewer 那边的滚轮闸门按它认出「这一滚是给列表的，不是给画布
  * 的」——两处必须指同一个名字，所以只有这一份（@see design-viewer.tsx 的 wheel）。
  */
 export const DESIGN_SIDE_CLASS = 'dsh-canvas-design-side'
 
-/** 编辑态的左右栏：左 = 页面 + 图层，右 = 属性。 */
-export function DesignSidePanels({ snapshot, engine, onAction, revision }: DesignPanelsProps): ReactElement {
+/** 右栏在两种标签页下的宽度：设计页一行字段够用，AI 页要装得下一枚标签与一整句话。 */
+const SIDE_WIDTH: Record<PanelTab, number> = { design: 200, ai: 300 }
+
+/**
+ * 左栏宽度（样式表里 `.dsh-canvas-design-side` 的那条 width）。
+ *
+ * 它到了 JS 这一侧只有一个用处：给 dock 那条浮层量出**两块面板之间那段空当**的左边界
+ * （见 {@link DesignDockLayer}）。改动这里必须同时改样式表那一条。
+ */
+const SIDE_LEFT_WIDTH = 180
+
+/**
+ * 编辑态的左右栏：左 = 页面 + 图层，右 = 属性。
+ *
+ * `dock` 是画布顶部中间那条工具栏（viewer 画的内容，位置归这里——它要落在两块面板**之间**
+ * 的空当正中，而空当的两条边只有这一层知道）。
+ */
+export function DesignSidePanels({
+  snapshot,
+  engine,
+  onAction,
+  revision,
+  locked,
+  onHold,
+  onSelectLayer,
+  selectMode,
+  dock,
+}: DesignPanelsProps &
+  DesignHoldProps & {
+    /**
+     * 点选走 viewer 那一份公共口径（选区只有一份，画布与面板必须给出同一个结果）。
+     *
+     * 面板不再自己 `engine.select`——以前那一版按 shift 加选，同一个 shift 在画布上是另一个
+     * 意思；现在两处都只报「点了谁、按没按 shift」，怎么选由 viewer 按顶栏的模式定。
+     */
+    onSelectLayer: (id: string, range: boolean) => void
+    selectMode: DesignSelectMode
+    dock?: ReactElement
+  }): ReactElement {
+  /**
+   * 属性面板的两个标签由**这里**拿着，不是 `PropertiesPanel` 自己拿着。
+   *
+   * 因为宽度是**栏**的事（右栏按标签页换宽，见下面的 SIDE_WIDTH），而栏是这一层画的
+   * ——标签落在里面那一层，宽度就够不着它。
+   */
+  const [tab, setTab] = useState<PanelTab>('design')
+  const lock = locked ? ' is-locked' : ''
   return (
     <>
-      <div className={`${DESIGN_SIDE_CLASS} dsh-canvas-design-side-left`} onPointerDown={(event) => event.stopPropagation()}>
+      <div
+        className={`${DESIGN_SIDE_CLASS} dsh-canvas-design-side-left${lock}`}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <PagesPanel snapshot={snapshot} engine={engine} onAction={onAction} revision={revision} />
-        <LayersPanel snapshot={snapshot} engine={engine} onAction={onAction} revision={revision} />
+        <LayersPanel
+          snapshot={snapshot}
+          engine={engine}
+          onAction={onAction}
+          revision={revision}
+          onSelectLayer={onSelectLayer}
+        />
       </div>
-      <div className={`${DESIGN_SIDE_CLASS} dsh-canvas-design-side-right`} onPointerDown={(event) => event.stopPropagation()}>
-        <PropertiesPanel snapshot={snapshot} engine={engine} onAction={onAction} revision={revision} />
+      {dock === undefined ? null : <DesignDockLayer right={SIDE_WIDTH[tab]}>{dock}</DesignDockLayer>}
+      <div
+        className={`${DESIGN_SIDE_CLASS} dsh-canvas-design-side-right${lock}`}
+        // 宽度走行内样式：它跟着**标签页状态**走，写在这里就没有第二条选择器可以跟它打架
+        // （伸缩那 180ms 留在样式表里）。
+        style={{ width: SIDE_WIDTH[tab] }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <PropertiesPanel
+          snapshot={snapshot}
+          engine={engine}
+          onAction={onAction}
+          revision={revision}
+          tab={tab}
+          onTab={setTab}
+          locked={locked}
+          onHold={onHold}
+          selectMode={selectMode}
+        />
       </div>
     </>
   )
 }
 
-/** 类型徽标：一行字符的轻量图形（不引图标库）。 */
-function typeGlyph(type: string): string {
-  if (type === 'text') return 'T'
-  if (type === 'frame' || type === 'canvas' || type === 'section') return '▢'
-  if (type === 'ellipse' || type === 'circle') return '◯'
-  if (type === 'image') return '▨'
-  if (type === 'group') return '❏'
-  return '◆'
+/** dock 那条浮层：横跨两块面板之间的空当，把内容摆在正中（内容不许吃指针，按钮自己吃）。 */
+function DesignDockLayer({ right, children }: { right: number; children: ReactNode }): ReactElement {
+  return (
+    <div className="dsh-canvas-design-dock-layer" style={{ left: SIDE_LEFT_WIDTH, right }}>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * 类型记号的外壳：24 视框、12px、只描边不填充、颜色随 currentColor。
+ *
+ * 一族的笔法只有这一份——尺寸、粗细、端点都在这里定死，加一枚新记号不必再抄一遍。
+ * 圆头、圆角是这族记号的共同长相，和面板里那两枚开关的图标同源。
+ */
+function Glyph({ strokeWidth = 1.8, children }: { strokeWidth?: number; children: ReactNode }): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: 'block' }}
+    >
+      {children}
+    </svg>
+  )
+}
+
+/**
+ * Figma 的 frame 记号：井字形（四根短线穿成一个框）。
+ *
+ * 容器在 Figma 的图层树上就是这枚 `#`，图层面板与画布上的容器名称签共用同一枚。
+ */
+export function FrameIcon(): ReactElement {
+  return (
+    <Glyph strokeWidth={2}>
+      <path d="M8 3v18M16 3v18M3 8h18M3 16h18" />
+    </Glyph>
+  )
+}
+
+/**
+ * Figma 的 section 记号：圆角方框 + 左上角一格（区域自己的名字就挂在那格里）。
+ *
+ * 区域是归类容器的组织层，不裁切——容器是光秃的 `#`，区域是框起来的，
+ * 两枚记号一眼分得开。
+ */
+export function SectionIcon(): ReactElement {
+  return (
+    <Glyph>
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      <path d="M3 10.5h9.5V3" />
+    </Glyph>
+  )
+}
+
+/** 文本：一枚 T。 */
+function TextIcon(): ReactElement {
+  return (
+    <Glyph>
+      <path d="M5 6h14M12 6v13" />
+    </Glyph>
+  )
+}
+
+/** 矩形：方框；圆角矩形把圆角放大到一眼看得出「圆」的那一档。 */
+function RectIcon({ rounded }: { rounded: boolean }): ReactElement {
+  return (
+    <Glyph>
+      <rect x="4.5" y="4.5" width="15" height="15" rx={rounded ? 5.5 : 1.5} />
+    </Glyph>
+  )
+}
+
+/** 椭圆 / 圆。 */
+function EllipseIcon(): ReactElement {
+  return (
+    <Glyph>
+      <circle cx="12" cy="12" r="8.5" />
+    </Glyph>
+  )
+}
+
+/** 直线：一根斜线。 */
+function LineIcon(): ReactElement {
+  return (
+    <Glyph>
+      <path d="M5 19 19 5" />
+    </Glyph>
+  )
+}
+
+/** 星形：十点闭合星。 */
+function StarIcon(): ReactElement {
+  return (
+    <Glyph>
+      <path d="M12 4 14.2 9.5 20.1 9.9 15.5 13.6 17 19.4 12 16.2 7 19.4 8.5 13.6 3.9 9.9 9.8 9.5Z" />
+    </Glyph>
+  )
+}
+
+/** 多边形：正六边形。 */
+function PolygonIcon(): ReactElement {
+  return (
+    <Glyph>
+      <path d="M12 3.6 19.4 7.8v8.4L12 20.4 4.6 16.2V7.8Z" />
+    </Glyph>
+  )
+}
+
+/** 矢量图形：一条曲线接两个节点。 */
+function VectorIcon(): ReactElement {
+  return (
+    <Glyph>
+      <path d="M5.5 18.5C5.5 11 18.5 13 18.5 5.5" />
+      <circle cx="5.5" cy="18.5" r="1.5" />
+      <circle cx="18.5" cy="5.5" r="1.5" />
+    </Glyph>
+  )
+}
+
+/** 分组：四角的括号——只表示「这是一组」，不画里面的成员。 */
+function GroupIcon(): ReactElement {
+  return (
+    <Glyph>
+      <path d="M4 9V5.8A1.8 1.8 0 0 1 5.8 4H9M15 4h3.2A1.8 1.8 0 0 1 20 5.8V9M20 15v3.2a1.8 1.8 0 0 1-1.8 1.8H15M9 20H5.8A1.8 1.8 0 0 1 4 18.2V15" />
+    </Glyph>
+  )
+}
+
+/** 认不得的类型（组件 / 实例等）：一枚空菱形，具体是什么交给提示文字说。 */
+function UnknownIcon(): ReactElement {
+  return (
+    <Glyph>
+      <path d="M12 3.8 20.2 12 12 20.2 3.8 12Z" />
+    </Glyph>
+  )
+}
+
+/** 图层面板两枚开关的线性图标：开与关是同一族里的两笔差别，笔画都随 currentColor 走。 */
+function EyeIcon({ off }: { off: boolean }): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: 'block' }}
+    >
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" />
+      <circle cx="12" cy="12" r="3" />
+      {/* 斜杠压住眼睛就是「藏起来」——同一只眼睛加一笔，两态一眼配对。 */}
+      {off ? <path d="M3 21 21 3" /> : null}
+    </svg>
+  )
+}
+
+/** 挂锁：关着是两条腿都扣住，开着是右腿离地（Figma 那副长相）。 */
+function LockIcon({ open }: { open: boolean }): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: 'block' }}
+    >
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
+      <path d={open ? 'M8.2 10.5V7.2a3.8 3.8 0 0 1 7.2-1.6' : 'M8.2 10.5V7.2a3.8 3.8 0 0 1 7.6 0v3.3'} />
+    </svg>
+  )
+}
+
+/**
+ * 类型徽标：一枚线性记号认一种类型。
+ *
+ * frame 的 `#` 与 section 的「框套格」跟着 Figma；其余是同一族的线性图形——原先那几枚
+ * 字形（`T`/`◯`/`▨`/`❏`/`◆`）换掉了：字符的字重、端点、基线都随字体走，和两侧的 SVG
+ * 开关摆在一行里对不上。
+ */
+function TypeGlyph({ type }: { type: string }): ReactElement {
+  if (type === 'frame' || type === 'canvas') return <FrameIcon />
+  if (type === 'section') return <SectionIcon />
+  if (type === 'text') return <TextIcon />
+  if (type === 'rectangle' || type === 'rounded-rectangle') return <RectIcon rounded={type === 'rounded-rectangle'} />
+  if (type === 'ellipse') return <EllipseIcon />
+  if (type === 'line') return <LineIcon />
+  if (type === 'star') return <StarIcon />
+  if (type === 'polygon') return <PolygonIcon />
+  if (type === 'vector') return <VectorIcon />
+  if (type === 'group') return <GroupIcon />
+  return <UnknownIcon />
+}
+
+/** 类型徽标的中文名（悬停提示）：认得的给中文，认不得的退回 wire 名本身。 */
+const TYPE_LABELS: Record<string, string> = {
+  frame: '容器',
+  canvas: '容器',
+  section: '区域',
+  group: '分组',
+  text: '文本',
+  rectangle: '矩形',
+  'rounded-rectangle': '圆角矩形',
+  ellipse: '椭圆',
+  line: '直线',
+  star: '星形',
+  polygon: '多边形',
+  vector: '矢量图形',
+  component: '组件',
+  'component-set': '组件集',
+  instance: '实例',
+  'boolean-operation': '布尔运算',
+  'shape-with-text': '图形文字',
 }
 
 // —— 页面面板 ————————————————————————————————————————————————————————
@@ -149,7 +471,28 @@ function PagesPanel({ snapshot, engine, onAction }: DesignPanelsProps): ReactEle
  */
 const MAX_INDENT_DEPTH = 6
 
-function LayersPanel({ snapshot, engine, onAction }: DesignPanelsProps): ReactElement {
+/** 气泡占的竖向空间：11px 字 + 上下各 1px 内边距 + 6px 空当——翻不翻就看这点够不够。 */
+const TIP_STACK_HEIGHT = 24
+
+/**
+ * 悬停气泡默认落在元素**下方**，下方装不下才翻到上方。
+ *
+ * 「装不下」以最近的可裁父级的底边为准：图层列表是 `overflow:auto`、侧栏是
+ * `overflow:hidden`，越过它们的气泡会被直接切掉；而那条边在哪儿只有量出来才知道
+ * （列表还可能已经滚过）。翻转靠一枚类，样式那边只切 `top`/`bottom`。
+ */
+function placeTip(host: HTMLElement): void {
+  const clip = host.closest('.dsh-canvas-design-panel-list') ?? host.closest(`.${DESIGN_SIDE_CLASS}`)
+  const limit = clip?.getBoundingClientRect().bottom ?? window.innerHeight
+  host.classList.toggle('is-up', host.getBoundingClientRect().bottom + TIP_STACK_HEIGHT > limit)
+}
+
+function LayersPanel({
+  snapshot,
+  engine,
+  onAction,
+  onSelectLayer,
+}: DesignPanelsProps & { onSelectLayer: (id: string, range: boolean) => void }): ReactElement {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [renaming, setRenaming] = useState<string | null>(null)
   const selected = new Set(snapshot.selection)
@@ -200,8 +543,8 @@ function LayersPanel({ snapshot, engine, onAction }: DesignPanelsProps): ReactEl
           ].filter(Boolean).join(' ')}
           style={{ paddingLeft: 4 + Math.min(depth, MAX_INDENT_DEPTH) * 12 }}
           onClick={(event) => {
-            engine.select([node.id], event.shiftKey)
-            onAction()
+            // 单选/多选、shift 铺一段——口径都在 viewer 那一份 selectLayer 里，这里只报点击。
+            onSelectLayer(node.id, event.shiftKey)
           }}
           onDoubleClick={() => setRenaming(node.id)}
         >
@@ -224,7 +567,13 @@ function LayersPanel({ snapshot, engine, onAction }: DesignPanelsProps): ReactEl
           ) : (
             <span className="dsh-canvas-design-caret" />
           )}
-          <span className="dsh-canvas-design-glyph">{typeGlyph(node.type)}</span>
+          <span
+            className="dsh-canvas-design-glyph dsh-canvas-design-tip is-right"
+            data-tip={TYPE_LABELS[node.type] ?? node.type}
+            onPointerEnter={(event) => placeTip(event.currentTarget)}
+          >
+            <TypeGlyph type={node.type} />
+          </span>
           {renaming === node.id ? (
             <TextField
               autoFocus
@@ -243,27 +592,31 @@ function LayersPanel({ snapshot, engine, onAction }: DesignPanelsProps): ReactEl
           )}
           <button
             type="button"
-            className="dsh-canvas-design-row-act"
-            title={node.locked ? '解除锁定' : '锁定'}
+            className="dsh-canvas-design-row-act dsh-canvas-design-tip"
+            aria-label={node.locked ? '解除锁定' : '锁定'}
+            data-tip={node.locked ? '解除锁定' : '锁定'}
+            onPointerEnter={(event) => placeTip(event.currentTarget)}
             onClick={(event) => {
               event.stopPropagation()
               engine.updateProps(node.id, { locked: !node.locked })
               onAction()
             }}
           >
-            {node.locked ? '🔒' : '🔓'}
+            <LockIcon open={!node.locked} />
           </button>
           <button
             type="button"
-            className="dsh-canvas-design-row-act"
-            title={node.visible ? '隐藏' : '显示'}
+            className="dsh-canvas-design-row-act dsh-canvas-design-tip"
+            aria-label={node.visible ? '隐藏' : '显示'}
+            data-tip={node.visible ? '隐藏' : '显示'}
+            onPointerEnter={(event) => placeTip(event.currentTarget)}
             onClick={(event) => {
               event.stopPropagation()
               engine.updateProps(node.id, { visible: !node.visible })
               onAction()
             }}
           >
-            {node.visible ? '👁' : '·'}
+            <EyeIcon off={!node.visible} />
           </button>
         </div>
         {hasChildren && !isCollapsed ? (
@@ -288,8 +641,23 @@ function LayersPanel({ snapshot, engine, onAction }: DesignPanelsProps): ReactEl
 /** 属性面板顶部的两个标签。 */
 type PanelTab = 'design' | 'ai'
 
-function PropertiesPanel({ snapshot, engine, onAction, revision }: DesignPanelsProps): ReactElement {
-  const [tab, setTab] = useState<PanelTab>('design')
+interface PropertiesPanelProps extends DesignPanelsProps, DesignHoldProps {
+  tab: PanelTab
+  onTab: (tab: PanelTab) => void
+  selectMode: DesignSelectMode
+}
+
+function PropertiesPanel({
+  snapshot,
+  engine,
+  onAction,
+  revision,
+  tab,
+  onTab,
+  locked,
+  onHold,
+  selectMode,
+}: PropertiesPanelProps): ReactElement {
   return (
     <section className="dsh-canvas-design-panel">
       <div className="dsh-canvas-design-tabs" role="tablist" aria-label="属性面板">
@@ -298,7 +666,7 @@ function PropertiesPanel({ snapshot, engine, onAction, revision }: DesignPanelsP
           role="tab"
           aria-selected={tab === 'design'}
           className={`dsh-canvas-design-tab${tab === 'design' ? ' is-active' : ''}`}
-          onClick={() => setTab('design')}
+          onClick={() => onTab('design')}
         >
           设计
         </button>
@@ -307,7 +675,7 @@ function PropertiesPanel({ snapshot, engine, onAction, revision }: DesignPanelsP
           role="tab"
           aria-selected={tab === 'ai'}
           className={`dsh-canvas-design-tab${tab === 'ai' ? ' is-active' : ''}`}
-          onClick={() => setTab('ai')}
+          onClick={() => onTab('ai')}
         >
           AI
         </button>
@@ -315,7 +683,15 @@ function PropertiesPanel({ snapshot, engine, onAction, revision }: DesignPanelsP
       {tab === 'design' ? (
         <DesignPropertiesTab snapshot={snapshot} engine={engine} onAction={onAction} revision={revision} />
       ) : (
-        <AiPromptTab snapshot={snapshot} engine={engine} onAction={onAction} revision={revision} />
+        <AiPromptTab
+          snapshot={snapshot}
+          engine={engine}
+          onAction={onAction}
+          revision={revision}
+          locked={locked}
+          onHold={onHold}
+          selectMode={selectMode}
+        />
       )}
     </section>
   )
@@ -383,6 +759,15 @@ function DesignPropertiesTab({ snapshot, engine, onAction, revision }: DesignPan
             <NumField value={Math.round(read.y)} onCommit={(y) => commit({ y })} />
           </label>
         </div>
+        {/* 旋转与 X/Y 同属位置（Figma 的变换一节也是这么并排的）：不设上下限，
+            整圈、负角都合法，值一个都不改地交给场景图。 */}
+        <label className="dsh-canvas-design-field">
+          <span>旋转</span>
+          <NumField
+            value={Math.round(read.rotation * 10) / 10}
+            onCommit={(rotation) => commit({ rotation })}
+          />
+        </label>
       </Module>
 
       <Module title="形状">
@@ -753,14 +1138,104 @@ function EffectList({
 /** 内联进提示词的选中图层上限（再多就截断——提示词不是图层清单）。 */
 const AI_INLINE_MAX = 8
 
-function AiPromptTab({ snapshot, engine }: DesignPanelsProps): ReactElement {
+/** 一枚内联图层标签要说的那点事实。 */
+interface InlineLayer {
+  id: string
+  type: string
+  name: string
+  x: number
+  y: number
+  width: number
+  height: number
+  fill: string | null
+}
+
+/**
+ * 选中图层那半截原文——**它就是发出去那一段提示词的开头**，输入框只是把它折成一枚标签。
+ *
+ * 与元素选择的定位同一套做法（`cutEditPrompt` + `PromptFold`）：折的只是画法，整串字符仍是
+ * 值的一部分，发送时照原样吐回去，于是「缩量的提示词」与「屏幕上看见的那句话」不会分成
+ * 两份事实。数组在前、要求在后，也是那个顺序：先说改哪儿，再说改成什么。
+ */
+function layerContext(layers: readonly InlineLayer[]): string {
+  return `（内联的选中图层，请以这些 id 为目标用 canvas_design_edit 修改：${JSON.stringify(layers)}）\n\n`
+}
+
+/** 标签上那行字：选一个就报名字，选多个就报个数——一枚标签装不下八个名字。 */
+function layerLabel(layers: readonly InlineLayer[]): string {
+  if (layers.length === 1) {
+    const only = layers[0]!
+    return only.name === '' ? only.type : only.name
+  }
+  return `${layers.length} 个图层`
+}
+
+/** 悬停时把这一笔的全部内容摊开（标签本身只有一枚的宽度）。 */
+function layerDetail(layers: readonly InlineLayer[], truncated: boolean): string {
+  const lines = layers.map((layer) => `${layer.name} (${layer.type}) · id=${layer.id}`)
+  if (truncated) lines.push(`（只内联了前 ${AI_INLINE_MAX} 个）`)
+  return lines.join('\n')
+}
+
+/**
+ * 值里的一段定位：**朝这几个图层说的那句话**。
+ *
+ * 一枚标签 = 一段（图层 + 紧跟其后的要求）。单选模式下永远只有一段——它跟着选区走（选中
+ * 别人就重新瞄准）；多选模式下会一段段累积起来：选一批说一句、再选一批再说一句，每一段
+ * 自己带着目标与人话。于是「一句话同时改好几个图层」与「好几句话分别改不同的图层」，在同一
+ * 个框里都写得出来。
+ */
+interface AiChip {
+  /** 这一段冲着哪些图层说。 */
+  layers: readonly InlineLayer[]
+  /** 这一段是从被截断的选区里来的（只进 tooltip）。 */
+  truncated: boolean
+}
+
+/** 把一段定位接在值末尾：中间隔一个空行（值本来就是空的就是它自己）。 */
+function appendChip(value: string, text: string): string {
+  return value === '' ? text : `${value.replace(/\n+$/u, '')}\n\n${text}`
+}
+
+/**
+ * 把值里现存的每一段折成一枚标签。
+ *
+ * 位置是**现找**的（上一段之后的第一处出现），不是存下来的偏移——用户在原文里删改过之后，
+ * 存下来的偏移早就不是那一段了。找不到的那些段就不折：它不再是标签，这一笔也不再朝它说话
+ * （见 `AiPromptTab` 的 targets）。
+ */
+function chipFolds(value: string, chips: readonly AiChip[]): PromptFold[] {
+  const folds: PromptFold[] = []
+  let cursor = 0
+  for (const chip of chips) {
+    const text = layerContext(chip.layers)
+    const at = value.indexOf(text, cursor)
+    if (at === -1) continue
+    folds.push({
+      at,
+      length: text.length,
+      reference: {
+        id: text,
+        type: 'element',
+        label: layerLabel(chip.layers),
+        detail: layerDetail(chip.layers, chip.truncated),
+      },
+    })
+    cursor = at + text.length
+  }
+  return folds
+}
+
+function AiPromptTab({
+  snapshot,
+  engine,
+  locked,
+  onHold,
+  selectMode,
+}: DesignPanelsProps & DesignHoldProps & { selectMode: DesignSelectMode }): ReactElement {
   const chrome = useChrome()
-  const [draft, setDraft] = useState('')
-  const [sending, setSending] = useState(false)
-  const [notice, setNotice] = useState('')
-  const [error, setError] = useState('')
-  // 内联的图层上下文：每次渲染现取（与面板的「拉」数据流一致），发送时定格。
-  const inlined = snapshot.selection
+  // 内联的图层上下文：每次渲染现取（与面板的「拉」数据流一致），发送时定格在这段值里。
+  const inlined: InlineLayer[] = snapshot.selection
     .slice(0, AI_INLINE_MAX)
     .map((id) => engine.nodeProps(id))
     .filter((read): read is NonNullable<typeof read> => read !== null)
@@ -774,23 +1249,84 @@ function AiPromptTab({ snapshot, engine }: DesignPanelsProps): ReactElement {
       height: Math.round(read.height),
       fill: read.fill,
     }))
+  const truncated = snapshot.selection.length > AI_INLINE_MAX
+  const multi = selectMode === 'multi'
+
+  /** 框里的**整段**值（各段定位 + 用户写的要求）。定位那几截折成标签画，值里一个字不少。 */
+  const [value, setValue] = useState(() => (inlined.length === 0 ? '' : layerContext(inlined)))
+  /** 值里那几段定位的目录（谁在这段标签里、截断过没有）——值才是真源，它只是索引。 */
+  const [chips, setChips] = useState<readonly AiChip[]>(() =>
+    inlined.length === 0 ? [] : [{ layers: inlined, truncated }],
+  )
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState('')
+
+  /**
+   * 选区变了就动值——「标签跟着选中走」这件事的全部实现，也是它唯一的触发点。
+   *
+   * 两条路，各自对得上手上的一个动作：
+   * - **重瞄最后一枚**：它后面那段文字还是空白（还没被说过话），换掉它不丢任何东西。单选
+   *   永远走这条（框里始终是「一个目标 + 一句话」）；多选时最后一枚还没落定也走这条——
+   *   「点了 A 再点 B，然后才写要求」因此写成一枚 [A,B] 的标签，而不是两枚。
+   * - **另起一段**：最后一枚后面已经有人话了，那一段就落定；再选图层（多选）便是新的一段。
+   *   新段只点**还没谈到的**图层——重复点名会让模型收到两遍同一枚标签。
+   *
+   * 清空选区什么都不动：那些标签是**说过的话的记录**，不是选区的影子。选区一没就把它们划
+   * 掉，等于替用户删掉他写过的要求。
+   */
+  const selectionKey = snapshot.selection.join(',')
+  const lastSelectionRef = useRef(selectionKey)
+  useEffect(() => {
+    if (selectionKey === lastSelectionRef.current) return
+    lastSelectionRef.current = selectionKey
+    if (inlined.length === 0) return
+    // 值才是真源：先从目录里剔掉用户在原文里删掉的段——「谁还没被谈到」才数得准。
+    const kept = chips.filter((chip) => value.includes(layerContext(chip.layers)))
+    const last = kept[kept.length - 1]
+    const lastText = last === undefined ? '' : layerContext(last.layers)
+    const lastAt = lastText === '' ? -1 : value.indexOf(lastText)
+    const settled = lastAt !== -1 && value.slice(lastAt + lastText.length).trim() !== ''
+    if (!settled || !multi) {
+      setChips([...kept.slice(0, -1), { layers: inlined, truncated }])
+      setValue(
+        lastAt === -1
+          ? appendChip(value, layerContext(inlined))
+          : value.slice(0, lastAt) + layerContext(inlined) + value.slice(lastAt + lastText.length),
+      )
+      return
+    }
+    const known = new Set(kept.flatMap((chip) => chip.layers.map((layer) => layer.id)))
+    const fresh = inlined.filter((layer) => !known.has(layer.id))
+    if (fresh.length === 0) return
+    setChips([...kept, { layers: fresh, truncated }])
+    setValue(appendChip(value, layerContext(fresh)))
+  }, [selectionKey])
+
+  /** 值里现存的几段：既是画出来的标签，也是这一笔要改的目标。 */
+  const present = chips.filter((chip) => value.includes(layerContext(chip.layers)))
+  const folds = chipFolds(value, present)
+  const targets =
+    present.length === 0
+      ? [...snapshot.selection]
+      : [...new Set(present.flatMap((chip) => chip.layers.map((layer) => layer.id)))]
 
   const send = (): void => {
-    const text = draft.trim()
-    if (text === '' || sending) return
+    const prompt = value.trim()
+    if (prompt === '' || sending || locked) return
+    // 交给会话去改的就是**框里每一段标签点到的那几个图层**（去重）——在起手这一刻定格：起手
+    // 之后画布锁住、选区也动不了，所以这批 id 与画面上圈住的那一块从头到尾是同一件事。
+    // 一枚标签都不剩（用户把标签删了）就退回当前选区，与只有一句话的老行为同一条路。
+    const ids = targets
     setSending(true)
     setError('')
-    // 选中图层以 id 清单内联进提示词：模型拿 id 调 canvas_design_edit 精确改稿。
-    const prompt =
-      inlined.length > 0
-        ? `${text}\n\n（内联的选中图层，请以这些 id 为目标用 canvas_design_edit 修改：${JSON.stringify(inlined)}）`
-        : text
     void chrome.bridge
       .sendMessage(chrome.projectId, chrome.cardId, prompt)
       .then(() => {
         setSending(false)
-        setDraft('')
-        setNotice('已发送给本卡会话，模型改稿写入后画布会自动刷新。')
+        // 发出去的那句话**留在框里**：刚写完的要求就是接下来要对照的东西（哪里没改到、
+        // 哪句说重了），清掉它等于把刚才说过的话从眼前拿走。下一次要改的多半还是这批
+        // 图层、还是接着这句话往下说——改一两个词再发，比重打一遍省事。
+        onHold(ids)
       })
       .catch((reason: unknown) => {
         setSending(false)
@@ -800,27 +1336,51 @@ function AiPromptTab({ snapshot, engine }: DesignPanelsProps): ReactElement {
 
   return (
     <div className="dsh-canvas-design-ai">
-      <p className="dsh-canvas-design-ai-hint">
-        {inlined.length > 0
-          ? `将内联 ${inlined.length} 个选中图层${snapshot.selection.length > AI_INLINE_MAX ? `（已截取前 ${AI_INLINE_MAX} 个）` : ''}。`
-          : '未选中图层，将作为通用指令发送。'}
-      </p>
-      <textarea
-        placeholder="描述要做的修改，例如「把这个卡片改成深色主题，加上投影」…"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          // ⌘/Ctrl+Enter 直接发送；面板表单的其余键节律不在此处。
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault()
-            send()
+      <div className="dsh-canvas-design-ai-box">
+        <PromptInput
+          className="dsh-canvas-design-ai-input"
+          value={value}
+          onChange={setValue}
+          folds={folds.length === 0 ? undefined : folds}
+          spellCheck={false}
+          placeholder={
+            multi
+              ? '多选：选几个图层写一句，再选几个再写一句…'
+              : '描述要做的修改，例如「把这个卡片改成深色主题，加上投影」…'
           }
-        }}
-      />
-      <button type="button" className="dsh-canvas-design-ai-send" disabled={sending || draft.trim() === ''} onClick={send}>
-        {sending ? '发送中…' : '发送给会话'}
-      </button>
-      {notice !== '' ? <p className="dsh-canvas-design-ai-notice">{notice}</p> : null}
+          onKeyDown={(event) => {
+            // ⌘/Ctrl+Enter 直接发送；面板表单的其余键节律不在此处。
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault()
+              send()
+            }
+          }}
+        />
+      </div>
+      <div className="dsh-canvas-design-ai-foot">
+        {/* 模型席位：与画布输入框底栏同一颗（`ui/model-picker.tsx`），同一份会话选择。 */}
+        <ModelPicker
+          bridge={chrome.bridge}
+          projectId={chrome.projectId}
+          cardId={chrome.cardId}
+          sessionId={chrome.sessionId}
+          kind="design"
+          t={chrome.t}
+        />
+        <span className="dsh-canvas-spacer" />
+        <button
+          type="button"
+          className="dsh-canvas-chipbtn"
+          data-primary="true"
+          disabled={locked || sending || value.trim() === ''}
+          onClick={send}
+        >
+          {sending ? '发送中…' : '发送'}
+        </button>
+      </div>
+      {locked ? (
+        <p className="dsh-canvas-design-ai-notice">改稿进行中：画布暂时锁定，模型写完会自动刷新。</p>
+      ) : null}
       {error !== '' ? <p className="dsh-canvas-design-ai-error">{error}</p> : null}
     </div>
   )

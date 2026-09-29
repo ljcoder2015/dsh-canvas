@@ -50,7 +50,7 @@ import {
   readsPick,
 } from '../../../core/artifact/preview-picker.ts'
 import { PREVIEW_CHANNEL } from '../../../core/artifact/webapp.ts'
-import { Slot, useChrome, useEscapeLayer } from '../chrome.tsx'
+import { Slot, useChrome, useEscapeLayer, useEscapeSink } from '../chrome.tsx'
 import { useElementPick } from '../element-pick/element-pick.tsx'
 import type { ViewerProps, ViewerRegistration } from './types.ts'
 
@@ -118,6 +118,8 @@ export function DeckViewer({ view, t }: ViewerProps) {
   useEffect(() => {
     setBlocked('')
   }, [view.text])
+  // 这张预览不用 Esc 关窗：垫底那一档由 sink 收下（见 chrome 的 useEscapeSink），下面那层照旧优先。
+  useEscapeSink()
   /**
    * Esc 在帧这边退的是「刚打开的那样东西」：模式开着就收起十字光标，手里攥着一笔就撤掉
    * 那一笔。两者互斥（点完一下模式就关了），所以是一档；而它先于「关掉预览」——退的是刚

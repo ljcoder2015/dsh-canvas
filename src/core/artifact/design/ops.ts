@@ -53,6 +53,28 @@ export interface DesignOpInput {
 /** Container types an `upsert`/`move` may target — same rule as Figma: pages, frames, groups, sections. */
 const CONTAINER_TYPES: ReadonlySet<string> = new Set(['CANVAS', 'FRAME', 'GROUP', 'SECTION'])
 
+/**
+ * 每个类型**允许的父类型**——容器粗判之后的细判，照 Figma 的层级规矩：
+ *
+ * - 区域（SECTION）是画布顶层的组织层，只归页面管，**不能被容器包含**，也不进分组；
+ * - 容器（FRAME）可以嵌容器（模块就是嵌套容器），可挂在页面或区域下，但不进分组；
+ * - 分组（GROUP）是临时组合：容器里、区域里、页面下都能放，也能再套分组；
+ * - 元素与组件保持宽松（只要是容器就能放）——本次不引入组件语义。
+ */
+const PARENT_TYPES: Readonly<Record<string, ReadonlySet<string>>> = {
+  SECTION: new Set(['CANVAS', 'SECTION']),
+  FRAME: new Set(['CANVAS', 'SECTION', 'FRAME']),
+  GROUP: new Set(['CANVAS', 'SECTION', 'FRAME', 'GROUP']),
+}
+
+/** 细判：`childType` 能不能放进 `parentType`——不能就抛，文案把可行的父类型说清楚。 */
+function assertParent(childType: string, parentType: string, parentId: string): void {
+  const allowed = PARENT_TYPES[childType] ?? CONTAINER_TYPES
+  if (allowed.has(parentType)) return
+  const names = [...allowed].map((type) => type.toLowerCase()).join(' / ')
+  throw new Error(`${childType.toLowerCase()} 不能放进 ${parentType.toLowerCase()}（${parentId}）：只允许放在 ${names} 下`)
+}
+
 /** Apply a batch of ops in place; a failing op records one error line and the batch carries on. */
 export function applyDesignOps(graph: DesignGraph, ops: readonly DesignOpInput[]): { applied: number; errors: string[] } {
   let applied = 0
@@ -108,8 +130,11 @@ function upsert(graph: DesignGraph, op: DesignOpInput): void {
   const parent = graph.nodes.get(op.parentId)
   if (parent === undefined) throw new Error(`父节点不存在：${op.parentId}`)
   if (!CONTAINER_TYPES.has(parent.type)) throw new Error(`父节点不是容器（${parent.type}）：${op.parentId}`)
+  assertParent(type, parent.type, op.parentId)
   const node = op.id === undefined ? graph.createNode(type, op.parentId) : graph.createNodeWithId(op.id, type, op.parentId)
   if (node.parentId !== op.parentId) throw new Error(`节点创建失败：${op.id ?? type}`)
+  // 新建的容器默认裁切溢出内容（Figma 的 frame 语义）；区域是自由容器，不裁。
+  if (type === 'FRAME') node.clipsContent = true
   setProps(graph, node, op, true)
 }
 
@@ -165,6 +190,7 @@ function move(graph: DesignGraph, op: DesignOpInput): void {
   const parent = graph.nodes.get(op.parentId)
   if (parent === undefined) throw new Error(`父节点不存在：${op.parentId}`)
   if (!CONTAINER_TYPES.has(parent.type)) throw new Error(`父节点不是容器（${parent.type}）`)
+  assertParent(node.type, parent.type, op.parentId)
   if (isDescendant(graph, op.id, op.parentId)) throw new Error('不能把节点移进它自己的后代')
   graph.reparentNode(op.id, op.parentId)
   if (node.parentId !== op.parentId) throw new Error('移动未生效')

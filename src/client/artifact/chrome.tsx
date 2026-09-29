@@ -9,14 +9,15 @@
  * 从前不是这样：「这个 kind 能不能就地编」「它的预览里有没有一个能对话的页面帧」是注册表
  * 里的两条**谓词** ——预览器声明能力，外壳查表，然后外壳替它把按钮画出来、把提示条摆好。
  * 能力写在一个文件、界面长在另一个文件，于是「加一种形态」还是得回到外壳里改那几处 `if`。
- * 现在外壳只提供**位置**（三个插槽）与**通道**（下面两条），按钮连同它的判断与状态都在
+ * 现在外壳只提供**位置**（三个插槽）与**通道**（下面这几条），按钮连同它的判断与状态都在
  * 预览器自己的文件里，外壳一行都不用动。
  *
- * 三条通道各解决一件事，都不是「能力声明」而是「协商」：
+ * 四条通道各解决一件事，都不是「能力声明」而是「协商」：
  *
  * | 通道 | 谁有话说 | 为什么不能由外壳决定 |
  * |---|---|---|
  * | {@link useEscapeLayer} | 开着模式的那一方（先退它那一层，再关弹窗） | 只有它知道自己现在在第几层 |
+ * | {@link useEscapeSink} | 不用 Esc 关窗的那几种形态（垫底收下这一下） | 外壳不知道用户在这个形态里想不想用 Esc 关 |
  * | {@link useCloseGate} | 手上有未保存草稿的那一方 | 外壳看不见草稿，问不出一句「真放弃吗」 |
  * | {@link Slot} | 三处插槽的所有者 | 按钮属于预览器，外壳不认识它们 |
  *
@@ -28,15 +29,18 @@ import { createPortal } from 'react-dom'
 import type { ReactElement, ReactNode, RefObject } from 'react'
 import type { ArtifactView } from '../../types.ts'
 import type { Translate } from '../ui/locales.ts'
+import type { ModelBridge } from '../ui/model-picker.tsx'
 import { claimFirst, type Claim } from './chrome-stack.ts'
 
 /**
  * 弹窗用得到的那几个 Remote 方法。
  *
- * 结构上与 `CanvasBridge` 相容，但只写弹窗自己会碰的三个：读产物、整篇写回、把一句
- * 话交给这张卡的会话。
+ * 结构上与 `CanvasBridge` 相容。前三个是弹窗自己读写的产物通道；模型那四个（{@link ModelBridge}）
+ * 是**给预览器里的模型席位**用的——设计预览的 AI 标签页要和画布输入框选出同一个模型，
+ * 就得走同一条会话选择通道（见 `ui/model-picker.tsx`）。四个都不是新增的远端能力：它们
+ * 都长在 `CanvasBridge` 上，这里只是把类型写全，好让预览器不必认识整个画布桥。
  */
-export interface ArtifactModalBridge {
+export interface ArtifactModalBridge extends ModelBridge {
   readArtifact(projectId: string, cardId: string): Promise<ArtifactView>
   writeText(projectId: string, cardId: string, content: string): Promise<unknown>
   /** Hand a picked element's edit request to the card's conversation (F3.14). */
@@ -57,6 +61,13 @@ export interface ChromeSlots {
 export interface ArtifactChrome {
   projectId: string
   cardId: string
+  /**
+   * 这张卡绑定的会话，或还没有会话时的 `''`。
+   *
+   * 预览器自己不需要会话，但**模型席位需要**：会话选择是按会话存的，问「下一次请求用哪个
+   * 模型」就得拿得出那个 id（`''` 也有意义，见 `ui/model-picker.tsx` 的补种那一段）。
+   */
+  sessionId: string
   bridge: ArtifactModalBridge
   t: Translate
   /** 会话域的变动计数（画布自己的重读触发器）。 */
@@ -132,6 +143,20 @@ export function useEscapeLayer(active: boolean, onEscape: () => void): void {
 }
 
 /**
+ * 登记一档**垫底**的 Esc：谁都不认领时由它收下，于是这张预览里 Esc 不再是「关掉」的快捷键。
+ *
+ * 处理者是**从后往前**问的（`chrome-stack.ts`），后登记的在上面——所以开着模式、开着确认条
+ * 的预览器仍先用 Esc 退自己那一层，轮到这一档才是最后一问：按 Esc 的人要退的是手头那样
+ * 东西，不是整张预览。关掉于是只剩 × 与点遮罩两条路。
+ *
+ * 由此也定了调用位置：它**必须先于**同一张预览里别的 `useEscapeLayer`——登记顺序就是顺位。
+ */
+export function useEscapeSink(): void {
+  const { takeEscape } = useChrome()
+  useEffect(() => takeEscape(() => true), [takeEscape])
+}
+
+/**
  * 登记一道关闭闸。
  *
  * 关闭是外壳的动作（×、Esc、点遮罩到最后都走它），但「现在关掉会不会丢东西」只有握着
@@ -164,6 +189,7 @@ export interface ArtifactShell {
 export interface ArtifactShellInput {
   projectId: string
   cardId: string
+  sessionId: string
   bridge: ArtifactModalBridge
   t: Translate
   revision?: number
@@ -181,7 +207,7 @@ export interface ArtifactShellInput {
  * 让「登记一次」变成「每渲染一次就重登记」。
  */
 export function useArtifactShell(input: ArtifactShellInput): ArtifactShell {
-  const { projectId, cardId, bridge, t, revision, openInEditor, adopt, saved, discard } = input
+  const { projectId, cardId, sessionId, bridge, t, revision, openInEditor, adopt, saved, discard } = input
   const [header, setHeader] = useState<HTMLElement | null>(null)
   const [banner, setBanner] = useState<HTMLElement | null>(null)
   /** 遮罩层：量尺是 ref（量的是当下那一刻的矩形），插槽是 state（portal 要一个落点）。 */
@@ -225,6 +251,7 @@ export function useArtifactShell(input: ArtifactShellInput): ArtifactShell {
     () => ({
       projectId,
       cardId,
+      sessionId,
       bridge,
       t,
       revision,
@@ -250,6 +277,7 @@ export function useArtifactShell(input: ArtifactShellInput): ArtifactShell {
       projectId,
       revision,
       savedNow,
+      sessionId,
       t,
       takeEscape,
     ],

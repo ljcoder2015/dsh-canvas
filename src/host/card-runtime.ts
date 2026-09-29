@@ -61,7 +61,7 @@ import {
 import { materialUpstreams } from '../core/canvas/source-store.ts'
 import type { BoardFile } from './board-file.ts'
 import { nameFileReferences, nameWithoutProbe, type FileReferenceTarget } from '../core/artifact/file-reference.ts'
-import { artboardsOf, designNodeToJson, scaffoldDesignDocument, DESIGN_FILE_VERSION } from '../core/artifact/design/document.ts'
+import { containersOf, designNodeToJson, scaffoldDesignDocument, DESIGN_FILE_VERSION } from '../core/artifact/design/document.ts'
 import { applyDesignOps, type DesignOpInput } from '../core/artifact/design/ops.ts'
 import type { DesignDocumentWire } from '../contract.ts'
 import { TOOL_NAMES } from '../contract.ts'
@@ -117,10 +117,29 @@ function mintSessionId(projectId: ProjectId, cardId: CardId): SessionId {
   return SessionId(`cv-${Date.now().toString(36)}-${nonce}-${projectId.length}${cardId.length}`)
 }
 
+/**
+ * Whether a resume failed because the log's single-writer lease is held.
+ *
+ * Matched by `name`, not `instanceof`: the class belongs to the persistence
+ * backend's own bundle, and across a bundle boundary `instanceof` is silently
+ * false — the same reason `FsError` is matched by its code prefix.
+ */
+function isAlreadyOwned(error: unknown): boolean {
+  return (error as { name?: unknown } | null)?.name === 'SessionAlreadyOwnedError'
+}
+
 export class CardRuntime extends TypertRemoteService {
   constructor(ctx: Context, private readonly deps: CardRuntimeDeps) {
     super(ctx, 'card')
   }
+
+  /**
+   * Agents whose card scope this runtime has already installed.
+   *
+   * Only adopted agents are marked: they are published before the card sees
+   * them, so the scope cannot ride the factory's `setup`. See {@link openSession}.
+   */
+  private readonly scopedAgents = new WeakSet<Context>()
 
   private get cards() {
     return this.deps.domain.table('cards')
@@ -396,7 +415,7 @@ export class CardRuntime extends TypertRemoteService {
    * The webapp scaffold's sibling, for a single file instead of a folder: the
    * name is slugged into `<name>.design` under the project root (numeric
    * suffix on collision, settled against the disk), the file holds one blank
-   * 1024×1024 artboard, and the card is seated on it. The scaffold is a Host
+   * 1024×1024 container, and the card is seated on it. The scaffold is a Host
    * call rather than a client-side seed because the artifact is a structured
    * scene-graph snapshot — a text seed cannot produce it, and the model-side
    * tools read and edit the document through the same structured path.
@@ -419,8 +438,8 @@ export class CardRuntime extends TypertRemoteService {
    * Read a design document as model-facing JSON (F2.6 — `canvas_design_read`).
    *
    * The whole node list is handed over with its format version, so the model
-   * sees the same structure the viewer renders; artboards are named by id
-   * (the frames directly under a page) and the full layer list follows.
+   * sees the same structure the viewer renders; containers are named by id
+   * (the frames of a page, through its regions) and the full layer list follows.
    */
   async readDesign(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<DesignDocumentWire> {
     const project = this.requireProject(projectId)
@@ -429,7 +448,7 @@ export class CardRuntime extends TypertRemoteService {
     return {
       cardId,
       formatVersion: DESIGN_FILE_VERSION,
-      artboards: artboardsOf(doc).map((board) => board.id),
+      containers: containersOf(doc).map((board) => board.id),
       nodes: [...doc.nodes.values()].filter((node) => node.id !== doc.rootId).map(designNodeToJson),
     }
   }
@@ -628,6 +647,14 @@ export class CardRuntime extends TypertRemoteService {
    * created rather than the stale one being overwritten: the old log stays on
    * disk, so nothing a user said is destroyed by a read failure.
    *
+   * Three ways in, in this order: a session this plugin already holds; the
+   * conversation already live under another owner, which is *adopted* — the
+   * harness's own session controller resumes a session the user opens in the
+   * main chat, and that resume takes the log's single-writer lease, so resuming
+   * it here would collide and mint a second conversation behind the user's
+   * back; and only then a resume of the stored binding, which is where a log
+   * that is genuinely gone becomes a fresh conversation.
+   *
    * The agent is composed from the deployment's agent preset before anything
    * else happens, because that composition is where its file tools live: a card
    * conversation writes its artifact with the ordinary `write`/`edit` tools, and
@@ -655,6 +682,26 @@ export class CardRuntime extends TypertRemoteService {
 
     let binding = record.sessionId
     let created = binding === ''
+
+    // An adopted agent is already published, so its card scope is installed
+    // here rather than in the factory's `setup`. A conversation that was
+    // released while its agent stayed live can be adopted again, and a second
+    // registration of the same prompt section would duplicate it — hence the
+    // guard, keyed by the agent's own context so the mark dies with the agent.
+    if (binding !== '') {
+      const sessionId = SessionId(binding)
+      const agent = this.ctx.agents.get(sessionId)
+      if (agent !== undefined) {
+        if (!this.scopedAgents.has(agent.ctx)) {
+          this.scopeFor(agent.ctx, project, cardId, fileOf(record, cardId), record.kind)
+          this.scopedAgents.add(agent.ctx)
+        }
+        const adopted = this.deps.sessions.adopt(project.id, cardId, sessionId, agent)
+        await this.align(adopted)
+        await this.claim(project, adopted.sessionId)
+        return { cardId, sessionId: adopted.sessionId, created: false }
+      }
+    }
 
     // The preset a card conversation composes from, resolved before anything is
     // created — see `core/agent-preset.ts` for why it is not optional to the
@@ -695,6 +742,18 @@ export class CardRuntime extends TypertRemoteService {
           attach(ownerCtx, SessionId(binding), false),
         )
       } catch (error) {
+        // A taken write lease is a *transient* conflict, not a missing log:
+        // whoever holds it is reading this same conversation right now, so
+        // minting a second one would orphan the conversation the user is
+        // actually looking at. Refuse instead, and leave the binding alone —
+        // the next open finds the agent live and adopts it.
+        if (isAlreadyOwned(error)) {
+          throw new RemoteError(
+            'card/session-busy',
+            `card ${cardId}: conversation ${binding} is open in another session`,
+            { projectId, cardId, sessionId: binding },
+          )
+        }
         this.ctx.logger(PLUGIN_ID).warn(
           `card ${cardId}: stored conversation ${binding} could not be resumed, starting a new one`,
           error,

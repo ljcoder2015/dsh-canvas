@@ -131,13 +131,13 @@ function harness(options: { activeProject?: string; card?: { project: string; ca
       readDesign: async () => ({
         cardId: 'untitled.design',
         formatVersion: 2,
-        artboards: ['board-1'],
+        containers: ['board-1'],
         nodes: [
           {
             id: 'board-1',
             type: 'frame',
             parentId: 'page-1',
-            name: '画板 1',
+            name: '容器 1',
             x: 0,
             y: 0,
             width: 1024,

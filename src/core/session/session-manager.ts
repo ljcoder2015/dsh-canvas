@@ -24,7 +24,17 @@ export interface CardSession {
   sessionId: SessionId
   /** The agent driving the session; its `ctx` is the card's prompt/tool scope. */
   agent: Agent
-  /** Releases the agent; the persisted log stays on disk. */
+  /**
+   * Whether this plugin owns the agent's lifecycle.
+   *
+   * A card's conversation is durable, so it may already be live under someone
+   * else: the harness's own session controller resumes a session when the user
+   * opens it in the main chat, and that resume takes the log's single-writer
+   * lease. Such an agent is *adopted* — the card drives the same conversation —
+   * but releasing the card must not dispose an agent it did not create.
+   */
+  owned: boolean
+  /** Releases the agent; the persisted log stays on disk. A no-op for an adopted session. */
   dispose: () => Promise<void>
 }
 
@@ -123,11 +133,36 @@ export class SessionManager {
       cardId,
       sessionId: handle.agent.id,
       agent: handle.agent,
+      owned: true,
       dispose: handle.dispose,
     }
     this.byKey.set(cardKeyOf(project, cardId), session)
     this.bySession.set(session.sessionId, session)
     return { session, created: true }
+  }
+
+  /**
+   * Register an agent this manager did not create (see {@link CardSession.owned}).
+   *
+   * The card's conversation may already be live under another owner that holds
+   * its single-writer lease; the card still drives that same conversation, so it
+   * is registered here and released without disposing it. Returns the session
+   * already open for the card, if there is one.
+   */
+  adopt(project: ProjectId, cardId: CardId, sessionId: SessionId, agent: Agent): CardSession {
+    const existing = this.live(project, cardId)
+    if (existing !== undefined) return existing
+    const session: CardSession = {
+      project,
+      cardId,
+      sessionId,
+      agent,
+      owned: false,
+      dispose: async () => undefined,
+    }
+    this.byKey.set(cardKeyOf(project, cardId), session)
+    this.bySession.set(sessionId, session)
+    return session
   }
 
   /**
@@ -153,6 +188,7 @@ export class SessionManager {
   private async forget(session: CardSession): Promise<void> {
     this.byKey.delete(cardKeyOf(session.project, session.cardId))
     this.bySession.delete(session.sessionId)
+    if (!session.owned) return
     try {
       await session.dispose()
     } catch {

@@ -2,7 +2,7 @@
  * 设计文档 v2（OpenPencil scene-graph 底座）：信封、digest、结构化 op。
  *
  * v1 的 Kiwi 编解码随改道退役（方案 A，格式破坏性切换）；这一版钉的是 v2 的
- * 三条面：**信封**（header + JSON 快照 round-trip、v1 拒绝）、**digest**（画板
+ * 三条面：**信封**（header + JSON 快照 round-trip、v1 拒绝）、**digest**（容器
  * 结构摘要）、**ops**（模型改稿的每条路都走到，失败进 errors 而不是静默）。
  */
 import { describe, expect, it } from 'vitest'
@@ -12,6 +12,7 @@ import {
   DESIGN_FILE_VERSION,
   colorFromCss,
   colorToCss,
+  containersOf,
   decodeDesignFile,
   designDigest,
   designNodeToJson,
@@ -27,18 +28,18 @@ const firstPage = (graph: SceneGraph) => {
   return page
 }
 
-/** The artboard of a scaffolded document (the single FRAME under the page). */
+/** The container of a scaffolded document (the single FRAME under the page). */
 const firstBoard = (graph: SceneGraph) => {
   const board = graph.getChildren(firstPage(graph).id).find((node) => node.type === 'FRAME')
-  if (board === undefined) throw new Error('scaffold produced no artboard')
+  if (board === undefined) throw new Error('scaffold produced no container')
   return board
 }
 
 describe('design envelope v2', () => {
-  it('scaffolds exactly one blank 1024×1024 artboard', () => {
+  it('scaffolds exactly one blank 1024×1024 container', () => {
     const graph = scaffoldDesignDocument()
     const board = firstBoard(graph)
-    expect(board.name).toBe('画板 1')
+    expect(board.name).toBe('容器 1')
     expect(board.width).toBe(1024)
     expect(board.height).toBe(1024)
     expect(graph.getChildren(firstPage(graph).id)).toHaveLength(1)
@@ -73,19 +74,19 @@ describe('design envelope v2', () => {
 })
 
 describe('digest', () => {
-  it('summarizes the page and artboard structure', () => {
+  it('summarizes the page and container structure', () => {
     const graph = scaffoldDesignDocument()
     const board = firstBoard(graph)
     graph.createNode('ELLIPSE', board.id, { name: '圆' })
     const { summary } = designDigest(graph)
     expect(summary).toContain('页面 1')
-    expect(summary).toContain('画板 1（1024×1024）')
+    expect(summary).toContain('容器 1（1024×1024）')
     expect(summary).toContain('1 个图层')
   })
 })
 
 describe('design edit ops', () => {
-  it('upserts into the artboard, minting ids when absent', () => {
+  it('upserts into the container, minting ids when absent', () => {
     const graph = scaffoldDesignDocument()
     const board = firstBoard(graph)
     const result = applyDesignOps(graph, [
@@ -163,6 +164,32 @@ describe('design edit ops', () => {
     ])
     expect(result.errors).toEqual([])
     expect(graph.getChildren(board.id).map((node) => node.id)).toEqual([a.id, b.id])
+  })
+
+  it('enforces the Figma hierarchy: a region never goes inside a container', () => {
+    const graph = scaffoldDesignDocument()
+    const board = firstBoard(graph)
+    const result = applyDesignOps(graph, [
+      // 区域归页面管，塞进容器要被拒。
+      { kind: 'upsert', type: 'section', parentId: board.id, name: '区域' },
+      // 容器嵌容器是模块，合法。
+      { kind: 'upsert', type: 'frame', parentId: board.id, name: '模块' },
+    ])
+    expect(result.applied).toBe(1)
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]).toContain('section 不能放进 frame')
+    expect(graph.getChildren(board.id).map((node) => node.type)).toEqual(['FRAME'])
+  })
+})
+
+describe('container walks', () => {
+  it('collects containers through regions and stops at nested containers', () => {
+    const graph = scaffoldDesignDocument()
+    const region = graph.createNode('SECTION', firstPage(graph).id, { name: '区域' })
+    const board = graph.createNode('FRAME', region.id, { name: '区域里的容器' })
+    // 嵌套容器是模块，不算独立的一块。
+    graph.createNode('FRAME', board.id, { name: '模块' })
+    expect(containersOf(graph).map((node) => node.name)).toEqual(['容器 1', '区域里的容器'])
   })
 })
 

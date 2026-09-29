@@ -27,20 +27,23 @@ export type { Color, NodeType, SceneNode }
 const WHITE: Color = { r: 1, g: 1, b: 1, a: 1 }
 
 /**
- * A brand-new design document: one blank 1024×1024 artboard (§四.2 scaffold)
- * on the scene graph's default page. The artboard is a white FRAME so it reads
+ * A brand-new design document: one blank 1024×1024 container (§四.2 scaffold)
+ * on the scene graph's default page. The container is a white FRAME so it reads
  * as a sheet on the canvas grid.
+ *
+ * `clipsContent` 跟着 Figma 的 frame 语义走：容器默认裁切溢出内容。
  */
 export function scaffoldDesignDocument(): SceneGraph {
   const graph = new SceneGraph()
   const page = graph.getPages()[0]
   if (page !== undefined) page.name = '页面 1'
   graph.createNode('FRAME', page.id, {
-    name: '画板 1',
+    name: '容器 1',
     x: 0,
     y: 0,
     width: 1024,
     height: 1024,
+    clipsContent: true,
     fills: [{ type: 'SOLID', color: WHITE, opacity: 1, visible: true }],
   })
   return graph
@@ -48,9 +51,22 @@ export function scaffoldDesignDocument(): SceneGraph {
 
 // ── walks ──────────────────────────────────────────────────────────────────
 
-/** The artboards of a document: the FRAME children of its pages, in z-order. */
-export function artboardsOf(graph: SceneGraph): SceneNode[] {
-  return graph.getPages().flatMap((page) => graph.getChildren(page.id).filter((node) => node.type === 'FRAME'))
+/**
+ * 一个节点下的容器，z 序——**沿区域下潜**：区域（SECTION）是归类容器的组织层，它的子容器
+ * 同样是画布上的容器。遇到容器就收下且不再下潜：嵌套容器是模块，不是独立的一块。
+ */
+function containersUnder(graph: SceneGraph, parentId: string): SceneNode[] {
+  const containers: SceneNode[] = []
+  for (const child of graph.getChildren(parentId)) {
+    if (child.type === 'FRAME') containers.push(child)
+    else if (child.type === 'SECTION') containers.push(...containersUnder(graph, child.id))
+  }
+  return containers
+}
+
+/** The containers of a document: the FRAME nodes of its pages (through regions), in z-order. */
+export function containersOf(graph: SceneGraph): SceneNode[] {
+  return graph.getPages().flatMap((page) => containersUnder(graph, page.id))
 }
 
 /** The children of one node, in z-order. */
@@ -61,7 +77,7 @@ export function childrenOf(graph: SceneGraph, id: string): SceneNode[] {
 // ── digest ─────────────────────────────────────────────────────────────────
 
 /**
- * Bounded digest for the board and card summaries (F5.2): pages, artboards
+ * Bounded digest for the board and card summaries (F5.2): pages, containers
  * and their shape counts — the structure a model needs to decide what to read.
  */
 export function designDigest(graph: SceneGraph, budget = 40): { summary: string; outline: string[] } {
@@ -69,8 +85,9 @@ export function designDigest(graph: SceneGraph, budget = 40): { summary: string;
   const lines: string[] = []
   let used = 0
   for (const page of pages) {
-    const boards = graph.getChildren(page.id).filter((node) => node.type === 'FRAME')
-    lines.push(`页面 ${page.name}：${boards.length} 个画板`)
+    // 区域里的容器也算这一页的容器——与 containersOf 同一套遍历口径。
+    const boards = containersUnder(graph, page.id)
+    lines.push(`页面 ${page.name}：${boards.length} 个容器`)
     used += 1
     for (const board of boards) {
       if (used >= budget) {
@@ -78,7 +95,7 @@ export function designDigest(graph: SceneGraph, budget = 40): { summary: string;
         return { summary: lines.join('\n'), outline: lines }
       }
       const shapes = graph.getChildren(board.id)
-      lines.push(`  画板 ${board.name}（${Math.round(board.width)}×${Math.round(board.height)}）：${shapes.length} 个图层`)
+      lines.push(`  容器 ${board.name}（${Math.round(board.width)}×${Math.round(board.height)}）：${shapes.length} 个图层`)
       used += 1
     }
   }

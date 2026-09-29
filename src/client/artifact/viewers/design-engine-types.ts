@@ -28,6 +28,53 @@ export interface DesignViewport {
   scale: number
 }
 
+/**
+ * 撤销/重做的可用态——HUD 上那两枚按钮的禁用判据。
+ *
+ * core 的 UndoManager 有 canUndo/canRedo，但没从 `createEditor` 的能力面里露出来，所以引擎
+ * 自己记一份（记法见 design-engine.ts 的 recordHistory：以 history:changed 有没有响为准，
+ * 不是「调了几次提交就算几笔」——commitNodeUpdate 在没真变时是不进栈的）。
+ */
+export interface DesignHistoryState {
+  /** 还有一步可退。 */
+  undo: boolean
+  /** 还有一步可进（退过之后才有）。 */
+  redo: boolean
+}
+
+/**
+ * 一次几何变换（缩放/旋转）要写下去的几何——节点在**父级坐标系**下的原始字段。
+ *
+ * 与 {@link DesignNodeProps} 那几个字段同源，单独一个名字是因为变换是**整份覆盖**：
+ * 四个字段一起写，缺一个都会把节点弹回旧值。
+ */
+export interface DesignGeometry {
+  x: number
+  y: number
+  width: number
+  height: number
+  /** 相对父级的旋转角（度）。 */
+  rotation: number
+}
+
+/**
+ * 单节点在**世界坐标**下的变换框（含祖先位移与旋转）。
+ *
+ * `rotation` 是**总**角度（祖先 + 自己）：视图层拿它转那一圈手柄用的就是这一个；
+ * `parentRotation` 是祖先那部分，节点自己的 `rotation` 字段是相对父级的，两者相减才是
+ * 「拖出来的角度该写多少」。
+ */
+export interface DesignNodeFrame {
+  /** 世界坐标下的中心（旋转绕着它）。 */
+  centerX: number
+  centerY: number
+  /** 未旋转的宽高（世界单位）。 */
+  width: number
+  height: number
+  rotation: number
+  parentRotation: number
+}
+
 /** One rendering backend (the Skia engine implements it; 2D lives inline). */
 export interface DesignBackend {
   /** Paint one frame at CSS size `width×height` (device pixels from `dpr`). */
@@ -78,6 +125,23 @@ export interface DesignEngine {
   deleteSelection(): void
   undo(): void
   redo(): void
+  /** 撤销/重做还有没有一步可走（HUD 那两枚按钮的禁用判据）。 */
+  history(): DesignHistoryState
+  /**
+   * 起手一次缩放/旋转：对当前选中那**一个**节点拍几何快照（多选不支持变换，快照留空）。
+   */
+  beginTransform(): void
+  /** 变换中：把几何直接落到图上（不压 undo；收手时一并提交一条）。 */
+  applyTransform(geometry: DesignGeometry): void
+  /** 结束变换：与起手时有差就提交一条 undo（没动就什么也不记）。 */
+  endTransform(): void
+  /**
+   * 一个节点在**世界坐标**下的变换框（含祖先位移与旋转）。
+   *
+   * 选中框与八枚手柄的画法、命中都靠它：手柄长在节点的**自身坐标系**里，只有拿到
+   * 中心与总旋转角，视图层才画得出贴合旋转后的那一圈。
+   */
+  nodeFrame(id: string): DesignNodeFrame | null
   /** 面板数据快照：页面列表、当前页图层树、选中。每次渲染时现取，图小不贵。 */
   snapshot(): DesignSnapshot
   /** 切换当前页（异步：core 会做字体/layout 准备），完成后引擎自会请求重画。 */
@@ -135,6 +199,8 @@ export interface DesignNodeProps {
   y?: number
   width?: number
   height?: number
+  /** 旋转角（度，绕节点中心；场景图的原生字段，正数顺时针）。 */
+  rotation?: number
   fill?: string
   opacity?: number
   /** 统一圆角：写入时联动四角并关掉 independentCorners（与 ops.setProps 同语义）。 */
@@ -166,6 +232,7 @@ export interface DesignNodeRead {
   y: number
   width: number
   height: number
+  rotation: number
   fill: string | null
   opacity: number
   cornerRadius: number

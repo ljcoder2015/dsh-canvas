@@ -54,7 +54,7 @@ dsh plugin --profile web remove @ljcoder2015/dsh-canvas # 卸载
 | 能力 | 现状 |
 |------|------|
 | **文本** | Markdown 与纯文本文档：全屏预览渲染、原地编辑、停手自动落盘、未保存拦关闭；数据图表（CSV / JSON）按表格呈现 |
-| **设计** | `.design` 矢量设计文档——多画板场景图（基于 OpenPencil 底座），画布内直接渲染，Agent 可读结构、可按 `ops` 精确改图层 |
+| **设计** | `.design` 矢量设计文档——多容器场景图（基于 OpenPencil 底座），画布内直接渲染，Agent 可读结构、可按 `ops` 精确改图层 |
 | **应用** | 新建应用即建一个文件夹并写入 web 应用脚手架（清单 + 入口 + shadcn 设计令牌 + Web Components），沙箱 iframe 全屏真跑、可点选元素让会话改代码；HTML Deck 与站点同属这一族 |
 
 ### 后续

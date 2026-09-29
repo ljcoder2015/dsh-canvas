@@ -62,9 +62,17 @@ await build({
   platform: 'node', target: ['node22'], sourcemap: true, external: dshExternal, logLevel: 'info',
 })
 
+/**
+ * 只有这一路开 minify：客户端半是**发给浏览器**的，也是全插件唯一体积有分量的一路
+ * （pdf-lib + fontkit 就占去约 1.6 MB）；host 半在本地 Node 里随取随读，照旧不压。
+ * `banner` / `footer` 是原样注入的裸文本，不经压缩，所以
+ * `window.__ModuleLoader__.load(...)` 那条注册契约与压缩前逐字一致；bundle 里的
+ * `require` / `module` / `exports` 是 banner 声明的外部自由变量，esbuild 只重命名自己
+ * 拥有的符号，不会动它们。
+ */
 await build({
   entryPoints: ['src/client/index.tsx'], outfile: 'lib/client.js', bundle: true, format: 'cjs',
-  platform: 'browser', target: ['es2022'], sourcemap: true, jsx: 'automatic',
+  platform: 'browser', target: ['es2022'], sourcemap: true, minify: true, jsx: 'automatic',
   // 设计预览引擎按 URL 动态 import，必须原样保留 import() 语法（CJS 输出
   // 默认会改写成 require，浏览器里跑不了 ESM chunk）。
   supported: { 'dynamic-import': true },

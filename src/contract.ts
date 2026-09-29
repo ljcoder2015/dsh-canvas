@@ -265,7 +265,7 @@ export const designDocumentSchema = z
   .object({
     cardId: cardIdSchema,
     formatVersion: z.number(),
-    artboards: z.array(z.string()),
+    containers: z.array(z.string()),
     nodes: z.array(designNodeSchema),
   })
   .readonly()
@@ -631,6 +631,12 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'card/unsupported': { readonly kind: string; readonly operation: string }
     /** The card has no bound session yet. */
     'card/session-missing': { readonly projectId: string; readonly cardId: string }
+    /**
+     * The card's conversation is held open elsewhere — its log's single-writer
+     * lease is taken, typically by the session controller that put it in the
+     * main chat. Retriable, and never a reason to start a second conversation.
+     */
+    'card/session-busy': { readonly projectId: string; readonly cardId: string; readonly sessionId: string }
     /** A guarded write lost a race against a newer version. */
     'card/stale-version': { readonly cardId: string; readonly expected: string; readonly actual: string }
     /** The artifact is absent, or is a directory where a file is required. */

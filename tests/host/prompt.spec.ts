@@ -8,7 +8,7 @@
  *
  * `installCardScope` is checked on what it actually hands the model: the
  * design card's preset (F3.16) and the rules it must carry (v1.55 — one page
- * is one continuous artboard, no per-screen split) — asserted through the
+ * is one continuous container, no per-screen split) — asserted through the
  * section it installs rather than on the module's private strings.
  */
 import { describe, expect, it } from 'vitest'
@@ -102,23 +102,30 @@ describe('userPromptMessage', () => {
 })
 
 describe('设计卡的预设（F3.16 / v1.55）', () => {
-  it('设计卡带画板尺寸与「一页一块画板」的规矩', () => {
+  it('设计卡带容器尺寸与「一页一个容器」的规矩', () => {
     const text = sectionTextOf('design')
     expect(text).toContain('design** card')
     expect(text).toContain('height follow the content')
-    expect(text).toContain('Do not split one page into per-screen boards')
+    expect(text).toContain('Do not split one page into per-screen containers')
     // 网页 / 应用的高度按内容给，菜单里的固定值只是**宽度**与「整块给出」的稿件尺寸。
     expect(text).toContain('手机屏 375 宽')
     expect(text).toContain('海报 1242×1660')
+  })
+
+  it('组织口径按 Figma：区域（section）归类容器（frame），容器里再拆模块容器', () => {
+    const text = sectionTextOf('design')
+    expect(text).toContain('a **page** holds **regions** (sections)')
+    expect(text).toContain('a region holds **containers** (frames)')
+    expect(text).toContain('Regions sit at the top level only')
   })
 
   it('菜单里不再给出「一屏高」的网页稿（那正是分屏的由来）', () => {
     expect(sectionTextOf('design')).not.toContain('官网首屏 1440×900')
   })
 
-  it('非设计卡不带这套画板规矩', () => {
+  it('非设计卡不带这套容器规矩', () => {
     const text = sectionTextOf('markdown')
-    expect(text).not.toContain('artboard')
+    expect(text).not.toContain('Container sizes')
     expect(text).not.toContain('No pagination')
   })
 })

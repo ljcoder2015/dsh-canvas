@@ -51,6 +51,11 @@ const noop = (): void => undefined
 export function ArtifactModal(props: {
   projectId: string
   cardId: string
+  /**
+   * 这张卡绑定的会话，或还没有会话时的 `''`——模型席位按它查「这张卡的会话下一次请求用
+   * 哪个模型」（见 `chrome.tsx` 的 `sessionId`）。
+   */
+  sessionId: string
   bridge: ArtifactModalBridge
   t: Translate
   /** Open straight into the editor — the control strip's 手动输入 button. */
@@ -66,12 +71,13 @@ export function ArtifactModal(props: {
   revision?: number
   onClose: () => void
 }) {
-  const { projectId, cardId, bridge, t, initialMode, onSaved, onClose, revision } = props
+  const { projectId, cardId, sessionId, bridge, t, initialMode, onSaved, onClose, revision } = props
 
   const payload = useArtifactPayload({ projectId, cardId, bridge, t })
   const shell = useArtifactShell({
     projectId,
     cardId,
+    sessionId,
     bridge,
     t,
     revision,
@@ -84,7 +90,8 @@ export function ArtifactModal(props: {
   /**
    * Escape unwinds one layer at a time — 元素选择模式、那一笔选择、放弃确认、关闭：按下
    * Esc 的人要退的是「刚打开的那样东西」，不是整张预览。前几档由握着那些状态的预览器
-   * 登记（`useEscapeLayer`），外壳只问「有没有人认领」，没人认领才是关闭。
+   * 登记（`useEscapeLayer`），外壳只问「有没有人认领」，没人认领才是关闭。文本、设计与
+   * 应用预览三面还各垫一档 `useEscapeSink`：在那三面里 Esc 退到底也不关窗。
    *
    * ⌘/Ctrl+S 不在这里：那是编辑面的和弦（`use-text-editing.ts` 自己听），而外壳现在已经
    * 不知道「这里有没有东西可以保存」。

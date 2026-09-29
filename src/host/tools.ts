@@ -328,7 +328,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.designRead,
       description:
-        '读取本卡设计文档（.design）的 JSON 结构：画板清单与全部图层的 id、几何、样式。修改设计前必须先读它——canvas_design_edit 的 ops 要引用这里返回的节点 id。',
+        '读取本卡设计文档（.design）的 JSON 结构：容器清单与全部图层的 id、几何、样式。修改设计前必须先读它——canvas_design_edit 的 ops 要引用这里返回的节点 id。',
       parameters: {},
       output: {
         schema: {
@@ -336,17 +336,17 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
           properties: {
             cardId: { type: 'string' },
             formatVersion: { type: 'number' },
-            artboards: { type: 'array', items: { type: 'string' } },
+            containers: { type: 'array', items: { type: 'string' } },
             nodes: { type: 'array', items: { type: 'object', properties: DESIGN_NODE_PROPERTIES, additionalProperties: false } },
           },
           additionalProperties: false,
         },
         render: (_args, value) => {
-          const doc = value as { cardId: string; artboards: string[]; nodes: readonly unknown[] }
+          const doc = value as { cardId: string; containers: string[]; nodes: readonly unknown[] }
           return text(
             [
-              `设计文档 ${doc.cardId}：${doc.artboards.length} 画板 · ${doc.nodes.length} 图层`,
-              `画板：${doc.artboards.join('、') || '无'}`,
+              `设计文档 ${doc.cardId}：${doc.containers.length} 容器 · ${doc.nodes.length} 图层`,
+              `容器：${doc.containers.join('、') || '无'}`,
               JSON.stringify(doc.nodes, null, 1),
             ].join('\n'),
           )
@@ -364,7 +364,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.designEdit,
       description:
-        '对本卡设计文档应用批量结构化编辑 op。kind=upsert 新建（缺 id 自动分配）；setProps 改属性；move 挪位置/换父节点；delete 级联删除子图层；reorder 调整叠放次序（index 省略则移到最上层）。坐标是图层坐标（相对父图层，x/y 为左上角），颜色用 #RRGGBB[AA]。结构上按模块分层：画板 → 模块 frame（导航栏/内容区/页脚…）→ 元素，元素不要直接平铺在画板上；画板默认裁切溢出内容（一页一板：文本页面 / App 页面 / PPT 页面），模块 frame 不裁，元素可溢出模块只要不出画板。一次给一批 op；全部失败会报错，部分失败时 errors 逐条说明。',
+        '对本卡设计文档应用批量结构化编辑 op。kind=upsert 新建（缺 id 自动分配）；setProps 改属性；move 挪位置/换父节点；delete 级联删除子图层；reorder 调整叠放次序（index 省略则移到最上层）。坐标是图层坐标（相对父图层，x/y 为左上角），颜色用 #RRGGBB[AA]。结构照 Figma 的形状：page → section（区域）→ frame（容器）→ 嵌套 frame（模块容器）/ group（分组）→ 元素，即按模块分层：区域归类容器，容器再拆模块容器（导航栏/内容区/页脚…，type=frame），元素不要直接平铺在容器上。层级有硬约束：区域只放顶层、不能塞进容器也不进分组，容器可以嵌套容器，分组到处都能套。frame 默认裁切溢出内容（新建即裁），section 不裁，元素可溢出模块只要不出容器。一次给一批 op；全部失败会报错，部分失败时 errors 逐条说明。',
       parameters: {
         ops: {
           type: 'array',
@@ -479,7 +479,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
     defineTool({
       name: TOOL_NAMES.createOnBoard,
       description:
-        '在画布上创建内容：type=note 创建共享便利贴（决策记录），type=card 把项目内的一个产物落成卡片，type=app 新建一个应用节点——建文件夹并写入 web components + shadcn 风格的 web 应用脚手架，type=design 新建一个设计节点——写入含空白画板的场景图设计文档（.design v2）。',
+        '在画布上创建内容：type=note 创建共享便利贴（决策记录），type=card 把项目内的一个产物落成卡片，type=app 新建一个应用节点——建文件夹并写入 web components + shadcn 风格的 web 应用脚手架，type=design 新建一个设计节点——写入含空白容器的场景图设计文档（.design v2）。',
       parameters: {
         type: { type: 'string', enum: ['note', 'card', 'app', 'design'], description: '创建类型', required: true },
         content: {
@@ -502,7 +502,7 @@ export function registerTools(ctx: Context, deps: ToolDeps): void {
           const named = created.name === undefined ? '' : `「${created.name}」`
           if (created.type === 'note') return text(`已创建便利贴 ${created.id}。`)
           if (created.type === 'app') return text(`已创建应用${named}（id ${created.id}，入口 index.html，文件夹内含脚手架）。`)
-          if (created.type === 'design') return text(`已创建设计${named}（id ${created.id}，.design，含空白画板）。`)
+          if (created.type === 'design') return text(`已创建设计${named}（id ${created.id}，.design，含空白容器）。`)
           return text(`已创建卡片${named}（id ${created.id}，文件 ${created.file ?? ''}）。`)
         },
       },

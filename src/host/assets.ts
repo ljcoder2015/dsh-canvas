@@ -138,7 +138,15 @@ function serveAsset(req: AssetRequest, res: AssetResponse): void {
   }
   const size = statSync(path).size
   const contentType = CONTENT_TYPES[extname(safe).toLowerCase()] ?? 'application/octet-stream'
-  res.writeHead(200, { 'content-type': contentType, 'content-length': String(size), 'cache-control': 'immutable' })
+  // `immutable` alone is only a hint: without a freshness lifetime the browser
+  // revalidates on every reload and refetches the whole set (~28MB: 8.2MB WASM,
+  // 3.5MB engine chunk, 18.9MB fonts). Names are content-stable build outputs,
+  // so a year-long lifetime is safe — a rebuild ships a new plugin bundle.
+  res.writeHead(200, {
+    'content-type': contentType,
+    'content-length': String(size),
+    'cache-control': 'public, max-age=31536000, immutable',
+  })
   if (method === 'HEAD') {
     res.end()
     return

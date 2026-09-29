@@ -4,14 +4,14 @@
 
 ## 〇、一句话结论
 
-dock 上替换原「矢量图片」为**设计节点**：产物是一个 `.design` 文件——Kiwi 二进制编码的多画板设计文档。渲染与编辑走 CanvasKit（画图形）+ DOM 覆盖层（选择框、文本编辑）。模型**不直接写二进制**，通过**结构化设计编辑工具**（读文档 / 批量改节点）读写；元素级选择由自研命中测试驱动，圈选 → 提示词框 → 结构化编辑，改稿闭环与 F3.14 同构。App 页、官网、海报、插画、PPT 都是**同一份设计文档里的画板（artboard）**，靠画板模板预设区分，不再路由到 webapp/site/html-deck。
+dock 上替换原「矢量图片」为**设计节点**：产物是一个 `.design` 文件——Kiwi 二进制编码的多容器设计文档。渲染与编辑走 CanvasKit（画图形）+ DOM 覆盖层（选择框、文本编辑）。模型**不直接写二进制**，通过**结构化设计编辑工具**（读文档 / 批量改节点）读写；元素级选择由自研命中测试驱动，圈选 → 提示词框 → 结构化编辑，改稿闭环与 F3.14 同构。App 页、官网、海报、插画、PPT 都是**同一份设计文档里的容器（frame）**，靠容器模板预设区分，不再路由到 webapp/site/html-deck。
 
 ## 一、v1 → v2 改了什么（及为什么）
 
 | v1（已废弃） | v2（本方案） | 原因 |
 |------|------|------|
 | SVG 为设计本体 | 新 kind `design`，Kiwi 二进制文档 | SVG 的「可编辑」停留在文本层，图层/填充/约束系统表达力不够；Figma 证明结构化文档才是专业编辑的地基 |
-| 海报 SVG 画在卡上，App/官网/PPT 路由到 webapp/site/html-deck | 全部是设计文档内的**画板**，一卡多画板 | ardot 的本质是「设计稿」不是「真网页」；路由让 App 页长成 HTML 应用，语义就错了。多画板天然支持 PPT=画板序列 |
+| 海报 SVG 画在卡上，App/官网/PPT 路由到 webapp/site/html-deck | 全部是设计文档内的**容器**，一卡多容器 | ardot 的本质是「设计稿」不是「真网页」；路由让 App 页长成 HTML 应用，语义就错了。多容器天然支持 PPT=容器序列 |
 | 元素选择复用探针（iframe 注入） | 自研命中测试（CanvasKit + 逆变换） | 画布不是 DOM 页面，探针不适用；但 chrome 插槽、两摞协商、流光、一笔跨关闭等**预览器级机制全部复用** |
 | 模型用文件工具直写文本 | 模型用**结构化编辑工具**改文档 | 二进制不可直写；结构化 op 也是改稿质量的保障（改哪个图层是显式的，不靠模型重猜全篇） |
 
@@ -25,9 +25,9 @@ Kiwi 是 Figma 开源的 schema 化二进制序列化格式（github.com/evanw/k
 
 ### 2.2 文档模型（schema 草案要点）
 
-- `Document { schemaVersion, artboards[], nodes[], textStyles[], paintStyles[] }`
+- `Document { schemaVersion, containers[], nodes[], textStyles[], paintStyles[] }`
 - `Node { id, type(enum: frame|rect|ellipse|text|vector|image|group), parentId, order, transform(a,b,c,d,tx,ty), size, fills[], strokes[], cornerRadius, opacity, blendMode, clipsContent, text{content,font,fontSize,lineHeight,color}, vectorNetwork{vertices,segments,regions} }`
-- 画板即根级 frame；`parentId` + `order` 构成图层树。
+- 容器即根级 frame（区域下归类）；`parentId` + `order` 构成图层树。
 
 ### 2.3 kind 与证据认定
 
@@ -37,10 +37,10 @@ Kiwi 是 Figma 开源的 schema 化二进制序列化格式（github.com/evanw/k
 
 文件即产物仍然成立——产物就是 `.design` 文件；但它**不可被模型的文本写工具直写**（二进制）。因此为卡片会话提供两个卡片作用域的新工具（`TOOL_NAMES` 14→16，`contract.spec.ts` 的清单断言会盯住 `dsh.plugin.json` 同步）：
 
-- `canvas_design_read`：读文档（全部或某画板/子树）为 JSON——模型眼里的文档永远是人类可读的；
+- `canvas_design_read`：读文档（全部或某容器/子树）为 JSON——模型眼里的文档永远是人类可读的；
 - `canvas_design_edit`：批量结构化 op（`upsertNode / setProps / moveNode / deleteNode / reorder`），Host 侧 decode → apply → encode 整文件落盘。
 
-收益：改稿是**显式的**（模型改的是图层 id，不是重猜全篇）；F5 摘要通道对 `design` kind 返回「画板清单 + 图层树摘要」（`outlineOf`/`digestOf` 按 kind 分支，Host 解码）；元素选择的「改动要求」提示框里嵌的是**节点路径 + JSON 片段**（给定位不给补丁，原则同 F3.14，且选中的 JSON 天然就是 `setProps` 的入参形状）。
+收益：改稿是**显式的**（模型改的是图层 id，不是重猜全篇）；F5 摘要通道对 `design` kind 返回「容器清单 + 图层树摘要」（`outlineOf`/`digestOf` 按 kind 分支，Host 解码）；元素选择的「改动要求」提示框里嵌的是**节点路径 + JSON 片段**（给定位不给补丁，原则同 F3.14，且选中的 JSON 天然就是 `setProps` 的入参形状）。
 
 ### 2.5 版本与兼容
 
@@ -75,20 +75,20 @@ CanvasKit 画文本需要内嵌字体（无系统字体访问）。中文场景�
 ## 四、接线（按模块落点，未写代码）
 
 1. **kind 注册**：`BUILTIN_KINDS` 加 `design` 条目（label 设计，`exportFormats: ['png']`，publishable 暂 false）；`detectKind` 认定 `.design`。
-2. **契约**：`contract.ts` 加 `dsh-canvas#card/scaffold_design`（新建设计卡：Host 写入最小合法 Kiwi 文档——一块 1024×1024 空画板）。dock 的 `DOCK_SPECS` 第 4 项替换：`label: 'canvas.dock.design'`、`extension: 'design'`、`kind: 'design'`、走 `scaffoldDesign`——与 `webapp: true` 同款特例路径（**seed 是文本机制，装不下二进制**，这正是 v1 seed 方案作废的原因）。locales 加 `canvas.dock.design`，删 `canvas.dock.vector`。
+2. **契约**：`contract.ts` 加 `dsh-canvas#card/scaffold_design`（新建设计卡：Host 写入最小合法 Kiwi 文档——一块 1024×1024 空容器）。dock 的 `DOCK_SPECS` 第 4 项替换：`label: 'canvas.dock.design'`、`extension: 'design'`、`kind: 'design'`、走 `scaffoldDesign`——与 `webapp: true` 同款特例路径（**seed 是文本机制，装不下二进制**，这正是 v1 seed 方案作废的原因）。locales 加 `canvas.dock.design`，删 `canvas.dock.vector`。
 3. **Host 侧 Kiwi 服务**：`src/core/artifact/design/`（纯逻辑：schema 编译产物 + 文档模型 + 编辑 op 应用器，零宿主依赖、可单测）；`card-runtime` 挂 scaffold 与读写。
 4. **Client 预览器**：`viewers/design-viewer.tsx`（CanvasKit 初始化、渲染循环、视口、命中测试、overlay、文本覆盖层）；`registry.ts` 认领 `design` kind；图层树面板（折叠/选中双向联动）M2 末尾加。
-5. **工具注册**：`tools.ts` 加 `canvas_design_read` / `canvas_design_edit`（卡片作用域，身份解析沿用前六项规则，`additionalProperties:false` 逐字对齐）；prompt 补设计预设——**宽度**模板清单：手机 375 宽、平板 834 宽、桌面 / 官网 1440 宽，另有固定规格整块给出的稿件（海报 1242×1660、社交图 1080×1080、PPT 1920×1080、横幅 1920×600），**都是文档内画板预设**，一句指令可加画板。**v1.55 补上高度规矩**：网页与应用的长页面**高度随内容**（一屏高不是上限），一块画板装一整页、连续往下排，不按「屏」切成多块画板；多块画板只留给「用户点名多屏并排」与「本身是序列的交付物（PPT 每页、海报系列）」。分屏是**产出侧**的事，渲染器那边画布与预览本来就摆在同一条可平移的画布上。
-6. **导出**：`canvas_export` 加 design→PNG（CanvasKit `makeImageSnapshot`，1x/2x/4x 倍率参数）。SVG/PPTX（矢量网络→路径、画板序列→可编辑形状）**远期**。
+5. **工具注册**：`tools.ts` 加 `canvas_design_read` / `canvas_design_edit`（卡片作用域，身份解析沿用前六项规则，`additionalProperties:false` 逐字对齐）；prompt 补设计预设——**宽度**模板清单：手机 375 宽、平板 834 宽、桌面 / 官网 1440 宽，另有固定规格整块给出的稿件（海报 1242×1660、社交图 1080×1080、PPT 1920×1080、横幅 1920×600），**都是文档内容器预设**，一句指令可加容器。**v1.55 补上高度规矩**：网页与应用的长页面**高度随内容**（一屏高不是上限），一块容器装一整页、连续往下排，不按「屏」切成多块容器；多块容器只留给「用户点名多屏并排」与「本身是序列的交付物（PPT 每页、海报系列）」。分屏是**产出侧**的事，渲染器那边画布与预览本来就摆在同一条可平移的画布上。
+6. **导出**：`canvas_export` 加 design→PNG（CanvasKit `makeImageSnapshot`，1x/2x/4x 倍率参数）。SVG/PPTX（矢量网络→路径、容器序列→可编辑形状）**远期**。
 7. **测试**：Kiwi 编解码 roundtrip、编辑 op 语义、文档摘要（纯模块单测）；E2E `design-editor.js`（渲染冒烟、选择框、文本编辑、结构化改稿闭环、导出像素）；dock 文案断言改名；`npm run check` 全绿。
 
 ## 五、分阶段
 
 | 阶段 | 内容 | 出口判据 |
 |------|------|----------|
-| M1 | kind + 契约 + Kiwi schema/编解码 + 只读渲染器 | 新建设计卡 → 预览里画板与图形渲染正确；`design_read` 能吐 JSON |
+| M1 | kind + 契约 + Kiwi schema/编解码 + 只读渲染器 | 新建设计卡 → 预览里容器与图形渲染正确；`design_read` 能吐 JSON |
 | M2 | 选择/命中/overlay + `canvas_design_edit` 闭环 + 文本（方案 A） | 「圈着改」全链路通：圈选 → 提示词 → 模型 op → 重绘 → 框收 |
-| M3 | 图层树面板、画板模板预设、PNG 倍率导出、多画板管理 | 一句指令加画板并按模板落；导出像素与预览一致 |
+| M3 | 图层树面板、容器模板预设、PNG 倍率导出、多容器管理 | 一句指令加容器并按模板落；导出像素与预览一致 |
 | M4（远期） | 矢量网络绘制、约束系统、增量历史/撤销栈、SVG/PPTX 导出、多模态判稿（渲染 PNG 回喂模型） | 另行评审 |
 
 ## 六、风险与取舍
@@ -101,6 +101,6 @@ CanvasKit 画文本需要内嵌字体（无系统字体访问）。中文场景�
 
 ## 七、验收判据（M2 出口）
 
-- 新建设计卡，输入「一块 375×812 的手机屏画板，顶部导航栏、标题文本、两张圆角卡片」，画板树与渲染正确，文本可双击改字。
+- 新建设计卡，输入「一块 375×812 的手机屏容器，顶部导航栏、标题文本、两张圆角卡片」，容器树与渲染正确，文本可双击改字。
 - 圈选标题 → 提示词框内嵌节点 JSON → 写「改成 #6B4226、24px」→ 发送后**只有该节点属性变化**（Kiwi 文档 diff 可验），渲染即时更新，框收起。
 - `canvas_design_read` 吐出的 JSON 与 `canvas_design_edit` 接受的 op 逐字段对齐；`npm run check` 全绿；`design-editor.js` 判据集全过。

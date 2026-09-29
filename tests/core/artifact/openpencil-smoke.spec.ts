@@ -42,7 +42,7 @@ describe('open-pencil scene-graph baseline', () => {
     const page = graph.getPages()[0]
     expect(page?.type).toBe('CANVAS')
 
-    const board = graph.createNode('FRAME', page.id, { name: '画板 1', x: 0, y: 0, width: 1024, height: 1024 })
+    const board = graph.createNode('FRAME', page.id, { name: '容器 1', x: 0, y: 0, width: 1024, height: 1024 })
     expect(graph.getNode(board.id)?.width).toBe(1024)
     expect(graph.getChildren(page.id).map((n) => n.id)).toContain(board.id)
 
@@ -53,14 +53,14 @@ describe('open-pencil scene-graph baseline', () => {
   it('round-trips a JSON snapshot with the tree and props intact', () => {
     const graph = new SceneGraph()
     const page = graph.getPages()[0]
-    const board = graph.createNode('FRAME', page.id, { name: '画板 1', width: 1024, height: 1024 })
+    const board = graph.createNode('FRAME', page.id, { name: '容器 1', width: 1024, height: 1024 })
     graph.createNode('RECTANGLE', board.id, { name: '卡片', x: 40, y: 60, width: 320, height: 200 })
     graph.createNode('TEXT', board.id, { name: '标题', x: 40, y: 280, width: 320, height: 48, text: '设计' })
 
     const restored = hydrate(JSON.parse(JSON.stringify(snapshotOf(graph))) as GraphSnapshot)
     const restoredPage = restored.getPages()[0]
     const restoredBoard = restored.getChildren(restoredPage.id)[0]
-    expect(restoredBoard?.name).toBe('画板 1')
+    expect(restoredBoard?.name).toBe('容器 1')
     expect(restoredBoard?.width).toBe(1024)
     expect(restored.getChildren(restoredBoard.id).map((n) => n.name)).toEqual(['卡片', '标题'])
     const title = restored.getChildren(restoredBoard.id)[1]

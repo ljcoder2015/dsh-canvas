@@ -63,7 +63,7 @@ export const BUILTIN_KINDS: readonly KindDefinition[] = [
     publishable: false,
   },
   {
-    // 设计节点（F2.6）：一个 `.design` 文件就是一份场景图快照（v2）的多画板设计文档。
+    // 设计节点（F2.6）：一个 `.design` 文件就是一份场景图快照（v2）的多容器设计文档。
     id: 'design',
     label: '设计',
     addressPatterns: ['dsh-resource://file/**/*.design'],

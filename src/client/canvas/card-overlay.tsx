@@ -35,21 +35,16 @@ import { isDirectTextKind } from '../../core/artifact/kind-registry.ts'
 import { referenceTypeOf, scanFileMentions } from '../../core/artifact/prompt-blocks.ts'
 import type { ReferenceFacts } from '../../core/artifact/prompt-blocks.ts'
 import type { BoardCard, CardSummary } from '../../types.ts'
-import type { CanvasBridge, CatalogModel, ModelCatalog } from '../wire/bridge.ts'
-import {
-  nodeTypeOf,
-  recallModel,
-  rememberModel,
-  selectionOf,
-  type ModelChoice,
-  type ModelSelectionView,
-} from '../wire/model-memory.ts'
+import type { CanvasBridge } from '../wire/bridge.ts'
+import { nodeTypeOf } from '../wire/model-memory.ts'
 import type { Translate } from '../ui/locales.ts'
+import { ModelPicker } from '../ui/model-picker.tsx'
 import { PromptInput } from '../ui/prompt-input.tsx'
 import type { PromptInputHandle } from '../ui/prompt-input.tsx'
 import { composerSizeOf, resizedComposerSize, type ComposerSize } from './composer-size.ts'
 import { referenceOptions } from './reference-options.ts'
 import type { ReferenceCandidate, ReferenceOption } from './reference-options.ts'
+import { TEXT_EXPORT_FORMATS, TEXT_EXPORT_LABEL, type TextExportFormat } from './text-export.ts'
 
 /** `@` 候选的挑选与过滤在 `reference-options.ts`（纯，node 环境可测）；这里只剩展示。 */
 
@@ -114,6 +109,14 @@ export interface CardSelectionProps {
   onManualEdit: () => void
   /** Export in the kind's first supported format. */
   onExport: () => void
+  /**
+   * 文本节点的导出：格式由用户点的那一行给。
+   *
+   * 与 {@link CardSelectionProps.onExport} 是两条路，不是同一件事的两种做法：那一条把
+   * 「导出成什么」交给宿主的 kind 表（只有一串写死的格式，点一下就是它），而文本节点的
+   * 四种格式（md / txt / docx / pdf）各有各的去处，得先问一句——所以这个回调带参数。
+   */
+  onExportText: (format: TextExportFormat) => void
   /** Take the card off the board; the file stays. */
   onRemove: () => void
   /** Declare an edge from `sourceId` and push its digest into the session. */
@@ -172,222 +175,59 @@ const PILL = [
 ] as const
 
 /**
- * The Host catalog, loaded at most once per client page and shared by every
- * card's picker. A failed load clears the cache so the next open retries.
+ * 胶囊上那枚〔导出〕。
+ *
+ * 对文本节点（`isDirectTextKind`）它是一张四行的菜单：md / txt / docx / pdf 各有去处，
+ * 没有哪一个能当默认，替用户猜一个就是把另外三个藏起来。其余形态仍走宿主那一条导出线
+ * ——格式由 kind 表写死（点一下就是它），这里保持原样的一击。
+ *
+ * 菜单复用画布既有的那套长相（`.dsh-canvas-menu` + `.dsh-canvas-row`），只是从胶囊边上
+ * 垂下来，所以外层那枚 `span` 是它定位的锚（见 `styles.ts` 的 `.dsh-canvas-pillmenu`）。
  */
-let catalogCache: Promise<ModelCatalog> | undefined
-
-function loadCatalog(bridge: CanvasBridge): Promise<ModelCatalog> {
-  catalogCache ??= bridge.modelCatalog().catch((error: unknown) => {
-    catalogCache = undefined
-    throw error
-  })
-  return catalogCache
-}
-
-/** Resolve a model id to its catalog display name, falling back to the id. */
-function modelName(catalog: ModelCatalog | undefined, choice: ModelChoice | undefined): string {
-  if (choice === undefined) return ''
-  const group = catalog?.groups.find((entry) => entry.id === choice.provider)
-  return group?.models.find((model) => model.id === choice.model)?.name ?? choice.model
-}
-
-/**
- * What the composer can say about the session's model.
- *
- * - `pending` — nothing read yet (catalog loading, or the list read in flight).
- * - `chosen` — the session has a selection; it is what its next request uses.
- * - `none` — the session has never picked a model and never run, so the node
- *   type's memory may speak for it.
- * - `unknown` — the session is not in the host's list, so nothing can be said.
- *
- * `pending` and `unknown` both keep the label at its placeholder rather than
- * printing the catalog default: an unverified default reads as a fact, and that
- * is exactly the claim this seat must not make.
- */
-type ModelSeat =
-  | { status: 'pending' }
-  | { status: 'chosen'; choice: ModelChoice }
-  | { status: 'none' }
-  | { status: 'unknown' }
-
-/** Cards this page has already seeded from the type memory; one write each. */
-const seededCards = new Set<string>()
-
-/**
- * The model seat in the composer's bottom-left corner.
- *
- * Reads the Host-generation catalog through the framework's `session` Remote
- * namespace and writes a durable per-session selection with the same
- * `selectModel` wire call the host composer's model seat makes — the choice
- * governs the card session's next model request. What it *shows* comes from the
- * session's own selection projection, read from the host's session list rather
- * than kept locally, and a session that has no selection of its own inherits
- * the model its node type remembers (see `model-memory.ts`).
- *
- * Inheriting means *opening the card's conversation first*: the host's
- * `selectModel` resolves a session by resuming it, and a session resumed by
- * that call is composed outside this card's agent scope — the plugin would then
- * find a session it cannot re-open, and would start a second conversation for
- * the card. Opening through the board's own call keeps the agent, its scope and
- * the selection one conversation's worth of state.
- */
-function ModelPicker({
-  bridge,
-  projectId,
-  cardId,
-  sessionId,
-  kind,
+function ExportPill({
   t,
+  text,
+  onExport,
+  onExportText,
 }: {
-  bridge: CanvasBridge
-  projectId: string
-  cardId: string
-  /** The session the card is bound to, or `''` before it has one. */
-  sessionId: string
-  /** The node type whose remembered model this session may inherit. */
-  kind: string
   t: Translate
+  /** 这张卡的产物是不是「就是它自己的文字」。 */
+  text: boolean
+  onExport: () => void
+  onExportText: (format: TextExportFormat) => void
 }) {
   const [open, setOpen] = useState(false)
-  const [catalog, setCatalog] = useState<ModelCatalog | undefined>(undefined)
-  const [seat, setSeat] = useState<ModelSeat>({ status: 'pending' })
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  // The catalog is loaded on mount, not on first open: the label needs a name
-  // for the session's model before the menu is ever consulted. The shared cache
-  // makes every later card free.
-  useEffect(() => {
-    let cancelled = false
-    loadCatalog(bridge)
-      .then((value) => {
-        if (!cancelled) setCatalog(value)
-      })
-      .catch((loadError: unknown) => {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : String(loadError))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [bridge])
-
-  // Read the session's own projection. It is the only face that can say what
-  // the next request will actually use, so the label is read from it rather
-  // than guessed from the catalog default. A card that has no conversation yet
-  // has no selection either — that is an answer, not a missing read.
-  useEffect(() => {
-    setSeat({ status: 'pending' })
-    if (sessionId === '') {
-      setSeat({ status: 'none' })
-      return
-    }
-    let cancelled = false
-    bridge
-      .readModelSelection(sessionId)
-      .then((view: ModelSelectionView | undefined) => {
-        if (cancelled) return
-        if (view === undefined) {
-          setSeat({ status: 'unknown' })
-          return
-        }
-        const choice = selectionOf(view)
-        setSeat(choice === undefined ? { status: 'none' } : { status: 'chosen', choice })
-      })
-      .catch(() => {
-        if (!cancelled) setSeat({ status: 'unknown' })
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [bridge, sessionId])
-
-  // A session with no selection of its own inherits its node type's memory:
-  // that is what makes remembering worth doing. The open comes first — see the
-  // component doc — and the write happens once per card, and only on the
-  // projection's own "nothing chosen yet" answer.
-  useEffect(() => {
-    if (seat.status !== 'none' || catalog === undefined || projectId === '' || cardId === '') return
-    const remembered = recallModel(kind, catalog)
-    if (remembered === undefined || seededCards.has(cardId)) return
-    seededCards.add(cardId)
-    setBusy(true)
-    setError('')
-    bridge
-      .openSession(projectId, cardId)
-      .then((binding) => bridge.selectModel(binding.sessionId, remembered.provider, remembered.model))
-      .then(() => setSeat({ status: 'chosen', choice: remembered }))
-      .catch((seedError: unknown) => setError(seedError instanceof Error ? seedError.message : String(seedError)))
-      .finally(() => setBusy(false))
-  }, [seat, catalog, kind, projectId, cardId, bridge])
-
-  const pick = (provider: string, model: CatalogModel) => {
-    if (busy || sessionId === '') return
-    setBusy(true)
-    setError('')
-    const choice: ModelChoice = { provider, model: model.id }
-    bridge
-      .selectModel(sessionId, provider, model.id)
-      .then(() => {
-        // The memory is written only here: what the user picked, never a guess.
-        rememberModel(kind, choice)
-        setSeat({ status: 'chosen', choice })
-        setOpen(false)
-      })
-      .catch((pickError: unknown) => setError(pickError instanceof Error ? pickError.message : String(pickError)))
-      .finally(() => setBusy(false))
+  if (!text) {
+    return (
+      <button className="dsh-canvas-chipbtn" onClick={onExport}>
+        {t('canvas.action.export')}
+      </button>
+    )
   }
-
-  // What the label may state: the session's own selection, or — once the
-  // projection has confirmed there is none — the model the next request will
-  // start from. That is the type memory when there is one (it is about to be
-  // installed), and the deployment default otherwise.
-  const shown =
-    seat.status === 'chosen'
-      ? seat.choice
-      : seat.status === 'none'
-        ? recallModel(kind, catalog) ?? catalog?.default
-        : undefined
-  const label = shown === undefined ? t('canvas.composer.model') : modelName(catalog, shown)
-  const current = seat.status === 'chosen' ? seat.choice : undefined
-
   return (
-    <span className="dsh-canvas-modelzone">
+    <span className="dsh-canvas-pillmenu">
       <button
-        className="dsh-canvas-modelbtn"
-        onClick={() => setOpen((value) => !value)}
-        disabled={sessionId === ''}
-        title={t('canvas.composer.model')}
+        className="dsh-canvas-chipbtn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((now) => !now)}
       >
-        {label}
-        <span aria-hidden="true">▾</span>
+        {t('canvas.action.export')}
       </button>
       {open ? (
-        <div className="dsh-canvas-menu is-raised dsh-canvas-modelmenu">
-          {error !== '' ? <span className="dsh-canvas-composer-menuempty">{error}</span> : null}
-          {error === '' && catalog === undefined ? (
-            <span className="dsh-canvas-composer-menuempty">{t('canvas.composer.modelLoading')}</span>
-          ) : null}
-          {catalog?.groups.map((group) => (
-            <div key={group.id}>
-              <div className="dsh-canvas-modelgroup">{group.name}</div>
-              {group.models.length === 0 ? (
-                <span className="dsh-canvas-composer-menuempty">{t('canvas.composer.modelEmpty')}</span>
-              ) : (
-                group.models.map((model) => (
-                  <button
-                    className="dsh-canvas-row"
-                    data-current={current?.provider === group.id && current?.model === model.id ? 'true' : 'false'}
-                    disabled={busy}
-                    key={model.id}
-                    title={model.description}
-                    onClick={() => pick(group.id, model)}
-                  >
-                    {model.name}
-                  </button>
-                ))
-              )}
-            </div>
+        <div className="dsh-canvas-menu" role="menu" aria-label={t('canvas.export.menu')}>
+          {TEXT_EXPORT_FORMATS.map((format) => (
+            <button
+              className="dsh-canvas-row"
+              role="menuitem"
+              key={format}
+              onClick={() => {
+                setOpen(false)
+                onExportText(format)
+              }}
+            >
+              {t(TEXT_EXPORT_LABEL[format])}
+            </button>
           ))}
         </div>
       ) : null}
@@ -850,7 +690,20 @@ export function CardSelection(props: CardSelectionProps) {
     <>
       <div className="dsh-canvas-toolbar is-horizontal" style={{ left: `${card.position.x + 100}px`, top: `${card.position.y - 44}px`, transform: 'translateX(-50%)' }}>
         {PILL.map(([key, handler]) => {
-          if (key === 'canvas.action.export' && !hasExport) return null
+          if (key === 'canvas.action.export') {
+            if (!hasExport) return null
+            return (
+              // key 带上卡片 id：换选另一张卡时这颗钮重挂一次，菜单跟着收起来——
+              // 不然它会开着跟到下一张卡的胶囊上，看上去像给那张卡开的。
+              <ExportPill
+                key={`${card.id}:${key}`}
+                t={t}
+                text={canEditText}
+                onExport={props.onExport}
+                onExportText={props.onExportText}
+              />
+            )
+          }
           if (key === 'canvas.action.manual' && !canEditText) return null
           return (
             <button className="dsh-canvas-chipbtn" key={key} onClick={props[handler]}>

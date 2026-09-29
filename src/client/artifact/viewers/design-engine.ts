@@ -26,7 +26,10 @@ import type {
   DesignBackend,
   DesignEngine,
   DesignEffectItem,
+  DesignGeometry,
+  DesignHistoryState,
   DesignLayerNode,
+  DesignNodeFrame,
   DesignNodeProps,
   DesignNodeRead,
   DesignStrokeItem,
@@ -72,6 +75,38 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
   // 也走 switchPage，这一个订阅把页面面板的所有重画都收口了。
   editor.onEditorEvent('page:changed', () => onRepaint())
 
+  // —— 历史计数（HUD 撤销/重做两枚按钮的禁用判据）。
+  //
+  // core 的 UndoManager 有 canUndo/canRedo，却没从 createEditor 的能力面里露出来；我们只
+  // 能自己记。记法是**以事实为准**：UndoManager 每次进栈/退栈都同步响一次
+  // `history:changed`，所以每个动作前后各取一次事件数，响了才动计数——比「调一次提交就当
+  // 一笔」诚实（commitNodeUpdate 在没真变时是直接早退的，不进栈）。唯一的偏差来源是 core
+  // 那个 200 笔的容量上限（超了会裁掉最旧的），那时计数会偏大——按钮多亮一格，点下去是空
+  // 操作，不伤人。
+  let historyEvents = 0
+  editor.onEditorEvent('history:changed', () => {
+    historyEvents += 1
+  })
+  let undoSteps = 0
+  let redoSteps = 0
+  /** 一次新提交：退的栈多一笔，进的栈作废（历史分叉了）。 */
+  const recordHistory = (before: number): void => {
+    if (historyEvents === before) return
+    undoSteps += 1
+    redoSteps = 0
+  }
+  /** 一次撤销/重做：两栈之间挪一笔。 */
+  const stepHistory = (before: number, forward: boolean): void => {
+    if (historyEvents === before) return
+    if (forward) {
+      redoSteps -= 1
+      undoSteps += 1
+    } else {
+      undoSteps -= 1
+      redoSteps += 1
+    }
+  }
+
   const fit = (width: number, height: number): DesignViewport => fitTransform(graph, width, height)
 
   /** The screen→world step every pointer coordinate takes before a hit test. */
@@ -82,6 +117,8 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
 
   // Move-drag state: positions captured at pointer-down, replayed per frame.
   let moveOriginals: Map<string, { x: number; y: number }> | null = null
+  // 缩放/旋转同一副节律：起手拍几何、拖的时候直接落图、收手提交一条 undo。
+  let transformOriginals: { id: string; before: DesignGeometry } | null = null
   // 悬停高亮：编辑模式指针下的「将被选中」节点。渲染器按帧画 overlay，
   // 不进场景 picture——变更只触发重画，不 bump sceneVersion。
   let hoverId: string | null = null
@@ -99,6 +136,7 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       y: node.y,
       width: node.width,
       height: node.height,
+      rotation: node.rotation,
       fill: firstSolidCss(node),
       opacity: node.opacity,
       cornerRadius: node.cornerRadius,
@@ -159,9 +197,100 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       if (moved) {
         // `commitMove` captures the *current* positions as the forward side and
         // replays the originals as the inverse.
+        const before = historyEvents
         editor.commitMove(moveOriginals)
+        recordHistory(before)
       }
       moveOriginals = null
+    },
+    beginTransform(): void {
+      const selected = [...editor.state.selectedIds]
+      // 缩放/旋转只对**单个**节点开：两者都以节点中心为支点，多选没有那一枚共同的中心。
+      const id = selected.length === 1 ? selected[0] : undefined
+      const node = id === undefined ? undefined : graph.getNode(id)
+      if (node === undefined) {
+        transformOriginals = null
+        return
+      }
+      transformOriginals = { id: node.id, before: { x: node.x, y: node.y, width: node.width, height: node.height, rotation: node.rotation } }
+    },
+    applyTransform(geometry: DesignGeometry): void {
+      const origin = transformOriginals
+      if (origin === null) return
+      // 宽高只防被拖成负尺寸（场景图没有「负宽」这回事）；角度任意，整圈与负角都合法。
+      graph.updateNode(origin.id, {
+        x: geometry.x,
+        y: geometry.y,
+        width: Math.max(geometry.width, 1),
+        height: Math.max(geometry.height, 1),
+        rotation: geometry.rotation,
+      })
+    },
+    endTransform(): void {
+      const origin = transformOriginals
+      if (origin === null) return
+      transformOriginals = null
+      const node = graph.getNode(origin.id)
+      if (node === undefined) return
+      const { before } = origin
+      // 起手又收手（位置、宽高、角度一个没动）就不压 undo——与 endMove 同一条规矩。
+      if (node.x === before.x && node.y === before.y && node.width === before.width && node.height === before.height && node.rotation === before.rotation) {
+        return
+      }
+      const beforeEvents = historyEvents
+      editor.commitNodeUpdate(origin.id, before, '变换图层')
+      recordHistory(beforeEvents)
+    },
+    nodeFrame(id: string): DesignNodeFrame | null {
+      const target = graph.getNode(id)
+      if (target === undefined) return null
+      // 先自下而上收到祖先链，再从上往下合成（最顶那一级 → 目标节点）。
+      const chain: SceneNode[] = [target]
+      let parentId: string | null = target.parentId
+      while (parentId !== null && parentId !== graph.rootId) {
+        const parent = graph.getNode(parentId)
+        if (parent === undefined) break
+        chain.unshift(parent)
+        parentId = parent.parentId
+      }
+      // 每层的局部变换都是「平移 (x,y) 再**绕自身中心**转 rotation」——与 core 的画法同源
+      // （highlight-rect / shadows 都是 rotate(θ, w/2, h/2)），所以一份「总角度 + 平移」就
+      // 够表达整条链：世界点 = R(总角度)·局部点 + 平移。
+      let angle = 0
+      let tx = 0
+      let ty = 0
+      let parentRotation = 0
+      for (const node of chain) {
+        // 走到目标节点时，累计角里装的正是**祖先那部分**——节点自己的 rotation 是相对父级的。
+        if (node.id === target.id) parentRotation = angle
+        const rad = (node.rotation * Math.PI) / 180
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        const cx = node.width / 2
+        const cy = node.height / 2
+        // 本层：p → R(θ)(p − c) + c + (x, y)，写成「R(θ)p + 平移」后平移是这个。
+        const localTx = node.x + cx - (cos * cx - sin * cy)
+        const localTy = node.y + cy - (sin * cx + cos * cy)
+        const outer = (angle * Math.PI) / 180
+        const outerCos = Math.cos(outer)
+        const outerSin = Math.sin(outer)
+        tx += outerCos * localTx - outerSin * localTy
+        ty += outerSin * localTx + outerCos * localTy
+        angle += node.rotation
+      }
+      const rad = (angle * Math.PI) / 180
+      const cos = Math.cos(rad)
+      const sin = Math.sin(rad)
+      const cx = target.width / 2
+      const cy = target.height / 2
+      return {
+        centerX: cos * cx - sin * cy + tx,
+        centerY: sin * cx + cos * cy + ty,
+        width: target.width,
+        height: target.height,
+        rotation: angle,
+        parentRotation,
+      }
     },
     updateProps(id: string, props: DesignNodeProps): boolean {
       const node = graph.getNode(id)
@@ -170,7 +299,7 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       const previous: Record<string, unknown> = {}
       // 直接落在节点标量字段上的项（几何/显隐/命名）——同一套「先记旧值、
       // 后提交 undo」的节律。
-      for (const key of ['name', 'visible', 'locked', 'x', 'y', 'width', 'height', 'clipsContent', 'independentCorners'] as const) {
+      for (const key of ['name', 'visible', 'locked', 'x', 'y', 'width', 'height', 'rotation', 'clipsContent', 'independentCorners'] as const) {
         const next = props[key]
         if (next === undefined || node[key] === next) continue
         changes[key] = next
@@ -235,19 +364,30 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       graph.updateNode(id, changes)
       // The editor's own commit snapshots the post-write values for the
       // forward side and derives "did anything actually change" itself.
+      const before = historyEvents
       editor.commitNodeUpdate(id, previous, '编辑属性')
+      recordHistory(before)
       return true
     },
     deleteSelection(): void {
       if (editor.state.selectedIds.size === 0) return
+      const before = historyEvents
       editor.deleteSelected()
+      recordHistory(before)
     },
     undo(): void {
+      if (undoSteps === 0) return
+      const before = historyEvents
       editor.undoAction()
+      stepHistory(before, false)
     },
     redo(): void {
+      if (redoSteps === 0) return
+      const before = historyEvents
       editor.redoAction()
+      stepHistory(before, true)
     },
+    history: (): DesignHistoryState => ({ undo: undoSteps > 0, redo: redoSteps > 0 }),
     snapshot: () => {
       const build = (parentId: string): DesignLayerNode[] =>
         graph.getChildren(parentId).map((node) => ({
@@ -458,7 +598,7 @@ function paint2DSelection(
   for (const id of selectedIds) {
     const node = graph.getNode(id)
     if (node === undefined) continue
-    // 节点坐标相对父级；顶层画板（parent 即根）的 x/y 就是世界坐标。P4 只在
+    // 节点坐标相对父级；顶层容器（parent 即根）的 x/y 就是世界坐标。P4 只在
     // 顶层图形上画框——进容器内部的精确世界矩形等 P5 的变换合成一起做。
     if (node.parentId !== graph.rootId && !graph.getPages().some((page) => page.id === node.parentId)) continue
     const x = node.x * viewport.scale + viewport.x

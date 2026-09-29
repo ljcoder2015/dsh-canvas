@@ -7,7 +7,7 @@
  * init). Both draw the same scene graph through the same viewport, so a
  * fallback changes the engine, not the picture.
  *
- * The painter walks each artboard's subtree in z-order (`SceneGraph.getChildren`
+ * The painter walks each container's subtree in z-order (`SceneGraph.getChildren`
  * carries the order), resolving solid fills/strokes to css for the 2D backend.
  * Gradients, images and vector networks render on the CanvasKit path (M2+);
  * on 2D they fall back to the first solid paint or nothing — visible
@@ -17,9 +17,9 @@
  * editing UI are later milestones. This module only answers "what does the
  * document look like".
  */
-import { artboardsOf, colorToCss, type DesignGraph, type SceneNode } from '../../../core/artifact/design/document.ts'
+import { containersOf, colorToCss, type DesignGraph, type SceneNode } from '../../../core/artifact/design/document.ts'
 
-/** The gutter between artboards when the zoom-to-fit needs a target box. */
+/** The gutter between containers when the zoom-to-fit needs a target box. */
 export const ARTBOARD_GUTTER = 64
 
 /** One drawing primitive the backends implement. Coordinates are screen-space. */
@@ -27,7 +27,7 @@ export interface DesignPaintOps {
   /** Apply an opacity to every call until the next one (1 = reset). */
   opacity(alpha: number): void
   /**
-   * The artboard backdrop: a white sheet with a soft drop shadow, drawn under
+   * The container backdrop: a white sheet with a soft drop shadow, drawn under
    * the board's own fill so a document reads as sheets on a canvas, not rects
    * on a void. Optional — a backend without it just skips the dressing.
    */
@@ -52,13 +52,15 @@ export interface DesignPaintOps {
   popClip(): void
 }
 
-/** The bounding box of all artboards, in document units. */
+/** The bounding box of all containers, in document units. */
 export function documentBounds(graph: DesignGraph): { x: number; y: number; width: number; height: number } {
   let right = 1
   let bottom = 1
-  for (const board of artboardsOf(graph)) {
-    right = Math.max(right, board.x + board.width)
-    bottom = Math.max(bottom, board.y + board.height)
+  for (const board of containersOf(graph)) {
+    // 区域里的容器，坐标是**相对区域**的——取绝对原点才是一份文档里的位置。
+    const origin = graph.getAbsolutePosition(board.id)
+    right = Math.max(right, origin.x + board.width)
+    bottom = Math.max(bottom, origin.y + board.height)
   }
   return { x: 0, y: 0, width: right, height: bottom }
 }
@@ -75,15 +77,16 @@ export function fitTransform(graph: DesignGraph, viewportWidth: number, viewport
   }
 }
 
-/** Paint the document through `ops`. Screen origin of an artboard = transform + board.x·scale. */
+/** Paint the document through `ops`. Screen origin of a container = transform + its absolute origin·scale. */
 export function paintDocument(graph: DesignGraph, ops: DesignPaintOps, transform: { x: number; y: number; scale: number }): void {
-  for (const board of artboardsOf(graph)) {
-    const px = transform.x + board.x * transform.scale
-    const py = transform.y + board.y * transform.scale
-    if (board.visible) {
-      ops.shadowRect?.(px, py, board.width * transform.scale, board.height * transform.scale, board.cornerRadius * transform.scale)
-      paintNode(graph, board, ops, transform, px, py, true)
-    }
+  for (const board of containersOf(graph)) {
+    if (!board.visible) continue
+    // 与 documentBounds 同一口径：区域里的容器要按绝对原点落笔。
+    const origin = graph.getAbsolutePosition(board.id)
+    const px = transform.x + origin.x * transform.scale
+    const py = transform.y + origin.y * transform.scale
+    ops.shadowRect?.(px, py, board.width * transform.scale, board.height * transform.scale, board.cornerRadius * transform.scale)
+    paintNode(graph, board, ops, transform, px, py, true)
   }
 }
 
@@ -98,10 +101,12 @@ function paintNode(
 ): void {
   ops.opacity(clamp01(node.opacity))
   paintOne(node, ops, px, py, transform.scale)
-  // 画板默认裁切溢出内容（一页一板：文本页面 / App 页面 / PPT 页面 / 海报……）；
-  // 模块 frame 不裁——元素可以溢出模块照常显示，只要不出画板。画板自己的填充与
-  // 描边先画，不被自己的裁切削掉半根边。
-  const clips = isBoard && node.type === 'FRAME'
+  // 容器默认裁切溢出内容（一页一容器：文本页面 / App 页面 / PPT 页面 / 海报……）；
+  // 其余容器按自己的 clipsContent 走——新建的容器默认就是 true（Figma 的 frame
+  // 语义），最顶这一枚另按身份兜底，老文档里没带这一位的容器照旧裁。
+  // 区域不裁，与 Figma 一致：元素可以溢出模块照常显示，只要不出容器。容器自己的
+  // 填充与描边先画，不被自己的裁切削掉半根边。
+  const clips = node.type === 'FRAME' && (isBoard || node.clipsContent)
   if (clips) {
     ops.pushClip(px, py, node.width * transform.scale, node.height * transform.scale, node.cornerRadius * transform.scale)
   }
