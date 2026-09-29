@@ -23,6 +23,29 @@ import { type CanvasKitRuntime } from './design-engine-types.ts'
 
 /** The route the host's asset module serves (`src/host/assets.ts`). */
 export const ASSET_BASE = '/dsh-canvas/assets'
+
+/**
+ * 资产 URL 上挂的那一格参数（v1.59）。
+ *
+ * 它**不是版本号**，是**换一格缓存键**。这条路由从前发 `immutable` + 一年，而资产的名字跨
+ * 构建一字不变——那些响应在浏览器里再也不会回来问服务器，缓存头改了也管不到它们（真机上
+ * 撞过一次：新的客户端配着缓存的旧引擎 chunk，报 `n.designExport is not a function`）。
+ * 把 URL 换一格，这台机器就会按新策略（`no-cache` + ETag）重新取一次，之后日常都是 304。
+ *
+ * 所以它跟着**缓存策略**变，不跟着构建变——策略再改一次才动它。
+ */
+const ASSET_QUERY = '?v=2'
+
+/** 一条资产 URL。**取资产一律走这里**，别自己拼 `${ASSET_BASE}/…`：拼两处就是两套规矩。 */
+export function assetUrl(name: string): string {
+  return `${ASSET_BASE}/${name}${ASSET_QUERY}`
+}
+
+/** 在一个可能已经带 query 的 URL 上再挂一格参数（`&` 还是 `?` 由它决定）。 */
+export function withParam(url: string, param: string): string {
+  return `${url}${url.includes('?') ? '&' : '?'}${param}`
+}
+
 /** Script-init timeout: an asset route that answers but never inits must not hang the viewer. */
 const INIT_TIMEOUT_MS = 15_000
 
@@ -44,13 +67,14 @@ export function loadCanvasKit(): Promise<CanvasKitRuntime | null> {
 async function attemptLoad(): Promise<CanvasKitRuntime | null> {
   if (typeof document === 'undefined') return null
   if (document.querySelector(`script[data-dsh-canvas-canvaskit]`) === null) {
-    await injectScript(`${ASSET_BASE}/canvaskit.js`)
+    await injectScript(assetUrl('canvaskit.js'))
   }
   const init = (window as unknown as { CanvasKitInit?: CanvasKitInitGlobal }).CanvasKitInit
   if (init === undefined) return null
   const runtime = await withTimeout(
     init({
-      locateFile: (file: string) => (file.endsWith('.wasm') ? `${ASSET_BASE}/${file}` : `${ASSET_BASE}/${file}`),
+      // CanvasKit 自己去找的 wasm 也要走同一条 URL（它按文件名拼，我们给它成品 URL）。
+      locateFile: (file: string) => assetUrl(file),
     }),
     INIT_TIMEOUT_MS,
   )

@@ -19,7 +19,7 @@ import { SkiaRenderer } from '@open-pencil/core/canvas'
 import { fontManager } from '@open-pencil/core/text'
 import type { CanvasKit, Surface } from 'canvaskit-wasm'
 import type { SceneGraph } from '@open-pencil/scene-graph'
-import { ASSET_BASE, loadCanvasKit } from './design-canvaskit.ts'
+import { assetUrl, loadCanvasKit } from './design-canvaskit.ts'
 import { type CanvasKitRuntime, type DesignBackend } from './design-engine-types.ts'
 
 /** The page backdrop behind the containers — matches `.dsh-canvas-design` CSS. */
@@ -48,7 +48,7 @@ let cjkFontPreloaded: Promise<ArrayBuffer | null> | undefined
  */
 async function loadFontFile(family: string, style: string, file: string): Promise<ArrayBuffer | null> {
   try {
-    const response = await fetch(`${ASSET_BASE}/${file}`)
+    const response = await fetch(assetUrl(file))
     if (!response.ok) {
       console.warn(`[dsh-canvas] 字体资产缺失：${file}（HTTP ${response.status}），文字可能不显示。`)
       return null

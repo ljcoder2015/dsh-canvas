@@ -865,6 +865,21 @@ await build({ entryPoints: ['src/client/index.tsx'], outfile: 'lib/client.js', b
 
 **第四步：fig 的压缩 worker**（`lib/assets/export-worker.ts`，v1.59）。逐字是 `.ts` 不是写错：上游的 fig 写器在浏览器里用 `new URL('./export-worker.ts', import.meta.url)` 找自己的 worker，打进我们那份 chunk 之后这个名字就定死在 `/dsh-canvas/assets/export-worker.ts` 上了（详见 §九「设计稿的四条出路」）。内容是一份普通 ESM 打包结果，`.ts` 由资产路由认成 JavaScript。
 
+#### 资产路由的缓存：名字跨构建不变，缓存头就必须每次回验（v1.59 修）
+
+`/dsh-canvas/assets/*` 这条路由从前的响应头是 `public, max-age=31536000, immutable`，理由写在当时的注释里：「名字是内容稳定的构建产物，重建就换一份插件包」。前半句对，后半句错得恰到好处——**重建换的是包，不是这里的 URL**：`design-engine.js`、`canvaskit.wasm`、那几份字体，名字跨构建一字不变，而内容每一版都在改。于是升级之后浏览器里的旧 chunk 还能用满一年：同一页里既跑着新的 `client.js`，又加载着旧的引擎 chunk，新的那侧去调 `designExport`，而旧的那份里根本没有这个函数——用户拿到 `n.designExport is not a function`（真机反馈），这句话对用户没有任何下一步。
+
+现在的策略是**每次问一句**：`no-cache` + ETag（只用长度与 mtime 两个数，`entityTagOf`）＋ `If-None-Match` 命中回 304（`isNotModified`）。没变就是几十字节，变了立刻拿到新的；那 28MB 资产不因此变慢——它们只在设计预览器打开时取，日常都是 304。
+
+但**缓存头改了管不到已经存进去的那一份**：旧策略发出去的响应在浏览器里可以「一年内不再问」，它永远不会回来看一眼新头。所以客户端那一侧还有两道：
+
+- **取资产一律走 `assetUrl()`**（`design-canvaskit.ts`），URL 上挂着固定的一格 `?v=2`。它**不是版本号**，是**换一格缓存键**——旧条目的键与新 URL 不同，于是这台机器按新策略重新取一次，之后日常 304。判据钉住两件事：那格字面量在，以及**没有第二处手拼 `${ASSET_BASE}/…`**（手拼一处，那一份就又回到旧条目上，事故原样复现且不报错）。
+- **引擎 chunk 取回来要核对形状**（`design-engine-module.ts` 的 `designEngineOf`：`createDesignEngine` 与 `designExport` 都在才算「这一份」）。形状不对就换一个带 `&t=<时间戳>` 的全新 URL 再取一次，仍不对才照实降级成「这次没导成」——**第二道防线**，为的是「谁少写一个 `assetUrl`、策略以后再改」这类再犯，收场是一条降级路而不是一句 `is not a function`。
+
+唯一带不上这一格的是 fig 的压缩 worker：它的 URL 由上游逐字拼出（`new URL('./export-worker.ts', import.meta.url)`，基 URL 上的 query 在相对解析时会掉），而缓存头这一层对它依然成立——从新策略生效起再存进去的那一份会回验。
+
+判据落在**真磁盘上的真文件**上（`registerAssetRoute` 的 `from` 参数就是为它开的）：`tests/host/assets.spec.ts` 判 200 带 ETag、命中回 304 且不带正文、换了内容就不再命中、`.ts` 按 JavaScript 发；`tests/client/artifact/viewers/design-engine-module.spec.ts` 判那一格缓存键在、没有第二处拼 URL、旧 chunk 会被认出来、会绕一次、且只绕一次。
+
 声明文件由 `tsc -p tsconfig.build.json` 单独产出到 `lib/types`（`emitDeclarationOnly`）。
 
 | 脚本 | 内容 |
