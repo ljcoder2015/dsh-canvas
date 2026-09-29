@@ -288,3 +288,55 @@ export interface CreateDesignEngineArgs {
   /** Called when async work (font settling) needs one more frame. */
   onRepaint: () => void
 }
+
+// ── 导出（F10.1，v1.59） ────────────────────────────────────────────────────
+
+/**
+ * 设计稿能导成哪几样。
+ *
+ * 与 `client/canvas/design-export.ts` 的 `DESIGN_EXPORT_FORMATS` 是**同一张表的两半**：
+ * 这里只声明字符串字面量（类型模块必须零依赖），那边拿着它排菜单，判据钉住两者一致。
+ * 之所以不放类型表（`core/artifact/kind-registry.ts`）的 `exportFormats`：那一格是给
+ * **部署能力**那条线看的，而设计稿的四样出路一个都不在部署上（见 `DESIGN_KINDS`）。
+ */
+export type DesignExportFormat = 'fig' | 'png' | 'pdf' | 'pptx'
+
+/** 一份产物被导出成的一件东西：文件名 + 字节。 */
+export interface DesignExportUnit {
+  /**
+   * 这一件叫什么（不带扩展名）。图片是**容器名**（`容器 1`）——一张图一个容器，名字由
+   * 文档给，不是引擎编的；fig / pptx / 多页 PDF 是一个整体，这里给空串。
+   */
+  name: string
+  bytes: Uint8Array
+}
+
+/** 没导成的三种原因。与 `client/canvas/design-export.ts` 的 `DesignRefusal` 是同一份。 */
+export type DesignExportRefusal =
+  /** `.design` 解不开：v1 旧信封、或内容损坏（见 `decodeDesignFile` 的三条报错）。 */
+  | 'broken'
+  /** 文档里一个容器都没有——没有可画的东西。 */
+  | 'empty'
+  /** 取不到渲染引擎（CanvasKit 的资产没到），而这一样出路非要它不可（图片 / PPT）。 */
+  | 'no-engine'
+
+/**
+ * 一次导出的收场。
+ *
+ * 与全仓别的收场同一条规矩：**被拒是答案，不是异常**。「文档还没写」「没有容器」这些不是
+ * 出错——它们各自有各自的下一步，所以分开说；`error` 只留给引擎真抛了异常。
+ */
+export type DesignExportOutcome =
+  | { kind: 'done'; units: DesignExportUnit[] }
+  | { kind: 'refused'; reason: DesignExportRefusal }
+  | { kind: 'error'; message: string }
+
+export interface DesignExportRequest {
+  /** 原始的 `.design` 信封文本（头一行 + JSON 快照）。 */
+  envelope: string
+  format: DesignExportFormat
+  /** 位图的倍率（逻辑像素 → 像素）。默认 2。 */
+  scale?: number
+  /** 给 PDF 用的文档标题（元信息里那一个）。 */
+  title?: string
+}

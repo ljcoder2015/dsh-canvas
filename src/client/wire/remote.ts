@@ -18,6 +18,7 @@ import type {
   BoardCard,
   BoardSnapshot,
   BoardSource,
+  BundleView,
   CardSummary,
   ExportResult,
   FolderEntry,
@@ -84,6 +85,8 @@ export interface CardFace {
   removeMissingCards(projectId: string, signal?: AbortSignal): Promise<RemoteResult<number>>
   readSummary(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary>>
   readArtifact(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<ArtifactView>>
+  /** Every file of an application artifact, for packing into a `.zip` (F10.1). */
+  readBundle(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<BundleView>>
   readSources(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<CardSummary[]>>
   referenceFiles(projectId: string, cardId: string, signal?: AbortSignal): Promise<RemoteResult<ReferencedFiles>>
   injectCard(
@@ -151,6 +154,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'card/removeMissingCards': CardFace['removeMissingCards']
     'card/readSummary': CardFace['readSummary']
     'card/readArtifact': CardFace['readArtifact']
+    'card/readBundle': CardFace['readBundle']
     'card/readSources': CardFace['readSources']
     'card/referenceFiles': CardFace['referenceFiles']
     'card/injectCard': CardFace['injectCard']

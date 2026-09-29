@@ -97,3 +97,30 @@ await build({
   external: ['node:fs/promises', 'node:path', 'node:url', 'fs', 'path', 'url'],
   logLevel: 'info',
 })
+
+/**
+ * fig 导出器的压缩 worker（设计节点导出，v1.59）。
+ *
+ * `.fig` 是一份 zip（图 + 缩略图 + 元数据），打包那一步
+ * （`@open-pencil/core/io/formats/fig/export.js`）在**浏览器**里会把压缩丢给一个 module
+ * worker，URL 写的是它自己旁边那个文件：`new URL('./export-worker.ts', import.meta.url)`。
+ * 那句进不了 chunk 的相对解析簿记——`import.meta.url` 到运行时才落地，取到的就是**我们这份
+ * chunk 的地址**（`/dsh-canvas/assets/design-engine.js`），于是它去要
+ * `/dsh-canvas/assets/export-worker.ts`。那个文件不存在的话 worker 拉不起来，`onerror`
+ * 一响整趟 fig 导出就失败——**而 Figma 文件正是用户点名要的四样之一**。
+ *
+ * 所以这里就按它点名的名字产出。两个细节：
+ *
+ * - **内容是一份普通 ESM 打包结果，名字却是 `.ts`**。逐字的字面量拼的是 `.ts` 这三个字符
+ *   （上游 dist 里只有 `export-worker.js`，没有源码那份 `.ts`），改不了也不该改——改写
+ *   依赖里的字符串是个会悄悄失效的补丁。名字骗人的代价由资产路由承担（`.ts` 认成
+ *   JavaScript，见 `host/assets.ts`）。
+ * - `@open-pencil/fig` 随之打进这份 worker：它本来就是 `@open-pencil/core` 的传递依赖，
+ *   引擎 chunk 里也装着一份；worker 是独立线程，拿不到那份，只能自带。
+ */
+await build({
+  entryPoints: ['node_modules/@open-pencil/core/dist/io/formats/fig/export-worker.js'],
+  outfile: 'lib/assets/export-worker.ts',
+  bundle: true, format: 'esm', platform: 'browser', target: ['es2022'],
+  logLevel: 'info',
+})

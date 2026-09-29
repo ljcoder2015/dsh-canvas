@@ -77,6 +77,16 @@ export function assetFilePath(name: string, from: string = import.meta.url): str
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.wasm': 'application/wasm',
   '.js': 'text/javascript; charset=utf-8',
+  /**
+   * `.ts` —— 那不是 TypeScript 源码，是 fig 导出器的压缩 worker（v1.59）。
+   *
+   * 上游的 fig 写器在浏览器里用 `new URL('./export-worker.ts', import.meta.url)` 找自己的
+   * worker，打进我们那份 chunk 之后这个名字就定死在 `/dsh-canvas/assets/export-worker.ts`
+   * 上了，所以 `build.mjs` 就按它点名的名字产出（内容是普通 ESM）。module worker 对 MIME
+   * 有硬要求，不认这个类型它连脚本都不执行——**于是 fig 导出会静默地整趟失败**，而这正是
+   * 用户点名要的四样之一。
+   */
+  '.ts': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',

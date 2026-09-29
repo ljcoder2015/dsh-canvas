@@ -12,27 +12,26 @@
  * wording can be asserted without a browser.
  */
 import type { ReferencedFiles } from '../../types.ts'
-import type { Translate } from '../ui/locales.ts'
-
-/** The translation seam, as the rest of the client already hands it around. */
-export type NoticeTranslate = Translate
+import type { Notice, NoticeTranslate } from './notice.ts'
 
 /**
- * Summarize one handoff.
+ * Summarize one handoff: the sentence *and* the tone it is shown in.
  *
  * Four outcomes, and the last two are why this is not a one-liner: a card with
- * no sources at all (a plain fact), a set of names, a partial set where some
- * paths could not be written in the `@file` grammar, and a set where *every*
- * path was refused. The partial and total cases never read as success, because
- * a board that silently hands over less material than it has is worse than one
- * that says so.
+ * no sources at all (a plain fact — `info`, since nothing failed), a set of
+ * names (`ok`), a partial set where some paths could not be written in the
+ * `@file` grammar (`warn`), and a set where *every* path was refused (`warn`).
+ * The partial and total cases never read as success, because a board that
+ * silently hands over less material than it has is worse than one that says so.
  */
-export function referenceNotice(result: ReferencedFiles, t: NoticeTranslate): string {
-  if (result.files.length === 0 && result.skipped.length === 0) return t('canvas.reference.filesEmpty')
+export function referenceNotice(result: ReferencedFiles, t: NoticeTranslate): Notice {
+  if (result.files.length === 0 && result.skipped.length === 0) {
+    return { text: t('canvas.reference.filesEmpty'), tone: 'info' }
+  }
   const lines =
     result.files.length === 0
       ? [t('canvas.reference.filesNone')]
       : [t('canvas.reference.files', { count: result.files.length })]
   if (result.skipped.length > 0) lines.push(t('canvas.reference.skipped', { count: result.skipped.length }))
-  return lines.join(' ')
+  return { text: lines.join(' '), tone: result.files.length === 0 || result.skipped.length > 0 ? 'warn' : 'ok' }
 }

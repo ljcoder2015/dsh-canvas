@@ -34,8 +34,15 @@
  * 所以判据看**路径形态**而不是 kind——归并后 `app` 既盖得住单文件页面
  * （`deck.html`，改名改文件），也盖得住目录应用（`myapp/index.html`，改名改目录），
  * kind 已经分不出这两种形态，路径分得清。
+ *
+ * 导出。这条判据不止是改名的：**凡是「产物是一个人还是一个文件夹」这个问题，答案
+ * 都由它给出**——改名要知道改哪一项（`planRename`），打包要知道装哪一项
+ * （`bundleTarget`），预览要知道按哪个目录解析同级资源（`ArtifactIo.inlinePageAssets`）。
+ * 三处各写一遍 `endsWith('index.html')` 就是三份会各自漂移的知识，而它们漂移起来是
+ * 静默的：改名的判据错了是改错文件，打包的判据错了是**少装几个文件**——一个看起来
+ * 像导出、实为半份的包（v1.58 就是这么发出一份只有 `index.html` 的 zip 的）。
  */
-function isEntryPage(file: string): boolean {
+export function isEntryPage(file: string): boolean {
   return basenameOf(file).toLowerCase() === 'index.html'
 }
 

@@ -35,8 +35,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { InjectFace, PropsRuntime, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
-import type { BoardCard, BoardSnapshot, CardSummary, LastPrompt, Point, Project, Viewport } from '../../types.ts'
-import { kindById, kindLabel } from '../../core/artifact/kind-registry.ts'
+import type {
+  BoardCard,
+  BoardSnapshot,
+  CardSummary,
+  ExportFormat,
+  LastPrompt,
+  Point,
+  Project,
+  Viewport,
+} from '../../types.ts'
+import { kindLabel } from '../../core/artifact/kind-registry.ts'
 import { autoNameOf } from '../../core/canvas/card-name.ts'
 import type { CanvasBridge } from '../wire/bridge.ts'
 import type { CanvasKey, Translate } from '../ui/locales.ts'
@@ -49,14 +58,29 @@ import { SourceEdges, seatAtAnchor, type PendingEdge } from './source-edges.tsx'
 import { FolderPicker } from './folder-picker.tsx'
 import { referenceNotice } from './material-notice.ts'
 import {
+  bundleFailedNotice,
+  bundleNotice,
+  designExportNotice,
+  exportWorkingNotice,
+  pruneNotice,
+  textExportNotice,
+  type Notice,
+} from './notice.ts'
+import { exportOfferOf, type ExportOffer } from './export-plan.ts'
+import { exportDesign, type DesignExportFormat } from './design-export.ts'
+import { mergePdfPages } from './pdf-merge.ts'
+import { loadDesignEngine } from '../artifact/viewers/design-engine-module.ts'
+import {
   docxBytes,
-  downloadBytes,
   exportFileName,
   markdownToPlainText,
   textBlocksOf,
+  TEXT_EXPORT_MIME,
   utf8Bytes,
   type TextExportFormat,
 } from './text-export.ts'
+import { downloadBytes } from './download.ts'
+import { exportBundle } from './bundle-export.ts'
 import { loadPdfFontBytes, pdfBytes } from './text-pdf.ts'
 import { ArtifactModal } from '../artifact/artifact-view.tsx'
 import { basenameOf, isInside, parseFileAddress } from '../wire/address.ts'
@@ -329,16 +353,22 @@ export function CanvasBoard(props: CanvasBoardProps) {
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [error, setError] = useState('')
   /**
-   * The board's answer to the last material handoff, when there is one.
+   * The board's answer to the last action that produced nothing visible: a
+   * material handoff, an export, a cleanup.
    *
-   * A handoff leaves no visible trace on the card face — the names go into the
-   * conversation, not into the artifact — so without this line the user cannot
-   * tell whether anything happened, or how much of the material could be named.
-   * Cleared by
-   * every new action, exactly like the error strip, so the two never compete for
-   * the same spot.
+   * A handoff leaves no trace on the card face, an export leaves its file in the
+   * downloads folder, a cleanup only removes cards — so without this line the
+   * user cannot tell whether anything happened, or how much of it could be done.
+   * Cleared by every new action, exactly like the error strip, so the two never
+   * compete for the same spot.
+   *
+   * It carries a **tone** as well as a sentence, because "it worked", "it did
+   * not happen, and here is why" and "it failed" are three different endings and
+   * used to be sent out looking identical. Which ending earns which tone is a
+   * judgement, and it lives in `./notice.ts` with the wording — this file only
+   * paints it (see the `data-tone` rules in styles.ts).
    */
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState<Notice | null>(null)
   const [stamp, setStamp] = useState(0)
   /** What each card's composer holds on its own account; see `ComposerDraft`. */
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft | undefined>>({})
@@ -656,7 +686,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
   const run = useCallback(
     (action: () => Promise<unknown>) => {
       setError('')
-      setNotice('')
+      setNotice(null)
       void action()
         .then(() => setStamp((value) => value + 1))
         .catch(report)
@@ -794,11 +824,9 @@ export function CanvasBoard(props: CanvasBoardProps) {
     setPruning(false)
     void run(async () => {
       const removed = await bridge.removeMissingCards(projectId)
-      setNotice(
-        removed < promised
-          ? t('canvas.prune.partial', { removed, skipped: promised - removed })
-          : t('canvas.prune.done', { count: removed }),
-      )
+      // 清光了是 ok；有留下的（读不到、证不出不存在）就是 warn——报出实数，别让用户
+      // 以为按了没反应。口气的判据与文案一起在 `./notice.ts` 里。
+      setNotice(pruneNotice(removed, promised, t))
     })
   }, [bridge, missingCount, projectId, run, t])
 
@@ -816,16 +844,48 @@ export function CanvasBoard(props: CanvasBoardProps) {
     [activateSession, bridge, projectId, report],
   )
 
-  const exportCard = useCallback(
+  /**
+   * 应用节点的导出：把整份产物打包成 zip 落进用户的本机（F10.1）。
+   *
+   * 与文本导出同一套分工、同一份理由：**打包是浏览器里做得了的事**，所以它不经过部署
+   * 的导出能力（`dsh-canvas.capabilities`）。此前应用卡片点导出走的是 `.exportFormats[0]`
+   * ——恰好就是 `zip`——但那条线要求部署提供导出能力，在没有它的部署上点下去是**什么都不
+   * 会发生**（宿主返回 `ok:false` 是一份答案，不是一次异常，`run` 不会把它说出来）。
+   *
+   * 拒绝照实说，一律不假装导出成功：产物还没写、目录里没有可打包的东西、文件多到一包
+   * 装不下——三种都只是界面上一句话的事（文案与**口气**都在 `./notice.ts`）。
+   */
+  const exportBundleCard = useCallback(
     (card: BoardCard) => {
       if (projectId === '') return
-      // The kind table decides what a kind can become — the browser never
-      // invents a format the host would then refuse.
-      const format = kindById(summaries[card.id]?.kind ?? '')?.exportFormats[0]
-      if (format === undefined) return
+      setError('')
+      setNotice(null)
+      void (async () => {
+        const view = await bridge.readBundle(projectId, card.id)
+        // 装包这一步有自己的说法（与 PDF 那条同理）：它失败与「读不到产物」是两回事，
+        // 别让它只剩一句宿主抛出来的原文。被拒是**答案**，抛错才是 error。
+        try {
+          setNotice(bundleNotice(await exportBundle(view, downloadBytes), t))
+        } catch (error) {
+          setNotice(bundleFailedNotice(error, t))
+        }
+      })().catch(report)
+    },
+    [bridge, projectId, report, t],
+  )
+
+  /**
+   * 其余形态的导出：交给部署那条导出能力（`canvas/export`）。
+   *
+   * 「形态决定走哪条路」这件事不在这里判——它住在 `export-plan.ts`，与菜单里摆什么
+   * 是同一份判据（见 {@link exportOffer}）。这里只是四条通道里的第三条的落点。
+   */
+  const exportHostCard = useCallback(
+    (card: BoardCard, format: ExportFormat) => {
+      if (projectId === '') return
       void run(() => bridge.exportCard(projectId, card.id, format))
     },
-    [bridge, projectId, run, summaries],
+    [bridge, projectId, run],
   )
 
   /**
@@ -841,15 +901,15 @@ export function CanvasBoard(props: CanvasBoardProps) {
     (card: BoardCard, format: TextExportFormat) => {
       if (projectId === '') return
       setError('')
-      setNotice('')
+      setNotice(null)
       void (async () => {
         const view = await bridge.readArtifact(projectId, card.id)
         if (!view.present) {
-          setNotice(t('canvas.export.absent'))
+          setNotice(textExportNotice({ kind: 'absent' }, t))
           return
         }
         if (view.truncated) {
-          setNotice(t('canvas.export.truncated'))
+          setNotice(textExportNotice({ kind: 'truncated' }, t))
           return
         }
         const name = exportFileName(view.file === '' ? card.file : view.file, format)
@@ -866,16 +926,12 @@ export function CanvasBoard(props: CanvasBoardProps) {
               blocks: textBlocksOf(view.text, markdown),
               fontBytes: await loadPdfFontBytes(),
             })
-            downloadBytes(name, bytes, format)
-            setNotice(t('canvas.export.done', { name }))
+            downloadBytes(name, bytes, TEXT_EXPORT_MIME[format])
+            setNotice(textExportNotice({ kind: 'done', name }, t))
           } catch (error) {
             // 这条路上多了一次资产取字体，失败得说清楚是哪一步——不要只丢一句
-            // 「导出失败」出去。
-            setNotice(
-              t('canvas.export.pdfFailed', {
-                reason: error instanceof Error ? error.message : String(error),
-              }),
-            )
+            // 「导出失败」出去。它也因此是这一族里少数几个 `error` 口气。
+            setNotice(textExportNotice({ kind: 'failed', reason: error }, t))
           }
           return
         }
@@ -883,12 +939,75 @@ export function CanvasBoard(props: CanvasBoardProps) {
           format === 'docx'
             ? docxBytes({ title, blocks: textBlocksOf(view.text, markdown) })
             : utf8Bytes(format === 'txt' && markdown ? markdownToPlainText(view.text) : view.text)
-        downloadBytes(name, bytes, format)
-        setNotice(t('canvas.export.done', { name }))
+        downloadBytes(name, bytes, TEXT_EXPORT_MIME[format])
+        setNotice(textExportNotice({ kind: 'done', name }, t))
       })().catch(report)
     },
     [bridge, projectId, report, t],
   )
+
+  /**
+   * 设计稿的导出：Figma 文件 / 图片 / PDF / PPT，四样都在浏览器里画出来（F10.1，v1.59）。
+   *
+   * 与文本导出、应用打包同一条分工：**能在这里做的在这里做**。这四样一条都不在部署上
+   * ——fig 要 Figma 的 kiwi schema，图片与 PPT 要 CanvasKit 的渲染器，PDF 要 DOM——而它们
+   * 全在用户这台浏览器里；所以这条路不要求部署提供 `dsh-canvas.capabilities`，也不先往
+   * 服务器磁盘写一份再告诉用户一条路径。
+   *
+   * 画的部分在引擎 chunk 里（`design-engine.ts` 的 `designExport`），命名 / 装包 / 说哪一句
+   * 在 `design-export.ts` 与 `notice.ts`。这里只做三件事：把产物读回来、把 chunk 取回来、
+   * 把结果说给用户。**chunk 取不到**（`null`）是一条被拒的理由（`no-engine`），不是异常——
+   * 预览器那条路的失败长得不一样（它要报错面板），所以加载器两份合了一份之后，处理仍各是
+   * 各的（见 `design-engine-module.ts` 开头）。
+   */
+  const exportDesignCard = useCallback(
+    (card: BoardCard, format: DesignExportFormat) => {
+      if (projectId === '') return
+      setError('')
+      // PDF 与 PPT 要在 CanvasKit 上一页一页画，fig 要现拉 17MB 的中文字体才画得出缩略图
+      // ——没有哪一样是一按就好的。先说一句，免得看起来像点空了；随后那一条会把它换掉。
+      setNotice(exportWorkingNotice(t))
+      void (async () => {
+        const view = await bridge.readArtifact(projectId, card.id)
+        const title = card.name.trim() !== '' ? card.name.trim() : kindLabel(card.kind)
+        setNotice(
+          designExportNotice(
+            await exportDesign({
+              view,
+              format,
+              title,
+              engine: await loadDesignEngine(),
+              save: downloadBytes,
+              mergePdf: mergePdfPages,
+            }),
+            t,
+          ),
+        )
+      })().catch(report)
+    },
+    [bridge, projectId, report, t],
+  )
+
+  /**
+   * 选中的这张卡点〔导出〕给什么（F10.1）。
+   *
+   * 四条通道的落点在这里凑齐，而**判据不在**——「有没有得导、是菜单还是一击、菜单里摆
+   * 哪几行」全在 `export-plan.ts` 那个纯函数里（它读类型表，判据能穷举）。画布只负责把
+   * 四个处理函数接上去。此前这份判据一半在胶囊里、一半在这里（`isBundleKind` +
+   * `exportFormats[0]`），加进第三条通道那一刻它们就会开始各说各话：菜单里摆着「Figma
+   * 文件」，点下去走的却是部署那条线。
+   */
+  const exportOffer: ExportOffer = useMemo(() => {
+    const card = selectionCard
+    if (card === undefined) return { kind: 'none' }
+    const kind = summaries[card.id]?.kind ?? card.kind
+    return exportOfferOf(kind, {
+      bundle: () => exportBundleCard(card),
+      host: (format) => exportHostCard(card, format),
+      text: (format) => exportTextCard(card, format),
+      design: (format) => exportDesignCard(card, format),
+    })
+  }, [exportBundleCard, exportDesignCard, exportHostCard, exportTextCard, selectionCard, summaries])
 
   // ── card composer ─────────────────────────────────────────────────────────
 
@@ -1530,8 +1649,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
                 draft={promptDraft}
                 onChat={() => openCardSession(selectionCard)}
                 onManualEdit={() => setViewing({ cardId: selectionCard.id, edit: true })}
-                onExport={() => exportCard(selectionCard)}
-                onExportText={(format) => exportTextCard(selectionCard, format)}
+                exportOffer={exportOffer}
                 onRemove={() => {
                   setPruning(false)
                   setRemoval(selectionCard.id)
@@ -1653,8 +1771,25 @@ export function CanvasBoard(props: CanvasBoardProps) {
           </div>
         )}
 
-        {error === '' ? null : <div className="dsh-canvas-error">{t('canvas.error', { message: error })}</div>}
-        {error !== '' || notice === '' ? null : <div className="dsh-canvas-notice">{notice}</div>}
+        {/* 两条提示条同占一个位置（每次动作先清空回执，所以不会打架）。颜色由口气决定，
+            字由收场决定——见 `./notice.ts`；两条都可以自己关掉，别让一句话赖在画布上
+            等下一次动作来替它收场。 */}
+        {error === '' ? null : (
+          <div className="dsh-canvas-error">
+            <span className="dsh-canvas-strip-text">{t('canvas.error', { message: error })}</span>
+            <button className="dsh-canvas-strip-close" onClick={() => setError('')} aria-label={t('canvas.action.dismiss')}>
+              ×
+            </button>
+          </div>
+        )}
+        {error !== '' || notice === null ? null : (
+          <div className="dsh-canvas-notice" data-tone={notice.tone}>
+            <span className="dsh-canvas-strip-text">{notice.text}</span>
+            <button className="dsh-canvas-strip-close" onClick={() => setNotice(null)} aria-label={t('canvas.action.dismiss')}>
+              ×
+            </button>
+          </div>
+        )}
 
         {removal === undefined ? null : (
           <div className="dsh-canvas-toolbar is-horizontal" style={{ left: '50%', top: '12px', transform: 'translateX(-50%)', zIndex: 6 }}>

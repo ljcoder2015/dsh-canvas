@@ -849,7 +849,8 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 .dsh-canvas-chipbtn[data-primary=true]:hover{filter:brightness(1.08);background:var(--dsh-sunset-solid)}
 .dsh-canvas-chipbtn[disabled]{opacity:.45;cursor:default}
 .dsh-canvas-chipbtn svg{display:block}
-/* 胶囊上那枚〔导出〕的锚：文本节点的格式菜单（md/txt/docx/pdf）从这颗钮下面垂下来。
+/* 胶囊上那枚〔导出〕的锚：要挑格式的形态（文本节点 md/txt/docx/pdf、设计稿 fig/png/pdf/pptx）
+   都把菜单从这颗钮下面垂下来。
    锚是 inline-flex 的一层 span——胶囊那一排是 flex 的行，菜单不能参与它的排版，只能在
    锚里绝对定位。宽度按内容撑（.dsh-canvas-menu 自己那 150px 下限够用），左缘与钮对齐。 */
 .dsh-canvas-pillmenu{position:relative;display:inline-flex;align-items:center}
@@ -900,15 +901,36 @@ body[data-ds-dark-theme] .dsh-canvas-root{
   background:var(--dsh-soft);color:var(--dsh-fg);font:11px/15px var(--dsh-mono);text-align:center;white-space:nowrap}
 .dsh-canvas-keys-label{flex:1 1 auto;font:12px/17px var(--dsh-font);color:var(--dsh-fg-2)}
 
-/* ── empty / error ──────────────────────────────────────────────────────── */
+/* ── empty / 提示条 ─────────────────────────────────────────────────────── */
 .dsh-canvas-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;color:var(--dsh-fg-3)}
 .dsh-canvas-empty-title{font:500 13px/20px var(--dsh-font);color:var(--dsh-fg-2)}
-.dsh-canvas-error{position:absolute;left:12px;right:12px;top:12px;padding:8px 12px;border-radius:8px;
-  border:1px solid var(--dsh-hairline);background:var(--dsh-card);color:var(--dsh-twilight);font:12px/18px var(--dsh-mono)}
-/* 动作回执（会话引用走了哪条通道）：与错误条同一处、同一副骨架，只是颜色更弱——
-   两条不会同时出现（每次动作都先清空回执），所以叠在同一位置是安全的。 */
-.dsh-canvas-notice{position:absolute;left:12px;right:12px;top:12px;padding:8px 12px;border-radius:8px;
-  border:1px solid var(--dsh-hairline);background:var(--dsh-card);color:var(--dsh-fg-3);font:12px/18px var(--dsh-mono)}
+/* 一档一口气。这一层只声明**家族色**（就是这条规则自己的 --dsh-notice），底、描边、字由下面
+   那条共用规则算出来——于是「加一档」只加一行，也不会出现「底换了字忘了换」那类半截改。
+   家族色一律取画布调色板里的**文字色**那一档（sunset 是文字色、sunset-solid 才是实心底）：
+   亮色下底取淡调、字取原色，两边都读得出来；拿实心底那档当字色，亮色下就是黄字压黄底。
+   它不是主题令牌，是这一条自己的底色族，所以不进调色板、也不该被别处引用。 */
+/* 中性那一档（info，也是没挂 data-tone 时的默认长相）：只是告诉你一件事，不抢任何东西。 */
+.dsh-canvas-notice,.dsh-canvas-notice[data-tone="info"]{--dsh-notice:var(--dsh-fg-3)}
+.dsh-canvas-notice[data-tone="ok"]{--dsh-notice:var(--dsh-breeze)}
+.dsh-canvas-notice[data-tone="warn"]{--dsh-notice:var(--dsh-sunset)}
+/* 错误条只有一档（错就是错），所以它直接就是家族色的持有者，不用挂 data-tone。 */
+.dsh-canvas-notice[data-tone="error"],.dsh-canvas-error{--dsh-notice:var(--dsh-twilight)}
+/* 画布左上角那一条：一句话 + 一枚关闭。错误条与回执条共用这副骨架，也共用上面那几档口气
+   ——**颜色说口气，字说事情**，两者一起给出去，用户不必读完一行字才知道刚才成了没有。
+   两条不会同时出现（每次动作都先清空回执），所以叠在同一位置是安全的。
+   底与描边一律 color-mix 在画布调色板上算：两套主题各算各的，不必为一口再开令牌。 */
+.dsh-canvas-error,.dsh-canvas-notice{position:absolute;left:12px;right:12px;top:12px;
+  display:flex;align-items:flex-start;gap:8px;padding:8px 8px 8px 12px;border-radius:8px;
+  border:1px solid color-mix(in srgb, var(--dsh-notice) 42%, transparent);
+  background:color-mix(in srgb, var(--dsh-notice) 14%, var(--dsh-card));
+  color:var(--dsh-notice);font:12px/18px var(--dsh-mono)}
+/* 一句话占满剩下的宽度；长错误（mono 的一整行路径）照折行，不把关闭顶出去。 */
+.dsh-canvas-strip-text{flex:1 1 auto;min-width:0;word-break:break-word}
+/* 一枚 × ：底透明、颜色继承这一档，所以三条口气下它自己就换了色（不必另写三份）。 */
+.dsh-canvas-strip-close{flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  box-sizing:border-box;width:18px;height:18px;padding:0;border:none;border-radius:5px;
+  background:transparent;color:inherit;font:500 14px/1 var(--dsh-font);cursor:pointer;opacity:.7}
+.dsh-canvas-strip-close:hover{background:color-mix(in srgb, var(--dsh-notice) 20%, transparent);opacity:1}
 
 /* ── folder picker ──────────────────────────────────────────────────────── */
 .dsh-canvas-scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:5}

@@ -74,6 +74,27 @@ export function childrenOf(graph: SceneGraph, id: string): SceneNode[] {
   return graph.getChildren(id)
 }
 
+/**
+ * 一个节点落在哪一页（沿父链上溯，直到某一级的 id 本身就是一个页面）。
+ *
+ * 导出用得着它：绘图那几条出路都要「一页一份」——一张图一个容器、一页 PDF 一个容器、
+ * 一页幻灯片一个容器——而容器可以挂在区域（SECTION）下面，所以它离页面还隔着几级。
+ * open-pencil 的 io 里有同样的一件事（`findPageId`），但它没从任何公开子路径露出来，
+ * 于是这里自己走一遍；判据（`tests/core/artifact/design.spec.ts`）把它钉在区域嵌套这条
+ * 边界上。
+ *
+ * 上溯到根还没碰到页面就是 `null`（游离节点，画不出来也导不出去）。
+ */
+export function pageOf(graph: SceneGraph, nodeId: string): string | null {
+  const pages = new Set(graph.getPages().map((page) => page.id))
+  let cursor: string | null = nodeId
+  while (cursor !== null) {
+    if (pages.has(cursor)) return cursor
+    cursor = graph.getNode(cursor)?.parentId ?? null
+  }
+  return null
+}
+
 // ── digest ─────────────────────────────────────────────────────────────────
 
 /**

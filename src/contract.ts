@@ -179,6 +179,36 @@ export const artifactViewSchema = z
     updatedAt: z.number(),
   })
   .readonly()
+/** One file of an application artifact's archive (F10.1). */
+export const bundleFileSchema = z
+  .object({
+    /** Path inside the artifact folder, `/`-joined. */
+    path: z.string().max(400),
+    /** Decoded content of a text file; `''` for anything else. */
+    text: z.string().max(4_000_000),
+    /** Base64 of a non-text file's bytes; `''` for text. */
+    base64: z.string().max(6_000_000),
+    bytes: z.number(),
+  })
+  .readonly()
+/** One application artifact's files, as the browser packs them (F10.1). */
+export const bundleViewSchema = z
+  .object({
+    cardId: cardIdSchema,
+    file: cardFileSchema,
+    /** The card's name — the folder the archive unpacks into. */
+    name: z.string().max(120),
+    kind: z.string(),
+    present: z.boolean(),
+    /** Whether the artifact is a folder rather than a single page. */
+    directory: z.boolean(),
+    files: z.array(bundleFileSchema).max(400),
+    /** Paths the budget left out. Never silent. */
+    skipped: z.array(z.string().max(400)),
+    bytes: z.number(),
+    truncated: z.boolean(),
+  })
+  .readonly()
 /** Resolved upstream/downstream neighborhood of one card (F4.7). */
 export const sourceChainSchema = z
   .object({
@@ -408,6 +438,7 @@ const R = {
   summary: resultOf('@ljcoder2015/dsh-canvas#CardSummary', cardSummarySchema),
   summaryList: resultOf('@ljcoder2015/dsh-canvas#CardSummaryList', z.array(cardSummarySchema)),
   artifact: resultOf('@ljcoder2015/dsh-canvas#ArtifactView', artifactViewSchema),
+  bundle: resultOf('@ljcoder2015/dsh-canvas#BundleView', bundleViewSchema),
   write: resultOf('@ljcoder2015/dsh-canvas#WriteResult', writeResultSchema),
   designDocument: resultOf('@ljcoder2015/dsh-canvas#DesignDocument', designDocumentSchema),
   designEdit: resultOf('@ljcoder2015/dsh-canvas#DesignEditResult', designEditResultSchema),
@@ -544,6 +575,10 @@ export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
   {
     id: '@ljcoder2015/dsh-canvas#card/read_artifact', service: 'card', namespace: 'card', method: 'readArtifact',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.artifact,
+  },
+  {
+    id: '@ljcoder2015/dsh-canvas#card/read_bundle', service: 'card', namespace: 'card', method: 'readBundle',
+    invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.bundle,
   },
   {
     id: '@ljcoder2015/dsh-canvas#card/read_sources', service: 'card', namespace: 'card', method: 'readSources',

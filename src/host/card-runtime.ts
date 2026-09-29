@@ -17,6 +17,7 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import type {
   ArtifactView,
   BoardCard,
+  BundleView,
   CardId,
   CardSummary,
   ExportFormat,
@@ -521,6 +522,28 @@ export class CardRuntime extends TypertRemoteService {
     // called (F1.12), so the two deck-side values are stamped on here.
     return {
       ...view,
+      cardId,
+      file,
+      name: cardNameOf({ file, kind: record.kind, name: record.name }),
+    }
+  }
+
+  /**
+   * 一张**应用类**卡片的整份产物，读成浏览器要打包的那个清单（F10.1）。
+   *
+   * 与 {@link readArtifact}（「这份产物显示成什么」）不同，这一条答的是「这份产物里有什么」：
+   * 一个应用要被**完整地**交出去，就得连它的每一个文件一起走。于是分工与它完全一样——
+   * IO 层只认识路径，卡片那两个字段（真 id 与显示名）在这里盖上去。
+   */
+  @Remote
+  async readBundle(projectId: ProjectId, cardId: CardId, signal?: AbortSignal): Promise<BundleView> {
+    signal?.throwIfAborted()
+    const project = this.requireProject(projectId)
+    const record = this.requireCard(projectId, cardId)
+    const file = fileOf(record, cardId)
+    const bundle = await this.deps.io.bundle(project.root, file, signal)
+    return {
+      ...bundle,
       cardId,
       file,
       name: cardNameOf({ file, kind: record.kind, name: record.name }),

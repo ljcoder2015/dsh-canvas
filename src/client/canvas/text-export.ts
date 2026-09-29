@@ -17,6 +17,7 @@
  * 代码块与行内代码用等宽字体加灰底。详见 `docxBytes`。
  */
 import type { CanvasKey } from '../ui/locales.ts'
+import { zipBytes } from '../../core/artifact/zip.ts'
 
 /** 文本节点的本地导出格式。 */
 export type TextExportFormat = 'md' | 'txt' | 'docx' | 'pdf'
@@ -39,7 +40,7 @@ export const TEXT_EXPORT_LABEL: Record<TextExportFormat, CanvasKey> = {
 }
 
 /** 每种格式落盘时的 MIME。 */
-const MIME: Record<TextExportFormat, string> = {
+export const TEXT_EXPORT_MIME: Record<TextExportFormat, string> = {
   md: 'text/markdown;charset=utf-8',
   txt: 'text/plain;charset=utf-8',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -254,9 +255,10 @@ export function markdownToPlainText(source: string): string {
 /**
  * 把文本编成 .docx 的字节（Word OOXML）。
  *
- * 手写一个最小但**带样式**的 DOCX：ZIP（stored 无压缩）+ CRC32，七个条目——内容类型、
- * 包关系、正文、正文的关系、样式、编号、文档属性。样式不是「字号加粗」那几笔，而是
- * Word 的内建体系：
+ * 手写一个最小但**带样式**的 DOCX：ZIP（stored 无压缩，打包器在
+ * `core/artifact/zip.ts`——同一份实现也是应用节点导出 zip 用的）+ CRC32，七个条目——
+ * 内容类型、包关系、正文、正文的关系、样式、编号、文档属性。样式不是「字号加粗」那几笔，
+ * 而是 Word 的内建体系：
  *
  * - 标题一到六级用 `w:name="heading N"` 加 `w:outlineLvl`，所以导航窗格、目录、快速样式
  *   库都认得出它们是标题，而不只是长得像标题的粗字；
@@ -312,7 +314,7 @@ export function docxBytes({ title, blocks }: { title: string; blocks: readonly T
     '<cp:lastModifiedBy>dsh-canvas</cp:lastModifiedBy>' +
     '</cp:coreProperties>'
 
-  return zipStored([
+  return zipBytes([
     { name: '[Content_Types].xml', data: utf8Bytes(contentTypesXml) },
     { name: '_rels/.rels', data: utf8Bytes(relsXml) },
     { name: 'word/document.xml', data: utf8Bytes(documentXml) },
@@ -566,126 +568,11 @@ export function utf8Bytes(text: string): Uint8Array {
   return new TextEncoder().encode(text)
 }
 
-/**
- * 手写 ZIP（stored，无压缩）。
- *
- * 只做 `.docx` 要的那点：本地文件头 + 原样数据、中央目录、EOCD。方法 0（不压缩）意味着
- * 字节原样落盘、CRC32 直接算内容——Word 读 stored 的包毫无问题，代价是这里省掉一个压缩
- * 器。条目按给定顺序排，所以同一份输入永远得到同一份字节（可测）。
- */
-function zipStored(entries: readonly { name: string; data: Uint8Array }[]): Uint8Array {
-  const local: Uint8Array[] = []
-  const directory: Uint8Array[] = []
-  let offset = 0
-
-  for (const entry of entries) {
-    const name = utf8Bytes(entry.name)
-    const crc = crc32(entry.data)
-    const size = entry.data.byteLength
-
-    // 本地文件头：0x04034b50。
-    const head = new Uint8Array(30 + name.length + size)
-    const h = new DataView(head.buffer)
-    h.setUint32(0, 0x04034b50, true)
-    h.setUint16(4, 20, true) // 解开它至少需要的版本
-    h.setUint16(6, 0x0800, true) // 通用标志位：文件名按 UTF-8
-    h.setUint16(8, 0, true) // 压缩方法：0 = stored
-    h.setUint32(10, 0, true) // 修改时间 / 日期留空
-    h.setUint32(14, crc, true)
-    h.setUint32(18, size, true) // 压缩后大小 = 原大小
-    h.setUint32(22, size, true)
-    h.setUint16(26, name.length, true)
-    h.setUint16(28, 0, true) // 附加字段长度
-    head.set(name, 30)
-    head.set(entry.data, 30 + name.length)
-    local.push(head)
-
-    // 中央目录条目：0x02014b50，末字段记本条目在归档里的起始偏移。
-    const item = new Uint8Array(46 + name.length)
-    const d = new DataView(item.buffer)
-    d.setUint32(0, 0x02014b50, true)
-    d.setUint16(4, 20, true) // 制作的版本
-    d.setUint16(6, 20, true) // 解开所需的版本
-    d.setUint16(8, 0x0800, true)
-    d.setUint16(10, 0, true)
-    d.setUint32(12, 0, true) // 时间 / 日期
-    d.setUint32(16, crc, true)
-    d.setUint32(20, size, true)
-    d.setUint32(24, size, true)
-    d.setUint16(28, name.length, true)
-    d.setUint16(30, 0, true) // 附加字段
-    d.setUint16(32, 0, true) // 注释
-    d.setUint16(34, 0, true) // 起始磁盘号
-    d.setUint16(36, 0, true) // 内部属性
-    d.setUint32(38, 0, true) // 外部属性
-    d.setUint32(42, offset, true)
-    item.set(name, 46)
-    directory.push(item)
-
-    offset += head.byteLength
-  }
-
-  const directorySize = directory.reduce((sum, item) => sum + item.byteLength, 0)
-  // 中央目录结束记录：0x06054b50。
-  const end = new Uint8Array(22)
-  const e = new DataView(end.buffer)
-  e.setUint32(0, 0x06054b50, true)
-  e.setUint16(4, 0, true)
-  e.setUint16(6, 0, true)
-  e.setUint16(8, entries.length, true)
-  e.setUint16(10, entries.length, true)
-  e.setUint32(12, directorySize, true)
-  e.setUint32(16, offset, true)
-  e.setUint16(20, 0, true)
-
-  return concat([...local, ...directory, end])
-}
-
-/** 把若干段字节首尾相接（分配一次，避免中途反复复制）。 */
-function concat(parts: readonly Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.byteLength, 0))
-  let at = 0
-  for (const part of parts) {
-    out.set(part, at)
-    at += part.byteLength
-  }
-  return out
-}
-
-/** CRC-32（IEEE 802.3，ZIP 的条目校验用的那一条）。查表法，表在模块加载时建一次。 */
-const crc32 = (() => {
-  const table = new Uint32Array(256)
-  for (let n = 0; n < 256; n += 1) {
-    let value = n
-    for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1
-    table[n] = value >>> 0
-  }
-  return (data: Uint8Array): number => {
-    let crc = 0xffffffff
-    for (let at = 0; at < data.byteLength; at += 1) crc = table[(crc ^ data[at]) & 0xff] ^ (crc >>> 8)
-    return (crc ^ 0xffffffff) >>> 0
-  }
-})()
-
 /** 导出文件名：把产物路径的扩展名换成目标格式的（路径只取最后一段）。 */
 export function exportFileName(file: string, format: TextExportFormat): string {
   const base = file.split('/').pop() ?? ''
   const dot = base.lastIndexOf('.')
   const stem = dot > 0 ? base.slice(0, dot) : base
   return `${stem === '' ? 'text' : stem}.${format}`
-}
-
-/** 触发一次下载：对象 URL + `a[download]`，用完即 revoke。 */
-export function downloadBytes(name: string, bytes: Uint8Array, format: TextExportFormat): void {
-  // TS 6 的 `Uint8Array` 是带 buffer 类型的泛型，而 `BlobPart` 只收 ArrayBuffer 背后的
-  // 视图。这里的字节是上面刚分配出来的普通 Uint8Array（不是共享缓冲区），所以这处收窄
-  // 是安全的——不这么做就只能先复制一份。
-  const part = bytes as Uint8Array<ArrayBuffer>
-  const url = URL.createObjectURL(new Blob([part], { type: MIME[format] }))
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = name
-  anchor.click()
-  URL.revokeObjectURL(url)
 }
 

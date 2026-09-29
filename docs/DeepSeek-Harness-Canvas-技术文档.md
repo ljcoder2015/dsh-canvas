@@ -1,7 +1,7 @@
 # DeepSeek Harness 通用创作画布插件 · 技术文档
 
-**版本**：v1.57
-**最近更新**：2026-09-24
+**版本**：v1.59
+**最近更新**：2026-09-29
 **状态**：技术架构已按 [`dsh-plugin-template`](https://github.com/bugmaker2/dsh-plugin-template) 与 DeepSeek Harness 子系统文档（`docs/cookbook/*`、`docs/subsystems/*`）校准，并在真机跑通
 **产品文档**：[`DeepSeek-Harness-Canvas-产品文档.md`](./DeepSeek-Harness-Canvas-产品文档.md)——功能点清单（F1.1–F10.4）、MVP 范围、设计决策记录、修订记录都在那边
 **定位**：这个双端插件的完整技术设计。底座的形态约束、源码分层、跨端契约、Host 与 Client 两侧的职责边界、数据落点、构建与安装，各占一章
@@ -32,7 +32,7 @@ dsh-canvas/
 ├── package.json              # 唯一 Harness 清单：dsh.bundle.patch + dsh.client
 ├── cordis.patch.yml          # 把 Host 插件行挂进 profile（可覆盖 Config 默认值）
 ├── dsh.plugin.json           # dsh.so 注册表清单：id / engines / contributes
-├── build.mjs                 # esbuild 双端打包 + 声明文件
+├── build.mjs                 # esbuild 双端打包 + 引擎 chunk + fig worker + 资产拷贝（§10）
 ├── eslint.config.js
 ├── tsconfig.json             # typecheck：src
 ├── tsconfig.build.json       # 只产声明 → lib/types
@@ -84,8 +84,18 @@ dsh-canvas/
 │       │   ├── reference-options.ts  # @ 引用候选：路径 / 卡片名 / 座位 id 三件事各是各的（纯）
 │       │   ├── card-tile.tsx         # 卡片（含流光层）
 │       │   ├── card-face.tsx         # 卡面描述（画布 tab 与形态 tab 共用）
+│       │   ├── card-shot.ts          # 卡面那两张「截图」素材（设计/应用活在渲染之后）
 │       │   ├── card-overlay.tsx      # 选中态控制带（右下角把手：拖动改尺寸）
 │       │   ├── composer-size.ts      # 把手的算术（纯）：上下限与 zoom 换算
+│       │   ├── export-plan.ts        # 这张卡点〔导出〕给什么：一击 / 菜单 / 什么都没有（纯，v1.59）
+│       │   ├── text-export.ts        # 文本节点本地排版 md / txt / docx（v1.57）
+│       │   ├── text-pdf.ts           # 文本排成 PDF 字节（矢量、文字可搜，v1.57）
+│       │   ├── bundle-export.ts      # 应用节点：整份产物装成一个 zip（v1.58）
+│       │   ├── design-export.ts      # 设计节点：四样产物的命名 / 装包 / 收场（纯，v1.59）
+│       │   ├── pdf-merge.ts          # 一容器一页的 PDF 并成一份多页（v1.59）
+│       │   ├── download.ts           # 那一次「保存到本机」（对象 URL + a[download]）
+│       │   ├── notice.ts             # 画布左上角那条提示：说什么 + 哪一档（纯）
+│       │   ├── wheel-owner.ts        # 滚轮归谁：画布 / 自己会滚的盒子 / ⌘ 缩放（纯）
 │       │   ├── canvas-nav.tsx        # 左栏画布包裹（Portal）
 │       │   ├── canvas-menu.tsx       # 画布行的操作菜单与删除确认
 │       │   ├── row-actions.ts        # 那一行该给出哪几个动作（纯策略）
@@ -109,7 +119,16 @@ dsh-canvas/
 │       │   │   ├── deck-viewer.tsx       # 沙箱 iframe + 链接闸门 + 元素选择（自己那套）
 │       │   │   ├── delimited.ts          # 切行状态机（纯）
 │       │   │   ├── data-viewer.tsx
-│       │   │   └── text-viewer.tsx       # 兜底
+│       │   │   ├── text-viewer.tsx       # 兜底
+│       │   │   ├── design-canvaskit.ts   # CanvasKit 加载（可选资产，失败即降级，绝不抛）
+│       │   │   ├── design-skia.ts        # Skia 后端；**导出用的那台渲染器也出自这一份**（v1.59）
+│       │   │   ├── design-render.ts      # 渲染器选择与取景（纯）
+│       │   │   ├── design-viewer.tsx     # 设计卡预览：画布 + 编辑闭环 + 面板
+│       │   │   ├── design-panels.tsx     # 图层 / 属性 / 历史三块面板（React 自持）
+│       │   │   ├── design-engine-types.ts    # 引擎 chunk 两端共享的形状（只有类型）
+│       │   │   ├── design-engine-module.ts   # chunk 加载器（**只此一份**，失败即 null）
+│       │   │   ├── design-engine.ts          # chunk 入口：渲染与导出两个出口
+│       │   │   └── design-io.ts              # 四样出路：fig / png / pdf / pptx（v1.59）
 │       │   ├── editing/              # markdown / 纯文本的编辑面
 │       │   │   ├── use-text-editing.ts       # 状态机（hook）：草稿 / 自动保存 / 写被拒
 │       │   │   ├── editable-text.tsx         # 头部控件 + 条带 + 编辑框（两个文本预览器共用）
@@ -127,7 +146,7 @@ dsh-canvas/
 │           ├── styles.ts
 │           ├── seats.ts              # 借用别包的席位（运行时只要一个字符串键）
 │           └── shortcuts.ts          # 键位真源 + 说明表
-└── tests/                    # 21 个 spec，镜像 src 分层
+└── tests/                    # 48 个 spec，镜像 src 分层
     ├── contract.spec.ts          # 协议基座（镜像 src/ 根）
     ├── core/                     # core.spec.ts 跨三域，另有 canvas/ artifact/ session/
     ├── host/                     # prompt · tools
@@ -624,6 +643,16 @@ ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
 
 **两处按钮各管各的壳**，所以各站各的地盘：行内带子右上角那颗是〔放大〕（⤢，`canvas.composer.enlarge`，`corner` prop 可选——**只有行内传**），弹窗**头部右上角**那颗是〔缩小〕（⤡，`canvas.composer.shrink`）。底层的〔缩小〕因此站到 `.dsh-canvas-dialog-head` 里去（`.dsh-canvas-promptmodal-shrink`：`margin-left:auto` 推右沿、`flex:none` 防被长标题挤扁、上下 `-4px` 把 26px 的胶囊塞进头部那一行，头部高度因此不变），而不是混进那三行——**材料行与行内逐项相同，一颗多余的按钮都没有**，探针里「放大态那三行里不再有那颗 ⤢」和「缩小那颗整颗落在头部里、在内容区之上」两条判据盯着这件事。弹窗底部那枚重复的「收起」也已删掉：退出去走头部那颗、Esc 或点遮罩。前一个版本里放大态另有一套 13px/21px 的字号（`.is-modal`），那正是「放大之后不像同一个东西」的根源，已撤。
 
+### 画布左上角那一条：**颜色说口气，字说事情**（F10.1，v1.58）
+
+`.dsh-canvas-notice`（动作回执）与 `.dsh-canvas-error`（错误条）同占一个位置、共用一副骨架，过去也共用**同一种长相**：`--dsh-card` 底 + 发丝描边，只有字色差一点。于是同一个位置上，「导出成了」「这次没导成」「打包出错」看不出区别——用户得把一行字读完才知道刚才发生了什么（v1.58 收到的一条明确反馈：不明显，而且赖着不走）。
+
+现在一条提示带上 `tone`，**口气与文案一起定**、一起放在 `client/canvas/notice.ts`（纯模块，`t` 注入，所以能在 node 里穷举）：`NoticeTone = info | ok | warn | error`，每个收场该是哪一档由 `bundleNotice` / `bundleFailedNotice` / `textExportNotice` / `pruneNotice` / `referenceNotice` 各自答，jsx 只负责把 tone 画出来（`data-tone`）。两条界线值得写下来：**被拒不是出错**（产物还没写、目录里没有可打包的东西、文件多到一包装不下——都是「这次没导成，以及为什么」⇒ `warn`），**只有客户端自己动手那一步抛了异常才是 `error`**（装包、PDF 排版）；而「这张卡还没有引用任何材料」是中性事实 ⇒ `info`，给它涂成功色等于替用户下结论。
+
+颜色**不新开主题令牌**：每一档只声明一枚**家族色**（`--dsh-notice`，条内局部变量，不是调色板成员），底、描边、字由那条共用骨架规则用 `color-mix` 在画布调色板上算出来——两套主题各算各的，于是也没有「亮色值忘了加」那类静默事故。家族色一律取**文字色**那一档（`--dsh-sunset`，不是实心底的 `--dsh-sunset-solid`）：亮色下底取淡调、字取原色，两边都读得出；拿实心底那档当字色，亮色下就是黄字压黄底。判据读源码文本（`tests/client/ui/notice-tone.spec.ts`）：四档家族色互不相同、每一枚都在调色板里真存在（拼错的令牌名不会报错，只会永远走兜底），以及两条提示条**各带一枚 ×**。口气映射本身在 `tests/client/canvas/notice.spec.ts` 里逐条穷举（「三种拒绝都不是 error」也在那儿）。
+
+两条都能自己关掉——与元素选择那条回话同一分寸：**一句已经说完的话不该赖在画布上**，等下一次动作来替它收场。错误条与卡片面里那条错误共用 `.dsh-canvas-error`，所以卡片面里的错误也一并换了色（那里没有 ×，它属于卡片自己）。
+
 ### 提示词输入面：contenteditable 与原子引用标签（F3.18，v1.48）
 
 正文（`client/ui/prompt-input.tsx`）是 `contenteditable`，`@文件` 记号画成 `contenteditable="false"` 的原子标签。三件东西分三层放：**纯解析**在 `core/artifact/prompt-blocks.ts`（零依赖、node 单测直接覆盖——类型表、坐标语法、原子切分都在这儿）；**DOM 层**在 `client/ui/prompt-dom.ts`（只碰 DOM、不碰 React、不做任何决定）；**决定**在组件里（删哪一段、插什么字，都按值算出新值再连同光标一起写回）。DOM 层只在有 DOM 的地方成立，node 单测够不到，判据在 `.workbuddy/repro/prompt-refs/`（真组件 + 真样式 + 真浏览器：21 项 + 两条反证，`gen.cjs` 生成、`check.cjs` 判，退出码非 0 即红）。
@@ -727,6 +756,77 @@ IO 层（`core/artifact/artifact-io.ts`）的入参是**项目根 + 项目内的
 
 落刀的现场与受影响的方法见上表「卡片身份」那一行。**判据读源码**（`tests/host/card-paths.spec.ts`：凡是喂给 `io.*` 的实参里出现裸 `cardId` 的，必须同时出现 `fileOf(`），而不是跑一遍：这一层要跑起来得有整套宿主装配，而漏改的表现恰恰是「装配好了也照跑不误」。
 
+### 读一整个**目录**：`read_bundle` 与它的预算（F10.1，v1.58）
+
+应用节点的产物是一个文件夹，而「导出」的意思是**把这份东西完整地交出去**——不是把它渲染成别的格式，是连它的每一个文件一起走。于是需要一条别的读通道：`card/read_bundle`（`ArtifactIo.bundle`），把产物**整个目录**递归读成一个可打包的清单。
+
+分工与文本导出完全一样，理由也一样：**能读的那一侧读，能下载的那一侧打包**。目录只有 Host 走得动（`ctx.fs`），而 zip 在客户端生成（`client/canvas/bundle-export.ts`），因为下载发生在那儿。这条分工带来一个结果：**它不依赖部署的导出能力**——没有 `dsh-canvas.capabilities` 的部署上，应用卡片的导出照常工作。
+
+#### 「产物是哪一项」要路径与磁盘一起看（`bundleTarget`，v1.58）
+
+这一条曾静默地发过半份包，所以单独记一笔。**卡片记的是入口页，不是那个文件夹**：scaffold 的约定是目录应用的入口页固定叫 `index.html`，于是 app 卡的 `file` 是 `应用/index.html`——磁盘上问「这是文件还是目录」，答案永远是「文件」。照着这个答案打包，包里就只有那个 `index.html`：同目录的 `styles.css` 与 `app.js` 一个都不在。用户拿到一个解得开、打得开、**但一打开没有样式也没有交互**的包，而导出按钮说「已导出」。
+
+所以「产物是一个目录」有**两条各自充分**的证据，取或（`core/artifact/bundle.ts` 的 `bundleTarget(file, directory)`）：
+
+| 证据 | 谁给的 | 覆盖的座法 |
+|------|--------|------------|
+| 磁盘上它就是目录 | Host `probe` | `folder` 形态的产物（`file` 直接是目录，没有入口页这回事） |
+| 路径是一条入口页 | `isEntryPage(file)` | 目录应用的入口页座法（`应用/index.html`） |
+| —— 例外：入口页落在**画布根**上 | `dirnameOf(file) === ''` | 退回文件形态——那一层是全部卡片的公共场地，不是这一份产物的配套资源 |
+
+入口页这条判据**不是新知识，是复用的**：改名（`planRename`：入口页改目录、其余改文件）、预览（`inlinePageAssets` 按入口页所在目录解析 `styles.css`）、扫描项目（`scanProject` 认目录里的入口页）用的是同一条。四份各写一遍就是四份会各自漂移的知识，而它们漂移起来是**静默**的——改名的判据错了是改错文件，打包的判据错了是**少装几个文件**。根上入口页的例外也不是新规矩：`planRename` 把它判成 `root-entry` 拒改，`cardNameOf` 说它「没有文件夹可以借名字」，同源。
+
+> **踩过的地方（这一条是怎么漏过 43 条判据的）**：判据的**调用形态与真机不一致**。`bundle` 原有 7 条判据全部用目录路径调用（`bundle('应用1')`），而宿主传进来的永远是卡片的 `file`（`应用/index.html`）——一个从没被调用过的形态，自然从没被验过。补上的判据要点只有一个：**按真机传什么就调什么**。
+
+这一条也是全插件唯一**形状无界**的读（读的是一棵树，不是一个文件），所以界设在别处，一道都不省：
+
+| 界 | 判据 | 理由 |
+|----|------|------|
+| 哪些条目不进包 | `bundleSkipped(name)`（`node_modules` / `.git` / `.dsh-canvas` / `.DS_Store` …） | 依赖缓存与工具内部结构不是这份应用；`dist`、`build` **不在此列**——那是用户可能确实要交付的东西，该不该带由他决定 |
+| 单个文件 | `BUNDLE_ENTRY_BYTES_LIMIT`（4 MB，`readBytes` 的硬上限） | 一个巨大的文件在这里就被 seam 拒掉，不会先读进内存再发现装不下 |
+| 总量与条数 | `BUNDLE_BYTES_LIMIT`（8 MB）/ `BUNDLE_FILE_LIMIT`（300） | 「一次导出能可靠搬运」与「一个应用有多大」之间的那根线 |
+| 递归深度 | `BUNDLE_DEPTH_LIMIT`（12） | 不是防环（一个条目只有一个父目录），是防**病态的深**：层的名字要拼进 zip 的条目路径，而条目名有长度上限 |
+
+装不下的东西**绝不悄悄丢掉**：它记在 `skipped` 里、`truncated` 立起来，客户端据此**拒绝导出**并说一句话——与文本导出读到半份就不导是同一条规矩。条目按名字排序、路径一律用 `/` 连，于是同一份目录永远读到同一份清单（可断言，而不是只能看）。
+
+文本与二进制的分野也在这一条通道里定：**一个文件先按字节读回来（seam 自带硬上限），再试着按 UTF-8 解码**——解得开就是文本（HTML / CSS / JS，应用目录里绝大多数），解不开就是二进制，原样 base64。分两条路读（`readText` 兜底 `readBytes`）会多读一次，而且 `readText` 没有上限。
+
+打包那一侧只有**一份 ZIP 写入器**（`core/artifact/zip.ts`）：`.docx`（一个 OOXML 包，本来就是 ZIP）与应用节点的 `.zip` 共用它——两份实现迟早会在同一个包上给出不同答案。压缩走方法 8，压缩器由调用方注入（客户端是平台的 `CompressionStream('deflate-raw')`，没有它就按 stored 落包）；`.docx` 走存储（方法 0），保持同步与逐字节确定。
+
+> **踩过的地方（判据是从这里长出来的）**：条目的 **CRC 属于未压缩内容，不属于 payload**。写入器最初对 payload 算校验和——`stored` 那条路 payload 恰好就是原文，所以一直是对的；压缩一旦启用，包会**带着坏校验**发出去：解压器能列出文件名、能解开 stored 的条目，只在压缩的那些上报 `bad CRC`。抓出它的是把包交给**别人的解压器**那两条判据（`/usr/bin/ditto -x -k` 解出中文目录名、`/usr/bin/unzip -t` 逐条校验），不是回读自己的写器——两个自己的实现会一起错。
+
+### 设计稿的四条出路：fig / 图片 / PDF / PPT 全在浏览器里画（F10.1，v1.59）
+
+设计节点的产物是一份场景图快照，而它要交出去的四样东西**一件都不在部署上**：`.fig` 要 Figma 自己的 kiwi schema，图片与 PPT 要一个真渲染器，PDF 要 DOM（上游那条实现靠 `DOMParser` + `svg2pdf`）。这些全在用户这台浏览器里——而设计稿本来就是浏览器里的场景图。于是这一档继续走「能本地做的在本地做」，与前两档（文本排版 v1.57、应用打包 v1.58）是同一条分工，只是这次落点更远：**四样都自己画**。
+
+| 产物 | 粒度 | 依赖 |
+|------|------|------|
+| `.fig` | **整份文档一个文件** | `@open-pencil/fig`（kiwi 编解码 + fflate） |
+| 图片（`.png`） | 一容器一张，**2 倍像素**；多张打成一层同名文件夹的 zip | CanvasKit 的渲染器 |
+| PDF | 一容器一页，客户端并成**一份多页**（页面尺寸逐页跟着容器） | `jspdf` + `svg2pdf.js` + `DOMParser` |
+| PPT（`.pptx`） | **一页器一份**幻灯片序列；多页就是多个包 | CanvasKit（降级栅格化） |
+
+**分工的界线落在两个模块之间**：`client/canvas/design-export.ts` 管「产物该叫什么、怎么装、怎么说」（纯逻辑，node 里跑得动，判据穷举），画的那一步在引擎 chunk 里（`client/artifact/viewers/design-io.ts` 的 `designExport`，只吐「一件件字节」）。这样切是因为两件事的可测性正好相反：命名与装包要判据，画图非浏览器不可。
+
+#### 为什么绕不开自己的渲染器
+
+上游有一条「headless」的路（`headlessRenderNodes`），它在 node/bun 里靠 `import.meta.resolve('canvaskit-wasm/full')` 找 wasm——**浏览器里 `import.meta.resolve` 根本不存在**。所以图片与 PPT 的降级栅格化必须拿到我们自己的渲染器，经 `context: { canvasKit, renderer }` 递进去（`design-skia.ts` 的 `createExportRenderer`）。它比预览那台多一步：**先等 CJK 字体就位**再声明回落族——中文在没有回落族时渲染成空白，而导出是「一次成品的交付」，不能等到画完才发现字没了。
+
+同理，四条路一律走上游的门面 `IORegistry` + `BUILTIN_IO_FORMATS`，不逐个 import 各家 `exportXxx`：`fig` / `svg` / `raster` 三条子路径在包的 exports map 里，而 **`pdf` 与 `pptx` 不在**（只有格式表里那两个 adapter 认得它们）。门面是唯一处处露着的那一面，也是这个包自己给外部用的那一面。
+
+#### fig 的压缩 worker：一个必须按依赖点名的名字
+
+`.fig` 是一份 zip，打包那一步在上游的实现里会**开一个 module worker**去压缩，URL 写的是它自己旁边那个文件：`new URL('./export-worker.ts', import.meta.url)`。这句进不了打包器的相对解析簿记——`import.meta.url` 到运行时才落地，取到的就是我们那份 chunk 的地址（`/dsh-canvas/assets/design-engine.js`），于是它去要 `/dsh-canvas/assets/export-worker.ts`。那个文件不在的话 worker 拉不起来，`onerror` 一响**整趟 fig 导出失败**——而 Figma 文件正是用户点名要的四样之一。
+
+所以 `build.mjs` 就按它点名的名字产出：**内容是一份普通 ESM 打包结果（含 `@open-pencil/fig`），名字却是 `.ts`**（上游 dist 里只有 `export-worker.js`，逐字拼的却是 `.ts`；改写依赖里的字符串是个会悄悄失效的补丁，不做）。名字骗人的代价由资产路由承担——`host/assets.ts` 的 `CONTENT_TYPES` 里多一格 `.ts → text/javascript`，module worker 对 MIME 有硬要求。（同一份 chunk 里还有第二处 `new URL('./worker.ts', …)`，那是上游 **读** `.fig` 用的会话 worker；我们从不读 `.fig`，而且它自带「worker 起不来就退回主线程」的兜底，不需要跟着产出。）
+
+> **踩过的地方（一条真浏览器判据抓出来的）**：**`writeDocument` 那条路必须点名缩略图用哪一页**。`renderFigThumbnail` 拿不到页 id 时**直接交那张 1×1 的占位图**，而 `writeDocument`（整份文档，没有选区可提取）不会替你猜——上游的兜底只认一个叫 `cover` 的页（Figma 的封面页约定），我们的文档没有这个约定。症状是「导出成功」而 Figma 里的缩略图一片空白，**两处都不报错**。现在显式传第一页（`thumbnailPageId`），探针把它钉住：缩略图 512×213，正是第一页上两个容器的并集比例。
+
+#### 判据分两层，验证交给别人的工具
+
+- **浏览器里**（`.workbuddy/repro/design-export/`）：起一个最小的静态服务复刻资产路由，真 Chrome 打开一页，动态 import 真的 chunk、真跑四次 `designExport`，把四份产物的**字节**带出来。信封不是手抄的——`gen-doc.mjs` 用产品自己那条编码路（`encodeDesignFile`）生成，手抄一份快照结构就等于在探针里养第二个「信封长什么样」。
+- **node 里**：`unzip -t` 逐条校 CRC、自己解 PNG 的 IHDR 验 2 倍、pdf-lib 数页数与页尺寸、解 `.pptx` 看有没有 `ppt/slides/slide1.xml`、看 `canvas.fig` 的 `fig-kiwi` 签名。**回读自己的写器两个实现会一起错**（v1.58 的 CRC 就是这么抓出来的），所以这一层一律交给别人的解压器与别人的 PDF 库。
+
 ### 「手动输入」落到空座位：先落一份空文件（F3.13，v1.57）
 
 座位可以先于它的产物存在（F1.11 的 `seatedEmpty`），而这枚按钮的含义是「我要写字」。所以 `ArtifactModal` 在**以编辑面打开**、产物不在、且形态是「产物就是它自己的文字」时，**先落一份空文件再回读**，把读回来的那一份灌进 payload——编辑面因此被画出来，而不是先给一句「产物不存在」。
@@ -739,7 +839,7 @@ IO 层（`core/artifact/artifact-io.ts`）的入参是**项目根 + 项目内的
 
 ## 十、构建、质量与安装
 
-`build.mjs` 用 esbuild 出两个 bundle：
+`build.mjs` 用 esbuild 出**四个产物**（两个 bundle + 一份引擎 chunk + 一份 worker），另有资产拷贝（CanvasKit 的 wasm 脚本、OpenPencil 的 Inter 与随仓库走的 Noto Sans SC）：
 
 ```javascript
 // 整个 @deepseek-ai/* 都由宿主提供，不只是 dsh-*：cordis 与 schemastery 也一样。
@@ -758,6 +858,12 @@ await build({ entryPoints: ['src/client/index.tsx'], outfile: 'lib/client.js', b
   banner: { js: "window.__ModuleLoader__.load({ id: '@ljcoder2015/dsh-canvas', factory: (require) => { var module = { exports: {} }; var exports = module.exports;" },
   footer: { js: 'return module.exports; } });' } })
 ```
+
+前两个是 Host 半（`lib/index.js`）与 Client 半（`lib/client.js`）。
+
+**第三步：设计引擎 chunk**（`lib/assets/design-engine.js`）。场景图 + OpenPencil 渲染器 + yoga 布局整体打成一份独立 ESM，经资产路由出：yoga 的入口带顶层 await，而 `client.js` 是 CJS，装不下；更要紧的是**场景图的类身份必须全页唯一**，graph 在这份 chunk 里创建、也只能由这里的渲染器画。它按 URL 动态 import（`import()` 语法在 CJS 输出里必须原样保留，否则会被改写成 `require`）。node 专有的动态 import（本地字体访问等）标 external——浏览器里永远执行不到。
+
+**第四步：fig 的压缩 worker**（`lib/assets/export-worker.ts`，v1.59）。逐字是 `.ts` 不是写错：上游的 fig 写器在浏览器里用 `new URL('./export-worker.ts', import.meta.url)` 找自己的 worker，打进我们那份 chunk 之后这个名字就定死在 `/dsh-canvas/assets/export-worker.ts` 上了（详见 §九「设计稿的四条出路」）。内容是一份普通 ESM 打包结果，`.ts` 由资产路由认成 JavaScript。
 
 声明文件由 `tsc -p tsconfig.build.json` 单独产出到 `lib/types`（`emitDeclarationOnly`）。
 
@@ -801,6 +907,7 @@ Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在�
 | 文件访问 | 直接 `fs.read` | `ctx.fs.*`（统一 seam，带版本守卫、沙箱策略、写前 waterfall）；**v1.53 起有唯一一处例外——「改名」**：seam 只有 `writeText` / `editText`，没有 rename 动词，于是改名走 `ArtifactIo.renameEntry` 直调 `node:fs/promises.rename`，同时把 seam 原本提供的保证**在本地复刻**成三道闸：源与目标都过 `fs.contains(boundary)`；目标沙箱策略是 `read-only` 直接拒（`FS_SANDBOX_DENIED`）；`processPathOf` 证明两端的宿主路径来回映射回**同一个** `targetKey` 才动手（证明不了就 `FS_NOT_OBSERVED`） | 编辑回流与冲突处理有现成挂点；越过 seam 的只有改名一处，且守卫不减——缺的是动词，不是沙箱/远程场景用不上 |
 | 设计稿的容器尺寸 | 预设只给「一屏」的规格（手机屏 375×812、**官网首屏** 1440×900、海报……），模型于是按屏产稿 | **v1.55 起：宽度取菜单、高度随内容**（`DESIGN_PRESET`，`src/host/prompt.ts`）——菜单给**宽度**（手机 375 / 平板 834 / 桌面 1440）与「固定规格、整块给出」的那几项（海报 1242×1660、社交方图 1080×1080、幻灯片 1920×1080、横幅 1920×600），并明说网页与应用是**一个容器一整页**：多屏才看得完的内容在同一个容器里连续排下去，**禁止**拆成「首屏 / 第二屏 / 第三屏」，要多容器只在用户点名多屏并排（多屏对比 / 流程走查）或交付物本身是序列（幻灯片的每一页、海报系列）时 | **分屏是产出侧的规矩，不是渲染器的行为**：画布与预览本来就把全部容器摆在同一条可平移的画布上（`design-render.ts` 的 `fitTransform` 按 `documentBounds` 取景、可平移可缩放），所以这条只在预设里校准，客户端一行不用改 |
 | 目录结构 | `ui/` + `tools/` 平铺 | `src/` 根＝入口 + 协议基座；`src/host/`（装配与 Remote 服务）、`src/core/{canvas,artifact,session}/`（纯逻辑）、`src/client/{wire,canvas,artifact,ui}/`（浏览器半），其中 `client/artifact/` 再分 `registry.ts` + `chrome.tsx`（插槽与两条登记通道）+ `viewers/` + `editing/` + `element-pick/`（v1.40 分层，v1.41 细化产物面，v1.42 把能力从注册表挪进各预览器）；`tests/` 镜像之 | 依赖层落成目录，非法依赖（`core/` → `host/`）看得见；两个构建入口路径不动，打包与清单不受影响。产物面按「一行一个预览器，能力长在预览器自己身上」再分，加一种形态不必回头改弹窗 |
+| 导出落在哪一侧 | 「多格式导出」统一交部署能力（`dsh-canvas.capabilities.export`）产出 | **能本地做的在本地做**，到 v1.59 一共三档：文本节点的 md / txt / docx / pdf 由客户端排版并下载（v1.57），应用节点的 zip 由客户端打包（v1.58：`card/read_bundle` 读出整份产物 → `core/artifact/zip.ts` 装包 → 下载），设计节点的 fig / png / pdf / pptx 由客户端**画出来**（v1.59：引擎 chunk 里的导出管线，见 §九「设计稿的四条出路」）；`exportFormats` 里剩下的 html / png 那类才留给部署渲染（要一个真的光栅化后端）。判据一句话：**没有 `dsh-canvas.capabilities` 的部署上，这三条路照常工作**。**「这张卡给菜单还是一击、走哪条通道」收成一个纯函数**（`client/canvas/export-plan.ts`，v1.59）——此前一半判在那枚胶囊里、一半判在画布那侧，加进第三条通道时就会打架 | 一条「导出」因此有了四处实现，但分工的界线是「谁做得了谁做」——排版、打包、渲染都是客户端做得了的事，与发布会话不是一类。三档共同的规矩不变：**画不出来 / 装不下就如实说不导**，不给半份。顺带修掉两个**静默失败**：`exportCard` 返回的 `ok:false` 是一份**答案**、不是异常，画布那条 `run()` 只接异常，于是应用卡片点导出原本什么都不发生（v1.58）；那枚按钮的可见性原本是「kind 不是 folder」⇒ **视频卡片上有一枚点了什么都不发生的按钮**（v1.59 改为按「能不能导」判） |
 
 ## 十二、开放项（含已关闭项）
 
@@ -809,7 +916,7 @@ Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在�
 1. ~~**工具名是否允许 `.`**~~ **已关闭（2026-09-17）**：实测把 `canvas.read_card` 这类名字发给模型供应商，请求被 400 拒绝——`Invalid 'tools[0].name': string does not match pattern. Expected a string that matches the pattern '^[a-zA-Z0-9_-]+$'`。宿主不对工具名做校验或改写，原样透传，所以字符集必须由插件自己守住。已全面改用 `canvas_read_card` 形式（§3.6 工具清单、`contract.ts` 的 `TOOL_NAMES`、`dsh.plugin.json` 的 `contributes.tools`、客户端 `tool.call.toolview` 的 keys 同步），并在 `tests/contract.spec.ts` 里用 `TOOL_NAME_PATTERN` 钉死。
 2. **多卡片会话的并发与归属**：每张卡片一个 agent 是否可行（数量上限、并发轮次、资源占用），以及画布面板切换会话时的 fiber 生命周期。
 3. **形态认定与 tab 认领的一致性**：Host 侧 `kind-registry` 的判定结果与 Client 侧 `patterns` / `canOpen` 必须给出一致答案，否则会出现「卡片显示为 A 形态、点开却是内置查看器」。
-4. **PPTX 一秒级导出**（F10.2）的落地者：这取决于宿主是否已有 PPTX 生成能力，插件不应自带重型渲染引擎。
+4. **PPTX 一秒级导出**（F10.2）的落地者：这取决于宿主是否已有 PPTX 生成能力，插件不应自带重型渲染引擎。——**v1.58 后范围收窄**：同一族的另外两条已定案在客户端（文本的 md / txt / docx / pdf、应用节点的 zip，见 §九「读一整个目录」），它们要的只是排版与打包，浏览器里就有。**v1.59 再收窄一格**：设计节点的 PPTX 与 PDF 也已落在客户端（`@open-pencil/core/io` 的导出器，浏览器里现画，见 §九「设计稿的四条出路」），所以「PPTX 要一个真的排版引擎」这句对**设计稿**不成立——它要的是一个渲染器，而那个渲染器本来就随设计预览装在包里。真正还留在部署那一侧的只剩「把 HTML 页面 / 数据图表渲染成图片或 PDF」那一类（要一个无头浏览器级的后端），以及 F10.2 那个**一秒级**指标本身（现在设计稿的 PPT 是一页器一份、按容器现画，毫秒到几十毫秒，但没有按「大文档」量过），这一条照旧未关闭。
 5. **发布**（F10.3）与子域名/回收的归属：需确认走宿主既有发布能力还是插件自建，避免与 Harness 的生命周期冲突。
 6. **引用注入的上下文预算**（§3.5 F5.2）：摘要在域记录里缓存，还是每次注入现算；缓存则需定义失效时机。——**v1.37 基本关闭**：**默认通道不再有预算问题**——文件引用一个字的材料都不进上下文，模型按需 `read`，读哪一段也由它决定。产物摘要这一路仍是**每次现算、域记录里不缓存**，因为上游文件随时可被改写，缓存就得再定义失效时机，而现算的代价只是一次文件读；`summaryBudget` 只作用在这一路。这段历史里 v1.35 曾把预算交给宿主的 session-reference 服务现算，v1.37 撤销该通道后此路不复存在——问题的形状从「预算归谁算」变成了「根本不必预置材料」。
 7. **为了"页面别动"，探针与页面本身抢方向盘**（v1.44）：`hold` 态把滚动位置钉住（`scroll` 里拨回进入这一态时的位置），于是**页面自己用 JS 滚动会被按回去**（`scrollIntoView`、轮播、锚点跳转都算）——这是有意的（用户正指着某一处写要求，画面就不该自己走），代价是这类页面在框开着时看起来「卡住」。同一支上还有 `aim` 态那条：**页面自己的内层滚动容器滚不动**（只读层整块盖住视口，滚轮只落到文档本身；选不到的元素得先退出模式滚过去）。两条都写进了 §8 的取舍，目前没有更好的做法——真要让内层容器也滚，就得放弃"整块盖住"的只读方案，而那会漏掉悬停那一族。

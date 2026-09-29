@@ -269,6 +269,61 @@ export interface WriteResult {
   before: string | null
 }
 
+/**
+ * One file of an application artifact, as the browser packs it into an archive
+ * (F10.1).
+ *
+ * `text` and `base64` are mutually exclusive, and the split is a cost decision
+ * rather than a type: a folder of HTML, CSS and JS is what an app artifact
+ * almost always is, and carrying its text as *text* keeps the wire (and the
+ * archive) from paying a 33% base64 tax on the common case. Anything the seam
+ * will not decode — an image, a font, whatever the app ships — travels as its
+ * own bytes.
+ */
+export interface BundleFile {
+  /** Path inside the artifact folder, `/`-joined, never absolute. */
+  path: string
+  /** Decoded content of a text file; `''` for every other file. */
+  text: string
+  /** Base64 of the raw bytes for a non-text file; `''` for text. */
+  base64: string
+  bytes: number
+}
+
+/**
+ * Everything the browser needs to pack one application artifact into a `.zip`
+ * (F10.1).
+ *
+ * The reading half lives on the host (`ArtifactIo.readBundle`), because only
+ * the host can walk the folder, and the packing half lives in the browser,
+ * because that is where a download happens — the same division of labour the
+ * text export already uses.
+ *
+ * `skipped` and `truncated` exist because an incomplete archive must be
+ * refusable *knowably*: the client reads `truncated` and declines to export
+ * rather than handing over a zip that silently lost a file.
+ */
+export interface BundleView {
+  cardId: CardId
+  /** Artifact path relative to the project root. */
+  file: string
+  /** What the card is called (F1.12) — the folder the archive unpacks into. */
+  name: string
+  kind: string
+  /** Whether the artifact exists on disk. */
+  present: boolean
+  /** Whether the artifact is a folder rather than a single page. */
+  directory: boolean
+  /** Every file that travels, in archive order. */
+  files: BundleFile[]
+  /** Paths left out because they did not fit the budget. Never silent. */
+  skipped: string[]
+  /** Uncompressed size of everything in `files`. */
+  bytes: number
+  /** True when something did not fit, so the archive would be incomplete. */
+  truncated: boolean
+}
+
 /** One queued region-of-interest intent, fed to the card's next turn (F8.2/F8.4). */
 export interface PendingIntent {
   id: string

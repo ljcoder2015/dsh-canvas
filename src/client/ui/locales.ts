@@ -75,6 +75,7 @@ export const zh = {
   'canvas.action.reconcile': '引用对账',
   'canvas.action.refresh': '刷新',
   'canvas.action.collapse': '收起',
+  'canvas.action.dismiss': '关闭',
   'canvas.action.locate': '在画布中定位',
   'canvas.action.joinBoard': '加入画布',
   'canvas.action.remove': '从画布移除',
@@ -169,6 +170,25 @@ export const zh = {
   'canvas.export.truncated': '产物过大，这次只读到了前一部分；照这样导出会静默丢掉后面，所以先不导。',
   'canvas.export.done': '已导出 {name}',
   'canvas.export.pdfFailed': 'PDF 生成失败：{reason}',
+  // 应用节点的导出（F10.1）：没有格式可选，也没必要有——产物的「另一种形式」就是它自己
+  // 装进一个压缩包。所以「导出」在这里是一击，不是菜单；四种 md/docx 那种分叉不适用。
+  'canvas.export.bundleDone': '已导出 {name}（{count} 个文件）',
+  'canvas.export.bundleEmpty': '这个应用目录里没有可打包的文件。',
+  'canvas.export.bundleTruncated': '应用目录太大，超出一次导出能可靠搬运的范围；照这样导出会缺文件，所以先不导。',
+  'canvas.export.bundleFailed': '打包失败：{reason}',
+  // 设计节点的导出（F10.1，v1.59）：四样出路各要一样东西（Figma 的 kiwi schema / 一台
+  // 渲染器 / DOM / 排版引擎），而它们全在浏览器里，所以「导出」同样是一张菜单。图片与 PPT
+  // 要 CanvasKit 才画得出来——取不到时如实说不导，不交一份没有样式的图出去。
+  'canvas.export.menuDesign': '导出设计',
+  'canvas.export.fig': 'Figma 文件（.fig）',
+  'canvas.export.png': '图片（.png）',
+  'canvas.export.pptx': 'PPT（.pptx）',
+  'canvas.export.designBroken': '这份设计文档读不了（旧版信封或者内容被改坏了），让模型重新生成一份。',
+  'canvas.export.designEmpty': '这份设计里还没有容器，没有可以画的东西。',
+  'canvas.export.designNoEngine': '取不到设计渲染引擎，图片与 PPT 这次导不了；刚更新过插件的话刷新一下页面。',
+  'canvas.export.designFailed': '导出失败：{reason}',
+  'canvas.export.designPacked': '已导出 {name}（{count} 份）',
+  'canvas.export.working': '正在导出…',
   // 元素选择（F3.14）：在跑起来的页面上点一个元素，把它的源码嵌进提示词交给这张卡
   // 的会话去改。三句话各管一件事——工具叫什么、这一击不会落到页面上、发出去之后呢。
   'canvas.pick.tool': '元素选择',
@@ -310,6 +330,7 @@ export const en = {
   'canvas.action.reconcile': 'Reconcile references',
   'canvas.action.refresh': 'Refresh',
   'canvas.action.collapse': 'Collapse',
+  'canvas.action.dismiss': 'Dismiss',
   'canvas.action.locate': 'Locate on board',
   'canvas.action.joinBoard': 'Add to canvas',
   'canvas.action.remove': 'Remove from board',
@@ -406,6 +427,30 @@ export const en = {
     'The artifact is too large to read whole and only its first part came over; exporting that would silently drop the rest, so nothing was exported.',
   'canvas.export.done': 'Exported {name}',
   'canvas.export.pdfFailed': 'Could not build the PDF: {reason}',
+  // The application node's export (F10.1) has no format to choose and needs none:
+  // the only other form its artifact takes is itself, packed into an archive. So
+  // the button is a single click here rather than a menu.
+  'canvas.export.bundleDone': 'Exported {name} ({count} files)',
+  'canvas.export.bundleEmpty': 'This application folder has no files to pack.',
+  'canvas.export.bundleTruncated':
+    'The application folder is too large to carry out in one export; packing it now would leave files behind, so nothing was exported.',
+  'canvas.export.bundleFailed': 'Could not pack it: {reason}',
+  // The design node's export (F10.1, v1.59): each of the four ways out needs
+  // something (Figma's kiwi schema / a renderer / the DOM / a layout engine) and
+  // all of it lives in the browser, so this is a menu too. Images and PPT need
+  // CanvasKit — when it is missing we say so instead of handing over a blank.
+  'canvas.export.menuDesign': 'Export design',
+  'canvas.export.fig': 'Figma file (.fig)',
+  'canvas.export.png': 'Image (.png)',
+  'canvas.export.pptx': 'PPT (.pptx)',
+  'canvas.export.designBroken':
+    'This design document cannot be read (an older envelope, or its contents were damaged) — ask the model to generate it again.',
+  'canvas.export.designEmpty': 'This design has no containers yet, so there is nothing to draw.',
+  'canvas.export.designNoEngine':
+    'The design renderer is not available, so images and PPT cannot be exported right now; reload the page if the plugin was just updated.',
+  'canvas.export.designFailed': 'Could not export it: {reason}',
+  'canvas.export.designPacked': 'Exported {name} ({count} items)',
+  'canvas.export.working': 'Exporting…',
   // The element picker (F3.14): click an element on the running page and its own
   // source goes into a prompt handed to this card's conversation.
   'canvas.pick.tool': 'Select element',

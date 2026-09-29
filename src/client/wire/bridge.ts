@@ -18,6 +18,7 @@ import type {
   BoardCard,
   BoardSnapshot,
   BoardSource,
+  BundleView,
   CardSummary,
   ExportFormat,
   ExportResult,
@@ -327,11 +328,21 @@ export class CanvasBridge {
     return unwrap(this.card.readArtifact(projectId, cardId, this.signal))
   }
 
+  /**
+   * Every file of an application artifact, for packing into a `.zip` (F10.1).
+   *
+   * The host walks the folder and hands back the files themselves; the packing
+   * happens here, because the download does. `truncated` is the export's own
+   * stop signal — a folder that did not fit is not exported at all.
+   */
+  readBundle(projectId: string, cardId: string): Promise<BundleView> {
+    return unwrap(this.card.readBundle(projectId, cardId, this.signal))
+  }
+
   /** The digests of one card's direct materials. */
   readSources(projectId: string, cardId: string): Promise<CardSummary[]> {
     return unwrap(this.card.readSources(projectId, cardId, this.signal))
   }
-
   /**
    * Hand a card's materials to its conversation as file references.
    *

@@ -24,8 +24,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsErrorCode, FsTarget, FsVersion, FsWriteIntent } from '@deepseek-ai/dsh-fs'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
-import type { ArtifactView, CardId, CardSummary, FolderEntry } from '../../types.ts'
+import type { ArtifactView, BundleFile, BundleView, CardId, CardSummary, FolderEntry } from '../../types.ts'
 import { PROBE_HEAD_LIMIT, digestOf, detectKind, isHtmlKind, kindLabel, outlineOf, type KindProbe } from './kind-registry.ts'
+import { isEntryPage } from '../canvas/card-name.ts'
+import { BUNDLE_DEPTH_LIMIT, BUNDLE_ENTRY_BYTES_LIMIT, bundleAdmits, bundleSkipped, bundleTarget, type BundleLedger } from './bundle.ts'
 import { injectPreviewLinkGuard, inlineWebAppAssets, webAppAssetRefs, webappFiles } from './webapp.ts'
 import { injectPreviewPicker } from './preview-picker.ts'
 import { decodeDesignFile, designDigest, encodeDesignFile, type DesignGraph } from './design/document.ts'
@@ -527,6 +529,173 @@ export class ArtifactIo {
   }
 
   /**
+   * Read an application artifact as the archive the browser is about to build
+   * (F10.1).
+   *
+   * Where {@link view} answers "what does one artifact show", this answers
+   * "what is *in* one artifact" — the whole folder, recursively, because an
+   * exported app has to be the app and not a rendering of it. That makes this
+   * the one read in the plugin that is unbounded in *shape* (a tree, not a
+   * file), so it is bounded everywhere else instead:
+   *
+   * - names in {@link bundleSkipped} never travel (`node_modules`, `.git`, the
+   *   canvas's own board projection) — they are dependencies and tool
+   *   bookkeeping, not the app;
+   * - every file is read through the seam's byte cap, so a large file is
+   *   refused at the seam rather than buffered and then discarded;
+   * - the running total and count are kept in a {@link BundleLedger}, and
+   *   whatever does not fit lands in `skipped` (`truncated: true`).
+   *
+   * The last point is the same discipline the text export already follows: an
+   * export that quietly leaves something out is worse than one that declines,
+   * so nothing here is dropped silently — the caller can see exactly what was
+   * left behind and say so.
+   *
+   * **Which entry gets packed takes both the path and the disk into account**
+   * ({@link bundleTarget}): a card's `file` may name its *entry page*
+   * (`应用/index.html`), so asking the disk "is this a file" answers "yes" —
+   * and packing that answer ships a folder app with no stylesheet and no
+   * script. An entry page means the folder around it, which is the same
+   * judgement the rename path and the preview path already make.
+   *
+   * A missing artifact is a state, not a failure (a seated card may have no
+   * file yet), so it comes back as `present: false` — the same contract
+   * {@link view} keeps.
+   *
+   * @param root - the project root the path resolves against.
+   * @param cardId - the artifact's path relative to that root (the card's
+   *   `file`, never its seat id — see §9 of the technical doc).
+   */
+  async bundle(root: string, cardId: CardId, signal?: AbortSignal): Promise<BundleView> {
+    const probe = await this.probe(root, cardId, signal)
+    const plan = bundleTarget(cardId, probe.directory)
+    const base: BundleView = {
+      cardId,
+      file: cardId,
+      name: '',
+      kind: detectKind(probe),
+      present: probe.present,
+      directory: plan.directory,
+      files: [],
+      skipped: [],
+      bytes: 0,
+      truncated: false,
+    }
+    if (!probe.present) return base
+
+    const target = await this.targetOf(root, plan.path, signal)
+    const files: BundleFile[] = []
+    const skipped: string[] = []
+    const ledger: BundleLedger = { files: 0, bytes: 0 }
+
+    if (plan.directory) {
+      await this.walkBundle(target, '', 0, files, skipped, ledger, signal)
+    } else {
+      // 单文件形态：包里就是它自己，用它在目录里的名字（`deck.html`），
+      // 而不是整个产物路径。
+      const name = cardId.split('/').pop() ?? cardId
+      const file = await this.readBundleFile(target, name, signal)
+      if (file === undefined) skipped.push(name)
+      else {
+        files.push(file)
+        ledger.files += 1
+        ledger.bytes += file.bytes
+      }
+    }
+
+    return { ...base, files, skipped, bytes: ledger.bytes, truncated: skipped.length > 0 }
+  }
+
+  /**
+   * Walk one directory of an artifact into the archive's file list.
+   *
+   * Entries are read in name order so the same folder always packs to the same
+   * archive — an export one can compare rather than merely open. A directory
+   * the seam refuses to list is left out rather than aborting the walk: a
+   * folder with an unreadable corner still has an export worth having, and the
+   * omission is not silent (the entry is recorded in `skipped`).
+   */
+  private async walkBundle(
+    dir: FsTarget,
+    prefix: string,
+    depth: number,
+    out: BundleFile[],
+    skipped: string[],
+    ledger: BundleLedger,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (depth >= BUNDLE_DEPTH_LIMIT) return
+    let children: Awaited<ReturnType<typeof this.ctx.fs.listDir>>
+    try {
+      children = await this.ctx.fs.listDir(dir, signal)
+    } catch (error) {
+      if (!isSeamError(error)) throw error
+      return
+    }
+
+    for (const child of [...children].sort((left, right) => left.name.localeCompare(right.name))) {
+      if (bundleSkipped(child.name)) continue
+      const path = prefix === '' ? child.name : `${prefix}/${child.name}`
+      if (child.type === 'directory') {
+        await this.walkBundle(child.target, path, depth + 1, out, skipped, ledger, signal)
+        continue
+      }
+      if (child.type !== 'file') continue
+      // The declared size is a cheap refusal: a file this big will not fit any
+      // budget, so there is no reason to read it first and find out.
+      if (child.size !== undefined && !bundleAdmits(child.size, ledger)) {
+        skipped.push(path)
+        continue
+      }
+      const file = await this.readBundleFile(child.target, path, signal)
+      if (file === undefined || !bundleAdmits(file.bytes, ledger)) {
+        skipped.push(path)
+        continue
+      }
+      out.push(file)
+      ledger.files += 1
+      ledger.bytes += file.bytes
+    }
+  }
+
+  /**
+   * Read one file into its archive entry.
+   *
+   * One read, not two: the bytes come back through the seam's own cap (so a
+   * file beyond {@link BUNDLE_ENTRY_BYTES_LIMIT} is refused *by the seam*,
+   * never buffered here), and whether it is text is then a decoding question
+   * rather than a second file read. Text travels as text because that is what
+   * an app folder mostly is — HTML, CSS, JS — and base64 would tax every one
+   * of those bytes by a third; anything that is not valid UTF-8 (an image, a
+   * font, a GBK-encoded file) travels as its own bytes, unchanged.
+   *
+   * `undefined` means "this file cannot be in the archive" — too large, or
+   * unreadable. The caller reports it instead of exporting a hole.
+   */
+  private async readBundleFile(
+    target: FsTarget,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<BundleFile | undefined> {
+    let bytes: Uint8Array
+    try {
+      bytes = await this.ctx.fs.readBytes(target, signal, BUNDLE_ENTRY_BYTES_LIMIT)
+    } catch (error) {
+      if (!isSeamError(error)) throw error
+      return undefined
+    }
+    try {
+      // `fatal` is the whole judgement: a byte sequence that is not valid
+      // UTF-8 is not text, and guessing a replacement character would corrupt
+      // the file on the way into the archive.
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      return { path, text, base64: '', bytes: bytes.byteLength }
+    } catch {
+      return { path, text: '', base64: Buffer.from(bytes).toString('base64'), bytes: bytes.byteLength }
+    }
+  }
+
+  /**
    * The per-call sandbox policy a mutation under `root` runs under.
    *
    * A project root is picked by the user in the folder picker, and it *is* this
@@ -723,7 +892,7 @@ export class ArtifactIo {
       } catch {
         continue
       }
-      const entry = inner.find((item) => item.name === 'index.html')
+      const entry = inner.find((item) => isEntryPage(item.name))
       if (entry !== undefined) {
         found.push(`${child.name}/index.html`)
         continue

@@ -19,7 +19,7 @@ import { SkiaRenderer } from '@open-pencil/core/canvas'
 import { fontManager } from '@open-pencil/core/text'
 import type { CanvasKit, Surface } from 'canvaskit-wasm'
 import type { SceneGraph } from '@open-pencil/scene-graph'
-import { ASSET_BASE } from './design-canvaskit.ts'
+import { ASSET_BASE, loadCanvasKit } from './design-canvaskit.ts'
 import { type CanvasKitRuntime, type DesignBackend } from './design-engine-types.ts'
 
 /** The page backdrop behind the containers — matches `.dsh-canvas-design` CSS. */
@@ -88,6 +88,22 @@ function preloadCJKFont(): Promise<ArrayBuffer | null> {
 }
 
 /**
+ * 中文回落就位：先注册进**当前** provider，再声明进排版回落链。顺序不能反——
+ * `setCJKFallbackFamily` 只是让段落把 'Noto Sans SC' 写进 fontFamilies，
+ * 真正出字形的是 provider 里那一枚 typeface；先声明后注册的话，中间那段
+ * 时间排版拿不到字形，缺字判定会把文字判成 exhausted 而整段不画。
+ *
+ * 返回「字面这一趟有没有真变」——重画与否由调用方决定（预览要补一帧，导出不用）。
+ * 预览与导出共用这一步，正是「一份」的意思：中文在设计稿里画得出来，导出也不会变空白。
+ */
+function declareCJKFallback(data: ArrayBuffer): boolean {
+  const before = fontManager.generation()
+  fontManager.markLoaded(CJK_FAMILY, 'Regular', data)
+  fontManager.setCJKFallbackFamily(CJK_FAMILY)
+  return fontManager.generation() !== before
+}
+
+/**
  * Build the Skia backend for one canvas element. Resolves `null` when the
  * engine cannot take the element (no WebGL2 *and* no CPU surface) — the
  * viewer keeps its 2D picture in that case.
@@ -134,10 +150,7 @@ export async function createSkiaBackend(
    */
   const registerCJKFallback = (data: ArrayBuffer): void => {
     if (disposed || renderer.isDestroyed()) return
-    const before = fontManager.generation()
-    fontManager.markLoaded(CJK_FAMILY, 'Regular', data)
-    fontManager.setCJKFallbackFamily(CJK_FAMILY)
-    if (fontManager.generation() !== before) repaintAfterFontChange()
+    if (declareCJKFallback(data)) repaintAfterFontChange()
   }
 
   try {
@@ -193,6 +206,71 @@ export async function createSkiaBackend(
       renderer.render(graph, selectedIds as Set<string>, { hoveredNodeId: hoveredId }, sceneVersion, 'full')
     },
     dispose() {
+      if (disposed) return
+      disposed = true
+      renderer.destroy()
+    },
+  }
+}
+
+// ── 导出用的离屏渲染器（F10.1，v1.59） ──────────────────────────────────────
+
+/**
+ * 一台可以画到「内存里的画布」上的渲染器，专供导出。
+ *
+ * 为什么不复用预览那一台：导出可以不经过预览器（胶囊上的导出钮在画布上就能点，卡片
+ * 没有被打开过），而且预览器迟早要销毁——导出不该握着一台别人的、随时可能没了的
+ * 渲染器。所以这里新起一台：离屏 surface、没有 GL 上下文（`MakeSurface` 就是
+ * open-pencil 自己 headless 那条路的做法），画完即弃。
+ *
+ * **它必须走浏览器这条路，不能走 headless**：open-pencil 的 `headlessRenderNodes`
+ * 用 `import.meta.resolve` 去找 `canvaskit-wasm/full`——那是 node/bun 的 API，浏览器里
+ * 没有它（`import.meta.resolve` 是 undefined，调用即 TypeError）。所以导出这一侧一律把
+ * `{ canvasKit, renderer }` 作为 `context` 递进去，让它在需要降级栅格化时用我们这一台。
+ *
+ * 字体与预览共用同一套预载（`preloadCoreFonts` / `preloadCJKFont` /
+ * `declareCJKFallback`）——**这是必须的**：导出里的文字要过渲染器的排版，字面没进
+ * provider 就画不出字形，中文会整段空白；而「导出比预览少一个字体」这种事不会报错，
+ * 只会让产物看起来像设计错了。中文那 17.7MB 在这里**要等**（预览可以不等，导出不能
+ * 交一份缺字的图）。
+ *
+ * 取不到 CanvasKit（资产没到，或这台机器上没装）时返回 `null`——那是「这次没导成」的
+ * 一种原因（见 `DesignExportRefusal` 的 `no-engine`），不是异常。
+ */
+export interface ExportRenderer {
+  ck: CanvasKit
+  renderer: SkiaRenderer
+  dispose: () => void
+}
+
+export async function createExportRenderer(): Promise<ExportRenderer | null> {
+  const runtime = await loadCanvasKit()
+  if (runtime === null) return null
+  await preloadCoreFonts()
+  const cjk = fontManager.loadedData(CJK_FAMILY, 'Regular') ?? (await preloadCJKFont())
+  if (cjk !== null) declareCJKFallback(cjk)
+
+  const ck = runtime as unknown as CanvasKit
+  const surface = ck.MakeSurface(1, 1)
+  if (!surface) return null
+  const renderer = new SkiaRenderer(ck, surface)
+  renderer.showRulers = false
+  renderer.pageColor = CANVAS_COLOR
+  // headless 那台是这么起手的（1×1 的视口、dpr 1）：绘制时各自另开 surface，这一台只
+  // 负责「有渲染器可用」这件事。
+  renderer.viewportWidth = 1
+  renderer.viewportHeight = 1
+  renderer.dpr = 1
+  try {
+    await renderer.loadFonts()
+  } catch {
+    // 字面没全装上：图形照画，文字回落——与预览同一条降级（不 throw）。
+  }
+  let disposed = false
+  return {
+    ck,
+    renderer,
+    dispose: () => {
       if (disposed) return
       disposed = true
       renderer.destroy()

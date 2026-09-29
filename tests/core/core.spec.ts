@@ -7,7 +7,21 @@
 import { describe, expect, it } from 'vitest'
 import { CARD_HEIGHT, CARD_WIDTH, arrangeSeats, depthsOf, nextFreeSeat } from '../../src/core/canvas/board.ts'
 import { projectIdOf, shortDigest, slugify } from '../../src/core/canvas/ids.ts'
-import { BUILTIN_KINDS, HTML_KINDS, detectKind, digestOf, isHtmlKind, kindById, kindLabel, kindSupportsExport, outlineOf } from '../../src/core/artifact/kind-registry.ts'
+import {
+  BUILTIN_KINDS,
+  DESIGN_KINDS,
+  HTML_KINDS,
+  detectKind,
+  digestOf,
+  isBundleKind,
+  isDesignKind,
+  isHtmlKind,
+  kindById,
+  kindLabel,
+  kindSupportsExport,
+  outlineOf,
+  resolveKindId,
+} from '../../src/core/artifact/kind-registry.ts'
 import {
   materialUpstreams,
   reconcileEdges,
@@ -222,6 +236,37 @@ describe('kind registry', () => {
     for (const kind of ['markdown', 'image', 'video', 'data', 'folder', 'file', '']) {
       expect(isHtmlKind(kind)).toBe(false)
     }
+  })
+
+  /**
+   * 归并前的老 id 在**集合判据**上也必须是今天那个样子（v1.59）。
+   *
+   * 这一条不是洁癖：`kindById` 折算而 `isBundleKind` 不折算，同一个函数里就有了两种
+   * 「kind」（`export-plan.ts` 里正是这个形状）。老应用卡（`webapp`）于是掉到部署那条
+   * 导出线上——一条在没有 `dsh-canvas.capabilities` 的部署上**点了什么都不发生**的路，
+   * 而 v1.58 花了一整版才把它绕开。
+   */
+  it('归并前的老 id 在集合判据上也是它归并后的那一个', () => {
+    for (const legacy of ['webapp', 'site', 'html-deck']) {
+      expect(resolveKindId(legacy), legacy).toBe('app')
+      expect(isHtmlKind(legacy), legacy).toBe(true)
+      expect(isBundleKind(legacy), legacy).toBe(true)
+    }
+    // 没被归并、也没注册过的 id 原样返回：部署自己加的形态照旧指认得出来。
+    expect(resolveKindId('design')).toBe('design')
+    expect(resolveKindId('nothing-registered')).toBe('nothing-registered')
+  })
+
+  /** 设计稿（F10.1，v1.59）：导出＝**在浏览器里把它画出来**，不是打包，也不问部署。 */
+  it('设计稿是「在浏览器里画出来」的那一种形态，且不动部署那条线的格式表', () => {
+    expect(DESIGN_KINDS).toEqual(['design'])
+    expect(isDesignKind('design')).toBe(true)
+    for (const kind of ['app', 'markdown', 'image', 'video', 'data', 'folder', 'file']) {
+      expect(isDesignKind(kind), kind).toBe(false)
+    }
+    // 那四样出路（fig / png / pdf / pptx）部署一个都做不到，所以不进 `exportFormats`——
+    // 往里塞一个部署永远实现不了的格式，只会换来一条必然失败的请求。
+    expect(kindById('design')?.exportFormats).toEqual(['png'])
   })
 
   it('keeps every built-in kind addressable and exporting only what it can', () => {

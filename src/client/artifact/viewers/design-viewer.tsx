@@ -29,18 +29,17 @@ import type { ReactElement } from 'react'
 import type { ViewerProps, ViewerRegistration } from './types.ts'
 import { useChrome, Slot, useEscapeSink } from '../chrome.tsx'
 import { autosaveDelay, autosaveRetryDelay } from '../editing/autosave.ts'
-import { ASSET_BASE, loadCanvasKit } from './design-canvaskit.ts'
+import { loadCanvasKit } from './design-canvaskit.ts'
+import { loadDesignEngine } from './design-engine-module.ts'
 import { DESIGN_SIDE_CLASS, DesignSidePanels, FrameIcon } from './design-panels.tsx'
 import type { DesignSelectMode } from './design-panels.tsx'
 import type {
-  CreateDesignEngineArgs,
   DesignEngine,
   DesignGeometry,
   DesignHistoryState,
   DesignLayerNode,
   DesignSnapshot,
   DesignViewport,
-  EngineOutcome,
 } from './design-engine-types.ts'
 
 /** The viewer's honest states: engine loading, failed, live. */
@@ -204,20 +203,6 @@ interface TransformGesture {
   lastAngle: number
   /** 旋转：累计转过的度数（逐帧接平之后）。 */
   turned: number
-}
-
-/** The engine chunk's shape — the module is loaded by URL, typed here. */
-interface DesignEngineModule {
-  createDesignEngine(args: CreateDesignEngineArgs): Promise<EngineOutcome>
-}
-
-/** Single-flight module load by URL; `null` when the chunk cannot be fetched. */
-let engineModule: Promise<DesignEngineModule | null> | undefined
-function loadDesignEngine(): Promise<DesignEngineModule | null> {
-  engineModule ??= import(`${ASSET_BASE}/design-engine.js`)
-    .then((module) => module as DesignEngineModule)
-    .catch(() => null)
-  return engineModule
 }
 
 /**

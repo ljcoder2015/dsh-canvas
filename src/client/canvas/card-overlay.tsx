@@ -44,7 +44,7 @@ import type { PromptInputHandle } from '../ui/prompt-input.tsx'
 import { composerSizeOf, resizedComposerSize, type ComposerSize } from './composer-size.ts'
 import { referenceOptions } from './reference-options.ts'
 import type { ReferenceCandidate, ReferenceOption } from './reference-options.ts'
-import { TEXT_EXPORT_FORMATS, TEXT_EXPORT_LABEL, type TextExportFormat } from './text-export.ts'
+import type { ExportOffer } from './export-plan.ts'
 
 /** `@` 候选的挑选与过滤在 `reference-options.ts`（纯，node 环境可测）；这里只剩展示。 */
 
@@ -107,16 +107,14 @@ export interface CardSelectionProps {
   onChat: () => void
   /** Open a text node's artifact in the viewer's editor — 手动输入. */
   onManualEdit: () => void
-  /** Export in the kind's first supported format. */
-  onExport: () => void
   /**
-   * 文本节点的导出：格式由用户点的那一行给。
+   * 导出：这张卡点〔导出〕给什么——一击、一张菜单，或者什么都没有。
    *
-   * 与 {@link CardSelectionProps.onExport} 是两条路，不是同一件事的两种做法：那一条把
-   * 「导出成什么」交给宿主的 kind 表（只有一串写死的格式，点一下就是它），而文本节点的
-   * 四种格式（md / txt / docx / pdf）各有各的去处，得先问一句——所以这个回调带参数。
+   * 整份判据（形态 → 通道 → 每一行点下去做什么）在 `export-plan.ts` 里，是个纯函数，判据
+   * 能穷举；这里只负责画。此前这里是「文本给菜单、其余给一击」两分支，而画布那侧另有一处
+   * 判「走打包还是走部署」——同一件事两个来源，v1.59 加第三条通道时并成了一份。
    */
-  onExportText: (format: TextExportFormat) => void
+  exportOffer: ExportOffer
   /** Take the card off the board; the file stays. */
   onRemove: () => void
   /** Declare an edge from `sourceId` and push its digest into the session. */
@@ -170,36 +168,29 @@ export interface CardSelectionProps {
 const PILL = [
   ['canvas.action.chat', 'onChat'],
   ['canvas.action.manual', 'onManualEdit'],
-  ['canvas.action.export', 'onExport'],
+  // 第二格对导出行**没用**：它点下去做什么由 `props.exportOffer` 说了算（一击 / 菜单 /
+  // 什么都没有），下面是那个分支。留着一格是因为这张表的用处本来就是「顺序」。
+  ['canvas.action.export', 'exportOffer'],
   ['canvas.action.remove', 'onRemove'],
 ] as const
 
 /**
  * 胶囊上那枚〔导出〕。
  *
- * 对文本节点（`isDirectTextKind`）它是一张四行的菜单：md / txt / docx / pdf 各有去处，
- * 没有哪一个能当默认，替用户猜一个就是把另外三个藏起来。其余形态仍走宿主那一条导出线
- * ——格式由 kind 表写死（点一下就是它），这里保持原样的一击。
+ * 它只负责**画**：给菜单就出菜单，给一击就是一枚按钮，给「没有」（`none`）就什么都不出。
+ * 「这张卡该给哪一种、每一行点下去做什么」全在 `export-plan.ts` 里判（那是个纯函数，判据
+ * 能穷举）——此前这里自己读 `isDirectTextKind` 决定出不出菜单，画布那侧又读
+ * `isBundleKind` 决定走哪条路，两处判同一件事；加第三条通道时那种分工会立刻打架。
  *
  * 菜单复用画布既有的那套长相（`.dsh-canvas-menu` + `.dsh-canvas-row`），只是从胶囊边上
  * 垂下来，所以外层那枚 `span` 是它定位的锚（见 `styles.ts` 的 `.dsh-canvas-pillmenu`）。
  */
-function ExportPill({
-  t,
-  text,
-  onExport,
-  onExportText,
-}: {
-  t: Translate
-  /** 这张卡的产物是不是「就是它自己的文字」。 */
-  text: boolean
-  onExport: () => void
-  onExportText: (format: TextExportFormat) => void
-}) {
+function ExportPill({ t, offer }: { t: Translate; offer: ExportOffer }) {
   const [open, setOpen] = useState(false)
-  if (!text) {
+  if (offer.kind === 'none') return null
+  if (offer.kind === 'one') {
     return (
-      <button className="dsh-canvas-chipbtn" onClick={onExport}>
+      <button className="dsh-canvas-chipbtn" onClick={offer.run}>
         {t('canvas.action.export')}
       </button>
     )
@@ -215,18 +206,18 @@ function ExportPill({
         {t('canvas.action.export')}
       </button>
       {open ? (
-        <div className="dsh-canvas-menu" role="menu" aria-label={t('canvas.export.menu')}>
-          {TEXT_EXPORT_FORMATS.map((format) => (
+        <div className="dsh-canvas-menu" role="menu" aria-label={t(offer.menu)}>
+          {offer.rows.map((row) => (
             <button
               className="dsh-canvas-row"
               role="menuitem"
-              key={format}
+              key={row.id}
               onClick={() => {
                 setOpen(false)
-                onExportText(format)
+                row.run()
               }}
             >
-              {t(TEXT_EXPORT_LABEL[format])}
+              {t(row.label)}
             </button>
           ))}
         </div>
@@ -674,7 +665,6 @@ export function CardSelection(props: CardSelectionProps) {
     setDragged(undefined)
   }
 
-  const hasExport = (summary?.kind ?? '') !== 'folder'
   // 手动输入 是文本节点的门：编辑器整篇写回文件，所以只在「产物就是它自己的文字」的
   // 形态上出现——文件夹、图片、Deck 都没有可打字的地方，给它们一枚按钮只是一枚点了没
   // 反应（或更糟：把别的形态覆盖成文本）的按钮。这个事实住在宿主的 kind 表上
@@ -691,17 +681,13 @@ export function CardSelection(props: CardSelectionProps) {
       <div className="dsh-canvas-toolbar is-horizontal" style={{ left: `${card.position.x + 100}px`, top: `${card.position.y - 44}px`, transform: 'translateX(-50%)' }}>
         {PILL.map(([key, handler]) => {
           if (key === 'canvas.action.export') {
-            if (!hasExport) return null
             return (
               // key 带上卡片 id：换选另一张卡时这颗钮重挂一次，菜单跟着收起来——
               // 不然它会开着跟到下一张卡的胶囊上，看上去像给那张卡开的。
-              <ExportPill
-                key={`${card.id}:${key}`}
-                t={t}
-                text={canEditText}
-                onExport={props.onExport}
-                onExportText={props.onExportText}
-              />
+              //
+              // 「这张卡有没有得导」不在这里判：`offer.kind === 'none'` 时它自己返回
+              // null，判据住在 `export-plan.ts`。
+              <ExportPill key={`${card.id}:${key}`} t={t} offer={props.exportOffer} />
             )
           }
           if (key === 'canvas.action.manual' && !canEditText) return null

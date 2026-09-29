@@ -53,6 +53,7 @@ const CARD_MEMBERS: readonly TypertMemberModel[] = [
   member('removeMissingCards', 'removeMissingCards(projectId, signal?): Promise<number>', '一次移除板上所有产物已不在磁盘上的卡片，返回移除了几张；不删除磁盘文件。'),
   member('readSummary', 'readSummary(projectId, cardId, signal?): Promise<CardSummary>', '读取一张卡片产物的摘要。'),
   member('readArtifact', 'readArtifact(projectId, cardId, signal?): Promise<ArtifactView>', '读取一张卡片产物的全屏视图载荷（全文或媒体 data URL）。'),
+  member('readBundle', 'readBundle(projectId, cardId, signal?): Promise<BundleView>', '读取一张应用类卡片产物的整个目录（文件清单与内容），供浏览器本地打包成压缩包；依赖目录与超预算的文件会被跳过并如实记录。'),
   member('readSources', 'readSources(projectId, cardId, signal?): Promise<CardSummary[]>', '读取一张卡片的全部引用来源摘要。'),
   member('referenceFiles', 'referenceFiles(projectId, cardId, signal?): Promise<ReferencedFiles>', '把引用来源以「文件引用」注入卡片会话：上游产物按 @工作区相对路径 命名（模型自己 read 按需读取），不复制内容；路径无法写成 @引用的会在 skipped 里说明。'),
   member('injectCard', 'injectCard(projectId, cardId, sourceCardId, mode, signal?): Promise<CardSummary>', '把上游产物注入卡片会话。'),

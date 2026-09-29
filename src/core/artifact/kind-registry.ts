@@ -118,6 +118,21 @@ export function kindById(id: string, definitions: readonly KindDefinition[] = BU
   return definitions.find((entry) => entry.id === (LEGACY_KIND_IDS[id] ?? id))
 }
 
+/**
+ * 一个 kind id 折算成它今天的那个 id（v1.56/v1.59）。
+ *
+ * 老记录盖着旧章，而**读侧一律先折算**是那条零迁移的全部内容——所以凡是「按 kind 认一件事」
+ * 的判据都得从这里过一遍。未知 id 原样返回（部署自己注册的形态照旧能被指认）。
+ *
+ * 它独立成一个函数，是因为下面那四个集合判据此前各自拿**裸 id** 去 `includes`：`kindById`
+ * 折算、`isBundleKind` 不折算，同一个函数里于是有了两种「kind」（`export-plan.ts` 里正是
+ * 这个形状）。老应用卡（`webapp`）会因此掉到部署那条导出线上——一条在没有导出能力的部署上
+ * **点了什么都不发生**的路，而 v1.58 花了一整版才把它绕开。
+ */
+export function resolveKindId(id: string, definitions: readonly KindDefinition[] = BUILTIN_KINDS): string {
+  return kindById(id, definitions)?.id ?? id
+}
+
 /** Human label for a kind id, falling back to the id itself. */
 export function kindLabel(id: string, definitions: readonly KindDefinition[] = BUILTIN_KINDS): string {
   return kindById(id, definitions)?.label ?? id
@@ -148,7 +163,7 @@ export const HTML_KINDS: readonly string[] = ['app']
 
 /** Whether a kind's artifact is a whole HTML page (see {@link HTML_KINDS}). */
 export function isHtmlKind(kind: string): boolean {
-  return HTML_KINDS.includes(kind)
+  return HTML_KINDS.includes(resolveKindId(kind))
 }
 
 /**
@@ -176,7 +191,49 @@ export const DIRECT_TEXT_KINDS: readonly string[] = ['markdown', 'file']
 
 /** Whether a kind's artifact is its own text (see {@link DIRECT_TEXT_KINDS}). */
 export function isDirectTextKind(kind: string): boolean {
-  return DIRECT_TEXT_KINDS.includes(kind)
+  return DIRECT_TEXT_KINDS.includes(resolveKindId(kind))
+}
+
+/**
+ * 导出＝「把整份产物打包带走」的形态（F10.1）。
+ *
+ * 应用节点是唯一一个：它的产物要么是一个带入口页的文件夹，要么是一张单文件页面，而
+ * 「交给别人」的方式都不是把它渲染成另一种格式，是**原样装进一个压缩包**。这条判据让
+ * 客户端知道该走本地那条打包路（`client/canvas/bundle-export.ts`），而不是去问部署要
+ * 一个导出能力——把文件装进 zip 是浏览器里做得了的事，不需要后端。
+ *
+ * 与 {@link HTML_KINDS} 落在同一个位置、读同一张类型表：这两条都是「关于形态的事实」，
+ * 两侧（凭它选路的一侧、凭它内联的一侧）必须给出一致答案，所以都写在这里而不是各自的
+ * 调用点上。
+ */
+export const BUNDLE_KINDS: readonly string[] = ['app']
+
+/** Whether a kind exports by packing its artifact into an archive (see {@link BUNDLE_KINDS}). */
+export function isBundleKind(kind: string): boolean {
+  return BUNDLE_KINDS.includes(resolveKindId(kind))
+}
+
+/**
+ * 导出＝「要把这份产物**画出来**」的形态（F10.1，v1.59）。
+ *
+ * 与 {@link BUNDLE_KINDS} 一样是一根指针而不是一张表，但指向的**不是**类型表里的
+ * `exportFormats`——那一格是**部署能力那条线**的格式表（`canvas_export` 工具与
+ * `kindSupportsExport` 读它，契约里是 `P.format` 这个 enum）。设计稿的四样出路部署一个
+ * 都做不到：fig 要 Figma 的 kiwi schema，图片与 PPT 要 CanvasKit 的渲染器，PDF 要 DOM
+ * （open-pencil 那条实现靠 `DOMParser` + `svg2pdf`）——而它们**全在浏览器**里。往那个
+ * enum 里加一个 `fig` 只会让部署多收到一个它永远实现不了的格式（一条必然失败的请求），
+ * 所以设计卡的本地格式表归客户端自己：`client/canvas/design-export.ts` 的
+ * `DESIGN_EXPORT_FORMATS`。这与文本节点同一条道理——它的 md / txt / docx 也不在类型表里，
+ * 而在 `TEXT_EXPORT_FORMATS` 里。
+ *
+ * 这里存在的理由只有一个：**「这个形态走哪条路」必须只判一次**。画布那张菜单（胶囊上的
+ * 导出钮）与选路那处都要一个答案，两处各写一遍就是「同一个东西两个来源」。
+ */
+export const DESIGN_KINDS: readonly string[] = ['design']
+
+/** Whether a kind exports by rendering its artifact in the browser (see {@link DESIGN_KINDS}). */
+export function isDesignKind(kind: string): boolean {
+  return DESIGN_KINDS.includes(resolveKindId(kind))
 }
 
 /**

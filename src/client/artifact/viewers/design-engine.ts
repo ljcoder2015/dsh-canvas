@@ -45,6 +45,18 @@ export function createDesignEngine(args: CreateDesignEngineArgs): Promise<Engine
   }))
 }
 
+/**
+ * 导出（F10.1，v1.59）：这一份 chunk 的**第二个出口**，与 `createDesignEngine` 并列。
+ *
+ * 与引擎分成两个出口而不是一个，是因为导出**不该先要一台引擎**：胶囊上的导出钮在画布上
+ * 就能点，卡片可能从没被打开过（没有画布元素、没有视口、也没有编辑器）。导出要的只是
+ * 「把这串信封文本画成某一种格式」，于是它自己解码、自己起一台离屏渲染器、画完即弃。
+ *
+ * 它必须住在这个 chunk 里，理由与引擎完全一样：场景图的**类身份**得全页唯一——graph 在
+ * 这里创建，也只能由这里的渲染器画。实现见 `design-io.ts`。
+ */
+export { exportDesignDocument as designExport } from './design-io.ts'
+
 async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDesignEngineArgs): Promise<EngineOutcome> {
   let graph: SceneGraph
   try {
