@@ -1,6 +1,6 @@
 # DeepSeek Harness 通用创作画布插件 · 技术文档
 
-**版本**：v1.59
+**版本**：v1.60
 **最近更新**：2026-09-29
 **状态**：技术架构已按 [`dsh-plugin-template`](https://github.com/bugmaker2/dsh-plugin-template) 与 DeepSeek Harness 子系统文档（`docs/cookbook/*`、`docs/subsystems/*`）校准，并在真机跑通
 **产品文档**：[`DeepSeek-Harness-Canvas-产品文档.md`](./DeepSeek-Harness-Canvas-产品文档.md)——功能点清单（F1.1–F10.4）、MVP 范围、设计决策记录、修订记录都在那边
@@ -821,6 +821,22 @@ IO 层（`core/artifact/artifact-io.ts`）的入参是**项目根 + 项目内的
 所以 `build.mjs` 就按它点名的名字产出：**内容是一份普通 ESM 打包结果（含 `@open-pencil/fig`），名字却是 `.ts`**（上游 dist 里只有 `export-worker.js`，逐字拼的却是 `.ts`；改写依赖里的字符串是个会悄悄失效的补丁，不做）。名字骗人的代价由资产路由承担——`host/assets.ts` 的 `CONTENT_TYPES` 里多一格 `.ts → text/javascript`，module worker 对 MIME 有硬要求。（同一份 chunk 里还有第二处 `new URL('./worker.ts', …)`，那是上游 **读** `.fig` 用的会话 worker；我们从不读 `.fig`，而且它自带「worker 起不来就退回主线程」的兜底，不需要跟着产出。）
 
 > **踩过的地方（一条真浏览器判据抓出来的）**：**`writeDocument` 那条路必须点名缩略图用哪一页**。`renderFigThumbnail` 拿不到页 id 时**直接交那张 1×1 的占位图**，而 `writeDocument`（整份文档，没有选区可提取）不会替你猜——上游的兜底只认一个叫 `cover` 的页（Figma 的封面页约定），我们的文档没有这个约定。症状是「导出成功」而 Figma 里的缩略图一片空白，**两处都不报错**。现在显式传第一页（`thumbnailPageId`），探针把它钉住：缩略图 512×213，正是第一页上两个容器的并集比例。
+
+#### 幻灯片里的字体名：交出去之前必须换一个（v1.60）
+
+四条出路里**只有 PPT 这条把字体名交出去**。另外三条的字是我们自己画的：图片与 PDF 栅格化时那个名字是拿去 `fontManager` 里找字面的，fig 那边 `Inter` 恰好是 Figma 自己的默认字体。而幻灯片里的标题与正文是**原生可编辑文本**——上游 `addEditableText` 把文字交给 `pptxgenjs`，名字走的是 `fontFace: s.fontFamily ?? node.fontFamily`，最后落成 run 上那三行：
+
+```xml
+<a:latin typeface="…"/><a:ea typeface="…"/><a:cs typeface="…"/>
+```
+
+（`pptxgenjs` 那段的写法是 `if (opts.fontFace)`——**名字为空就整段不写**，那时 PowerPoint 用主题默认：`minorFont` 的 `ea` 是空的，由打开它的机器自己定。）
+
+这个 `typeface` 会在**对方机器上**解析，而我们的字体名是**自己这边的东西**：会话预设从不提字体（`host/prompt.ts` 里没有这一项），文字节点全落在 core 的 `DEFAULT_FONT_FAMILY`（`Inter`）上，而 `Inter` 只活在本插件的资产路由里——对方没有它，**它又没有汉字字形**，中文整段丢。真机报出来的就是这一条（用户原话「导出 PPT，第一页的字体丢失」），**而「只有第一页」正是它的指纹**：封面那种纯文字页全走原生文本，后面几页的文字落进了图片回退（渐变 / 遮罩 / 矢量子树），那部分是我们自己画的所以正常。
+
+所以交出去之前换名：`core/artifact/design/ppt-font.ts` 的 `retargetTextFonts`——**逐段 `styleRuns` 一起换**，run 上那个 `fontFamily` 会盖过节点那一个，漏掉它等于漏掉被单独设过字体的那几段。调用点挡在 `design-io.ts` 创建渲染器之前（它动的是交给对方的那份数据，与画法无关），**且只有 `pptx` 会走进去**（`retargetsTextFonts`）——这一点单独做成函数，好让它被判据点名测到而不是埋在 if 里。选微软雅黑：中文 Windows 与 WPS 必然有它，Mac 上替换成系统黑体，而它是黑体、与设计稿那套「Inter + 思源黑体」最接近。写英文名（`Microsoft YaHei`）而不是「微软雅黑」，OpenXML 的 `typeface` 按字族的英文名解析，各语言版本都认。
+
+判据分三层：`tests/core/artifact/design.spec.ts` 用**真图**判换得对不对（含「容器与形状的字体字段碰都不碰」「区域里嵌了层容器也换得到」），`tests/client/artifact/viewers/design-io.spec.ts` 读源码文本判接线（这个模块拉着 CanvasKit，node 里 import 即死），探针**解开 pptx 逐张看 `typeface`**——v1.59 当初只解出 `ppt/slides/slideN.xml` 就算过，这一验是补上的。
 
 #### 判据分两层，验证交给别人的工具
 

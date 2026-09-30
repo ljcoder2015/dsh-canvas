@@ -20,6 +20,11 @@ import {
   scaffoldDesignDocument,
 } from '../../../src/core/artifact/design/document.ts'
 import { applyDesignOps } from '../../../src/core/artifact/design/ops.ts'
+import {
+  PPT_TEXT_FAMILY,
+  retargetsTextFonts,
+  retargetTextFonts,
+} from '../../../src/core/artifact/design/ppt-font.ts'
 
 /** The page of a freshly scaffolded (or hydrated) document. */
 const firstPage = (graph: SceneGraph) => {
@@ -216,5 +221,70 @@ describe('colors', () => {
     expect(colorFromCss('#6b422680')?.a).toBeCloseTo(0.5)
     expect(colorFromCss('#abc')?.r).toBeCloseTo(170 / 255)
     expect(colorFromCss('nope')).toBeUndefined()
+  })
+})
+
+/**
+ * 交出去的 PPT 里的字体名（v1.60）。
+ *
+ * 这一组钉的是一次真机事故：设计稿里的字体名是**我们自己这边的东西**（拉丁字面 `Inter`、
+ * 汉字靠 vendored 的 `Noto Sans SC` 回落），而幻灯片里的原生文本是**对方的 PowerPoint**
+ * 排的——那个 `typeface` 会在对方机器上解析，写 `Inter` 的结果是找不到字体、汉字又没有
+ * 字形，中文整段丢。
+ */
+describe('ppt fonts', () => {
+  it('只有幻灯片那条路要换：图片 / PDF / fig 的字体名是拿去给渲染器找字面的，动不得', () => {
+    expect(retargetsTextFonts('pptx')).toBe(true)
+    for (const other of ['fig', 'png', 'pdf']) expect(retargetsTextFonts(other)).toBe(false)
+  })
+
+  it('把设计稿那套内部字体名换成对方机器上有的那个', () => {
+    const graph = scaffoldDesignDocument()
+    const title = graph.createNode('TEXT', firstBoard(graph).id, { name: '标题', text: '主视觉：你好' })
+    // 先钉住「设计稿里确实是 Inter」——不然这条判据可能什么都没测到。
+    expect(title.fontFamily).toBe('Inter')
+
+    retargetTextFonts(graph)
+
+    expect(title.fontFamily).toBe(PPT_TEXT_FAMILY)
+    expect(PPT_TEXT_FAMILY).toBe('Microsoft YaHei')
+  })
+
+  it('逐段字体一起换：run 上的名字会盖过节点那一个', () => {
+    const graph = scaffoldDesignDocument()
+    const title = graph.createNode('TEXT', firstBoard(graph).id, {
+      name: '标题',
+      text: '普通粗体',
+      fontFamily: 'Noto Sans SC',
+      styleRuns: [{ start: 2, length: 2, style: { fontFamily: 'Noto Sans SC' } }],
+    })
+
+    retargetTextFonts(graph)
+
+    expect(title.fontFamily).toBe(PPT_TEXT_FAMILY)
+    expect(title.styleRuns[0]?.style.fontFamily).toBe(PPT_TEXT_FAMILY)
+  })
+
+  it('只换文字：容器与形状碰都不碰（字体字段在那儿不代表画得出字）', () => {
+    const graph = scaffoldDesignDocument()
+    const board = firstBoard(graph)
+    const rect = graph.createNode('RECTANGLE', board.id, { name: '色块' })
+    graph.createNode('TEXT', board.id, { name: '标题', text: '设计' })
+
+    retargetTextFonts(graph)
+
+    expect(board.fontFamily).toBe('Inter')
+    expect(rect.fontFamily).toBe('Inter')
+  })
+
+  it('区域里嵌了层容器也换得到（走的是整棵页面树，不是只扫顶层）', () => {
+    const graph = scaffoldDesignDocument()
+    const region = graph.createNode('SECTION', firstPage(graph).id, { name: '区域' })
+    const inner = graph.createNode('FRAME', region.id, { name: '区域里的容器' })
+    const deep = graph.createNode('TEXT', inner.id, { name: '标题', text: '深一层' })
+
+    retargetTextFonts(graph)
+
+    expect(deep.fontFamily).toBe(PPT_TEXT_FAMILY)
   })
 })

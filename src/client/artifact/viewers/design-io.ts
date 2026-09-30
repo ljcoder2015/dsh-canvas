@@ -21,6 +21,11 @@
  * 名字报出来）。悄悄少一张图比导不出来坏得多——这条规矩与 v1.57 的文本导出、v1.58 的应用
  * 打包是同一条。
  *
+ * **四、只有 PPT 那条路要换字体名。** 另外三条的字是我们自己画出来的，字体名在那边是
+ * 「拿去 fontManager 里找字面」用的，动了反而画不出字；而幻灯片里的原生文本是把文字连同
+ * `typeface` 一起交给**对方的 PowerPoint** 排，那个名字得在对方机器上成立。理由与选名
+ * 见 `core/artifact/design/ppt-font.ts`。
+ *
  * 这个模块**只住在引擎 chunk 里**（`lib/assets/design-engine.js`）：它 import 的是
  * `@open-pencil/core/io`，而场景图的类身份必须全页唯一（见 `design-engine.ts` 开头的两条
  * 理由）。client.js 那边只看 `design-engine-types.ts` 里声明的形状。
@@ -29,6 +34,7 @@ import { BUILTIN_IO_FORMATS, IORegistry } from '@open-pencil/core/io'
 import type { ExportTarget, IOContext } from '@open-pencil/core/io'
 import type { SceneGraph, SceneNode } from '@open-pencil/scene-graph'
 import { containersOf, decodeDesignFile, pageOf } from '../../../core/artifact/design/document.ts'
+import { retargetsTextFonts, retargetTextFonts } from '../../../core/artifact/design/ppt-font.ts'
 import { createExportRenderer, type ExportRenderer } from './design-skia.ts'
 import type { DesignExportOutcome, DesignExportRequest, DesignExportUnit } from './design-engine-types.ts'
 
@@ -59,6 +65,11 @@ export async function exportDesignDocument(request: DesignExportRequest): Promis
 
   const containers = containersOf(graph).filter((node) => node.visible)
   if (containers.length === 0) return { kind: 'refused', reason: 'empty' }
+
+  // 幻灯片里的文字是**对方**的 PowerPoint 排的，字体名得在对方机器上成立：先把设计稿
+  // 那套内部名字换掉，否则中文整段丢（见 `core/artifact/design/ppt-font.ts`）。另外三条
+  // 路的字体名是拿去给我们的渲染器找字面的，一个字都不能动。
+  if (retargetsTextFonts(request.format)) retargetTextFonts(graph)
 
   // 渲染器**先起**：fig 用它画缩略图（没有也照导，只是缩略图退成 1×1），图片与 PPT 则
   // 非要它不可。一条路起一次，四种格式共用同一个判断。
