@@ -10,13 +10,19 @@
  *   见 DesignSidePanels 的 onSelectLayer）；
  *   展示顺序取子节点**倒序**（场景图 latter-on-top，图层面板惯例顶层在上）。
  * - 属性面板：顶部「设计 / AI」两个标签页。设计页按模块分组编辑选中图层
- *   （名称、位置 X·Y/旋转角、形状 W·H/圆角（统一或四角独立）/裁切溢出、外观
- *   填充/不透明、文本/字号、边框动态数组（颜色/宽度/实虚线/内外居中描边/
+ *   （名称、位置 X·Y/旋转角、形状 W·H/圆角（统一或四角独立）/裁切溢出、
+ *   **形状特有属性**（多边形的边数、星形的角数+内径、椭圆的弧：起点/扫过角/内径）、
+ *   外观填充/不透明/**混合模式**、文本内容与**排版**（字体/字重/字号/行距/字距/对齐）
+ *   与**尺寸行为**、边框动态数组（颜色/宽度/实虚线/内外居中描边/
  *   作用边）、阴影、内阴影、模糊）；AI 页是一个提示词框：**选中的图层折成框内的
  *   内联标签**（与元素选择同一条折法——值里那一段原文照旧，只是另画一种样子），
  *   底栏是模型席位与发送。单选模式下框里始终是一枚跟着选区走的标签；多选模式下
  *   一段段累积（选一批写一句、再选一批再写一句，见 AiChip）。AI 页更宽：框里
  *   要装得下标签和一整句话。
+ *
+ * 「哪种类型显示哪几格、下拉里有什么可选、值怎么夹」一律问纯判据模块
+ * （`core/artifact/design/node-props.ts`，F2.6）：面板这一层只把答案画成控件，
+ * 不许自己判类型、也不许再列一遍取值——两份取值表迟早说两样话。
  *
  * 发出去之后这一笔归 viewer：那批图层被圈起来（流光扫过被改的那一块），画布与面板一起
  * 锁上——改稿在别人手里，这里的每一笔改动都是两个人同时写一份文档。改完落地自动收。
@@ -29,6 +35,25 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import type { PromptFold } from '../../../core/artifact/prompt-blocks.ts'
+import {
+  BLEND_MODES,
+  type BlendModeId,
+  POINT_COUNT_MAX,
+  POINT_COUNT_MIN,
+  TEXT_ALIGNMENTS,
+  TEXT_AUTO_RESIZE,
+  TEXT_FAMILIES,
+  type TextAlignId,
+  type TextAutoResizeId,
+  arcAngles,
+  arcSweep,
+  hasStarInnerRadius,
+  shapeTraitsOf,
+  settleWeight,
+  weightLabel,
+  weightsOf,
+} from '../../../core/artifact/design/node-props.ts'
+import { canRemovePage, pageLabel } from '../../../core/artifact/design/pages.ts'
 import { useChrome } from '../chrome.tsx'
 import { ModelPicker } from '../../ui/model-picker.tsx'
 import { PromptInput } from '../../ui/prompt-input.tsx'
@@ -392,17 +417,76 @@ const TYPE_LABELS: Record<string, string> = {
   'shape-with-text': '图形文字',
 }
 
-// —— 页面面板 ————————————————————————————————————————————————————————
+// —— 页面管理 ————————————————————————————————————————————————————————
 
+/**
+ * 页面行的左边距：与图层面板那一列的**基本缩进**取同一个值。
+ *
+ * 那边是 `4 + 层深 × 12`（顶层节点就是 4px，接着才是折叠箭头与类型徽标），页是平的、
+ * 没有这两样，于是只跟那 4px 对齐——两段列表挨在一起，左沿看着是一条线。
+ */
+const PAGE_INDENT = 4
+
+/** 复制：两片重叠的方角纸（Figma 那一副）。 */
+function CopyGlyph(): ReactElement {
+  return (
+    <Glyph>
+      <rect x="9" y="9" width="11" height="11" rx="2.5" />
+      <path d="M6 15H5.5A2.5 2.5 0 0 1 3 12.5v-7A2.5 2.5 0 0 1 5.5 3h7A2.5 2.5 0 0 1 15 5.5V6" />
+    </Glyph>
+  )
+}
+
+/** 重命名：铅笔（笔尖朝左下，与 Figma 的编辑图标同一根）。 */
+function PencilGlyph(): ReactElement {
+  return (
+    <Glyph>
+      <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" />
+    </Glyph>
+  )
+}
+
+/** 删除：废纸篓（盖子 + 桶身 + 两道竖纹）。 */
+function TrashGlyph(): ReactElement {
+  return (
+    <Glyph>
+      <path d="M4 7h16M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7" />
+      <path d="M6.5 7 7.4 19a1.6 1.6 0 0 0 1.6 1.5h6a1.6 1.6 0 0 0 1.6-1.5L17.5 7" />
+      <path d="M10.5 11v6M13.5 11v6" />
+    </Glyph>
+  )
+}
+
+/**
+ * 页面管理（F2.8）：图层面板**上面**那一段。
+ *
+ * 四件事各有各的位置：**新建**在标题栏（空文档也得能加页，且它是唯一不针对某一行的动作），
+ * **复制 / 重命名 / 删除**在每一行行尾——当前页那三枚常显（这一栏的操作本来就只有这三件，
+ * 全藏进悬停里等于没有），其余行悬停才露。
+ *
+ * 两条不显眼但必须的规矩：
+ *
+ * - **名字一律过 `pageLabel`**：空名的页（只有模型手写的文档才可能）也得有一行字。
+ * - **删除要二次确认**：上游的 `deletePage` 直接删图上那个节点、**不进撤销栈**，删掉就没了
+ *   （见 `design-engine-types.ts` 那一格的注释）。确认**落在行内**（那一行本来就是它的主语）：
+ *   行染上一层警示色，行尾那三枚换成「删除 / 取消」两枚——**页名留在原地**，所以「删的是哪
+ *   一页」不必再问一遍。不做弹窗：面板这一层没有别的地方可以弹，而用户此刻看的就是这一行。
+ */
 function PagesPanel({ snapshot, engine, onAction }: DesignPanelsProps): ReactElement {
   const [renaming, setRenaming] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<string | null>(null)
+  // 「能不能删」只问这一句（只剩一页时不给删，上游也拒）——面板不许自己数一遍。
+  const canRemove = canRemovePage(snapshot.pages.length)
   return (
     <section className="dsh-canvas-design-panel">
       <header className="dsh-canvas-design-panel-head">
         页面
         <button
           type="button"
-          title="新建页面"
+          className="dsh-canvas-design-tip is-right"
+          aria-label="新建页面"
+          data-tip="新建页面"
+          onPointerEnter={(event) => placeTip(event.currentTarget)}
           onClick={() => {
             engine.addPage()
             onAction()
@@ -412,48 +496,124 @@ function PagesPanel({ snapshot, engine, onAction }: DesignPanelsProps): ReactEle
         </button>
       </header>
       <ul className="dsh-canvas-design-panel-list">
-        {snapshot.pages.map((page) => (
-          <li
-            key={page.id}
-            className={page.id === snapshot.currentPageId ? 'is-active' : undefined}
-            onClick={() => {
-              if (page.id !== snapshot.currentPageId) {
-                engine.setPage(page.id)
-                onAction()
-              }
-            }}
-            onDoubleClick={() => setRenaming(page.id)}
-          >
-            {renaming === page.id ? (
-              <TextField
-                autoFocus
-                value={page.name}
-                onCommit={(name) => {
-                  engine.renamePage(page.id, name)
-                  setRenaming(null)
+        {snapshot.pages.map((page) => {
+          const isActive = page.id === snapshot.currentPageId
+          const isConfirming = confirming === page.id
+          const rowClass = [
+            'dsh-canvas-design-page',
+            isActive ? 'is-active' : undefined,
+            isConfirming ? 'is-confirming' : undefined,
+          ].filter(Boolean).join(' ')
+          return (
+            <li key={page.id}>
+              <div
+                className={rowClass}
+                style={{ paddingLeft: PAGE_INDENT }}
+                // 确认态那一行点哪儿都不该切页：这一刻它问的是一个是非题。
+                onClick={() => {
+                  if (isConfirming || isActive) return
+                  engine.setPage(page.id)
                   onAction()
                 }}
-                onCancel={() => setRenaming(null)}
-              />
-            ) : (
-              <span className="dsh-canvas-design-row-name" title={page.name}>{page.name}</span>
-            )}
-            {snapshot.pages.length > 1 && page.id === snapshot.currentPageId ? (
-              <button
-                type="button"
-                className="dsh-canvas-design-row-act"
-                title="删除此页"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  engine.deletePage(page.id)
-                  onAction()
+                onDoubleClick={() => {
+                  if (isConfirming) return
+                  setRenaming(page.id)
                 }}
               >
-                ×
-              </button>
-            ) : null}
-          </li>
-        ))}
+                {renaming === page.id ? (
+                  <span className="dsh-canvas-design-row-name">
+                    <TextField
+                      autoFocus
+                      value={page.name}
+                      onCommit={(name) => {
+                        engine.renamePage(page.id, name)
+                        setRenaming(null)
+                        onAction()
+                      }}
+                      onCancel={() => setRenaming(null)}
+                    />
+                  </span>
+                ) : (
+                  <span className="dsh-canvas-design-row-name" title={pageLabel(page.name)}>
+                    {pageLabel(page.name)}
+                  </span>
+                )}
+                {isConfirming ? (
+                  <>
+                    <button
+                      type="button"
+                      className="dsh-canvas-design-page-act is-danger"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setConfirming(null)
+                        engine.deletePage(page.id)
+                        onAction()
+                      }}
+                    >
+                      删除
+                    </button>
+                    <button
+                      type="button"
+                      className="dsh-canvas-design-page-act"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setConfirming(null)
+                      }}
+                    >
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="dsh-canvas-design-row-act dsh-canvas-design-tip"
+                      aria-label="复制页面"
+                      data-tip="复制页面"
+                      onPointerEnter={(event) => placeTip(event.currentTarget)}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        engine.duplicatePage(page.id)
+                        onAction()
+                      }}
+                    >
+                      <CopyGlyph />
+                    </button>
+                    <button
+                      type="button"
+                      className="dsh-canvas-design-row-act dsh-canvas-design-tip"
+                      aria-label="重命名页面"
+                      data-tip="重命名页面"
+                      onPointerEnter={(event) => placeTip(event.currentTarget)}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setRenaming(page.id)
+                      }}
+                    >
+                      <PencilGlyph />
+                    </button>
+                    {canRemove ? (
+                      <button
+                        type="button"
+                        className="dsh-canvas-design-row-act dsh-canvas-design-tip is-danger"
+                        aria-label="删除页面"
+                        data-tip="删除页面"
+                        onPointerEnter={(event) => placeTip(event.currentTarget)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setRenaming(null)
+                          setConfirming(page.id)
+                        }}
+                      >
+                        <TrashGlyph />
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </li>
+          )
+        })}
       </ul>
     </section>
   )
@@ -739,6 +899,34 @@ function DesignPropertiesTab({ snapshot, engine, onAction, revision }: DesignPan
     })
   }
 
+  // 形状特有属性（F2.6）：**按类型露哪几格只问 `shapeTraitsOf`**，面板里不许再写
+  // `type === 'polygon'` 这类判断（判据在纯模块里，测得到）。
+  const traits = shapeTraitsOf(read.type)
+  const arc = read.arc
+  /**
+   * 字重下拉的可选项：这支字面真到货的档，外加**当前值本身**（它不在表里时）。
+   *
+   * 旧文档里可能落着一个我们没有字面的字重（如 300）：把这一格丢掉的话，控件显示空的，
+   * 用户看不见真值、一碰就悄悄改成别的；列出来至少是诚实的——选一个真有的档就是修好它。
+   */
+  const weights = weightsOf(read.fontFamily)
+  const weightOptions = weights.includes(read.fontWeight)
+    ? weights
+    : [...weights, read.fontWeight].sort((a, b) => a - b)
+  /**
+   * 写弧：起点/扫过角/内径三格共享同一个弧，改一格要把另两格一起带上（整组替换）。
+   * 「起点 + 扫过角 → 起点/终点角」的换算在纯模块 `arcAngles` 里，面板不做算术。
+   */
+  const writeArc = (patch: { start?: number; sweep?: number; inner?: number }): void => {
+    const current = arc ?? { startingAngle: 0, endingAngle: 270, innerRadius: 0 }
+    commit({
+      arc: {
+        ...arcAngles(patch.start ?? current.startingAngle, patch.sweep ?? arcSweep(current)),
+        innerRadius: patch.inner ?? current.innerRadius,
+      },
+    })
+  }
+
   const isFrame = read.type === 'frame'
   const isText = read.type === 'text'
   return (
@@ -830,6 +1018,79 @@ function DesignPropertiesTab({ snapshot, engine, onAction, revision }: DesignPan
         ) : null}
       </Module>
 
+      {/* 形状特有属性（F2.6）：多边形的边数、星形的角数共用场景图同一个 `pointCount`，
+          星形另有内径；椭圆的弧存的是**起点/终点角**，面板按 Figma 的说法给「起点 + 扫过角」。 */}
+      {traits.title === '' ? null : (
+        <Module title={traits.title}>
+          <label className="dsh-canvas-design-field">
+            <span>{traits.pointCountLabel}</span>
+            <NumField
+              value={read.pointCount}
+              min={POINT_COUNT_MIN}
+              max={POINT_COUNT_MAX}
+              onCommit={(pointCount) => commit({ pointCount })}
+            />
+          </label>
+          {hasStarInnerRadius(read.type) ? (
+            <label className="dsh-canvas-design-field">
+              <span>内径</span>
+              <NumField
+                value={Math.round(read.starInnerRadius * 100)}
+                min={0}
+                max={100}
+                onCommit={(value) => commit({ starInnerRadius: value / 100 })}
+              />
+            </label>
+          ) : null}
+        </Module>
+      )}
+
+      {traits.arc ? (
+        <Module
+          title="弧"
+          action={
+            <button
+              type="button"
+              onClick={() => (arc === null ? writeArc({ sweep: 270 }) : commit({ arc: null }))}
+            >
+              {arc === null ? '转为弧' : '还原整圆'}
+            </button>
+          }
+        >
+          {arc === null ? (
+            <span className="dsh-canvas-design-module-empty">完整椭圆</span>
+          ) : (
+            <>
+              <div className="dsh-canvas-design-grid2">
+                <label className="dsh-canvas-design-field">
+                  <span>起点</span>
+                  <NumField value={arc.startingAngle} onCommit={(start) => writeArc({ start })} />
+                </label>
+                <label className="dsh-canvas-design-field">
+                  <span>扫过</span>
+                  {/* 扫过角与 Figma 同为 −360…360（负值=反向扫） */}
+                  <NumField
+                    value={arcSweep(arc)}
+                    min={-360}
+                    max={360}
+                    onCommit={(sweep) => writeArc({ sweep })}
+                  />
+                </label>
+              </div>
+              <label className="dsh-canvas-design-field">
+                <span>内径</span>
+                <NumField
+                  value={Math.round(arc.innerRadius * 100)}
+                  min={0}
+                  max={100}
+                  onCommit={(value) => writeArc({ inner: value / 100 })}
+                />
+              </label>
+            </>
+          )}
+        </Module>
+      ) : null}
+
       <Module title="外观">
         <label className="dsh-canvas-design-field">
           <span>填充</span>
@@ -848,19 +1109,85 @@ function DesignPropertiesTab({ snapshot, engine, onAction, revision }: DesignPan
             onCommit={(value) => commit({ opacity: Math.min(1, Math.max(0, value / 100)) })}
           />
         </label>
+        {/* 混合模式在 Figma 里归「图层」那一节，我们并进外观——它改的是这个图层**怎么和
+            下面的东西合成**，和填充/不透明是同一件事的三种说法。取值表来自纯判据模块
+            （`node-props.ts`），别处不许再列一遍。 */}
+        <SelectField
+          value={read.blendMode}
+          options={BLEND_MODES.map((mode) => ({ value: mode.id, label: mode.label }))}
+          onChange={(next) => commit({ blendMode: next as BlendModeId })}
+        />
       </Module>
 
       {isText ? (
-        <Module title="文本">
-          <label className="dsh-canvas-design-field">
-            <span>文本</span>
-            <TextField value={read.text} onCommit={(text) => commit({ text })} />
-          </label>
-          <label className="dsh-canvas-design-field">
-            <span>字号</span>
-            <NumField value={read.fontSize} min={1} onCommit={(fontSize) => commit({ fontSize })} />
-          </label>
-        </Module>
+        <>
+          <Module title="文本">
+            <label className="dsh-canvas-design-field">
+              <span>内容</span>
+              <TextField value={read.text} onCommit={(text) => commit({ text })} />
+            </label>
+          </Module>
+
+          {/* 排版（F2.6）：字体下拉里只会出现**真注册过的字面**（`TEXT_FAMILIES`），
+              列一支没装上的一眼看上去没差别——画布上文字是空白的，什么也不报。 */}
+          <Module title="排版">
+            <SelectField
+              value={read.fontFamily}
+              options={TEXT_FAMILIES.map((family) => ({ value: family.id, label: family.label }))}
+              onChange={(fontFamily) =>
+                // 换字体**连带把字重落回这支字面真有的档**（中文只有 Regular）：
+                // 两格一起写，一次编辑一笔 undo，不留中间态。
+                commit({ fontFamily, fontWeight: settleWeight(fontFamily, read.fontWeight) })
+              }
+            />
+            {weightOptions.length > 1 ? (
+              <SelectField
+                value={String(read.fontWeight)}
+                options={weightOptions.map((weight) => ({ value: String(weight), label: weightLabel(weight) }))}
+                onChange={(next) => commit({ fontWeight: Number(next) })}
+              />
+            ) : null}
+            <div className="dsh-canvas-design-grid2">
+              <label className="dsh-canvas-design-field">
+                <span>字号</span>
+                <NumField value={read.fontSize} min={1} onCommit={(fontSize) => commit({ fontSize })} />
+              </label>
+              <label className="dsh-canvas-design-field">
+                <span>字距</span>
+                <NumField value={read.letterSpacing} onCommit={(letterSpacing) => commit({ letterSpacing })} />
+              </label>
+            </div>
+            <CheckField
+              label="行高自动"
+              checked={read.lineHeight === null}
+              // 关掉自动时给一个确定的起点（1.5 倍字号，Figma 的默认行距口径）；
+              // 开着就是 `null`——场景图按字面自己排。
+              onChange={(auto) =>
+                commit({ lineHeight: auto ? null : Math.max(1, Math.round(read.fontSize * 1.5)) })
+              }
+            />
+            {read.lineHeight === null ? null : (
+              <label className="dsh-canvas-design-field">
+                <span>行高</span>
+                <NumField value={read.lineHeight} min={1} onCommit={(lineHeight) => commit({ lineHeight })} />
+              </label>
+            )}
+            <SelectField
+              value={read.textAlignHorizontal}
+              options={TEXT_ALIGNMENTS.map((align) => ({ value: align.id, label: align.label }))}
+              onChange={(next) => commit({ textAlignHorizontal: next as TextAlignId })}
+            />
+          </Module>
+
+          {/* 尺寸行为：自动宽高 / 自动高度 / 固定 / 截断——文本块会不会被内容撑开。 */}
+          <Module title="尺寸行为">
+            <SelectField
+              value={read.textAutoResize}
+              options={TEXT_AUTO_RESIZE.map((mode) => ({ value: mode.id, label: mode.label }))}
+              onChange={(next) => commit({ textAutoResize: next as TextAutoResizeId })}
+            />
+          </Module>
+        </>
       ) : null}
 
       <BordersModule items={read.strokes} commit={(strokes) => commit({ strokes })} />

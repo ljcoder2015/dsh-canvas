@@ -7,6 +7,13 @@
  * 双方 `import type` 引用—— erased，不把 scene-graph 拖进任何一侧。
  */
 
+/**
+ * 属性面板两个「有固定取值集合」的字段（混合模式、文本尺寸行为）的联合类型，从判据表
+ * （`core/artifact/design/node-props.ts`）取——**只引类型**（erased），类型模块仍是零依赖，
+ * 而面板、引擎、判据三处对同一组取值只有一份声明。
+ */
+import type { BlendModeId, TextAlignId, TextAutoResizeId } from '../../../core/artifact/design/node-props.ts'
+
 /** The UMD `canvaskit.js` runtime's slice the engine touches. */
 export interface CanvasKitRuntime {
   MakeWebGLCanvasSurface?: (element: HTMLCanvasElement) => SurfaceLike | null
@@ -146,11 +153,24 @@ export interface DesignEngine {
   snapshot(): DesignSnapshot
   /** 切换当前页（异步：core 会做字体/layout 准备），完成后引擎自会请求重画。 */
   setPage(pageId: string): void
-  /** 新建页面并切过去。 */
+  /** 新建页面并切过去（默认名「页面 N」，取第一个空位）。 */
   addPage(): void
-  /** 重命名页面。 */
+  /**
+   * 复制一页：新页带上源页整棵子树，插在源页**后面**，并切到副本上。
+   *
+   * 上游的 page actions 只有「新建/删除/重命名/切页」四件，复制这一件是我们自己接的
+   * （机制在 `core/artifact/design/pages.ts` 的 `duplicatePageIn`，纯的）。传进来的不是
+   * 一页就什么也不做。
+   */
+  duplicatePage(pageId: string): void
+  /** 重命名页面（空名与同名都不放行）。 */
   renamePage(pageId: string, name: string): void
-  /** 删除页面（最后一页拒删；删当前页 core 会自动切到相邻页）。 */
+  /**
+   * 删除页面（最后一页拒删；删当前页 core 会自动切到相邻页）。
+   *
+   * **不进撤销栈**：上游这一支是直接 `graph.deleteNode`，不走 undo（新建与重命名同样不进）。
+   * 所以「删掉一页」在真机上是一去不回的——面板那一层的二次确认不是装饰。
+   */
   deletePage(pageId: string): void
   /** 把当前图序列化回 `.design` 信封文本（写盘用）。 */
   serialize(): string
@@ -213,12 +233,42 @@ export interface DesignNodeProps {
   independentCorners?: boolean
   /** frame 裁切溢出内容的开关（Figma 语义）。 */
   clipsContent?: boolean
+  /** 图层混合模式（F2.6）。 */
+  blendMode?: BlendModeId
+  /** 多边形/星形的边数或角数（整数，引擎侧夹到 3–60）。 */
+  pointCount?: number
+  /** 星形内径比例（0–1，引擎侧夹取）。 */
+  starInnerRadius?: number
+  /** 椭圆的弧；`null` = 完整椭圆。整组替换（面板按「起点 + 扫过角」算好了给）。 */
+  arc?: DesignArc | null
   /** 边框数组：整组替换（含作用边 → 节点级独立边宽的换算）。 */
   strokes?: DesignStrokeItem[]
   /** 效果数组：整组替换（面板负责分桶合并）。 */
   effects?: DesignEffectItem[]
   text?: string
   fontSize?: number
+  /** 字体族。**只能是 `fontManager` 真注册过的名字**（见 `node-props.ts` 的 TEXT_FAMILIES）。 */
+  fontFamily?: string
+  fontWeight?: number
+  /** 行高（px）；`null` = 自动（跟随字面）。 */
+  lineHeight?: number | null
+  /** 字间距（px，可负）。 */
+  letterSpacing?: number
+  textAlignHorizontal?: TextAlignId
+  /** 文本尺寸行为（自动宽高/自动高度/固定/截断）。 */
+  textAutoResize?: TextAutoResizeId
+}
+
+/**
+ * 椭圆的弧（与场景图 `ArcData` 同形）。
+ *
+ * 三个都是**原生单位**：角度是度、`innerRadius` 是 0–1 的比值（Figma 的 `arcData` 也是这个
+ * 口径）。面板把「起点 + 扫过角」换算成这里的起点/终点角（`node-props.ts` 的 `arcAngles`）。
+ */
+export interface DesignArc {
+  startingAngle: number
+  endingAngle: number
+  innerRadius: number
 }
 
 /** {@link DesignEngine.nodeProps} 的读面（全部必填，调用方按 type 取用）。 */
@@ -242,10 +292,20 @@ export interface DesignNodeRead {
   bottomLeftRadius: number
   independentCorners: boolean
   clipsContent: boolean
+  blendMode: BlendModeId
+  pointCount: number
+  starInnerRadius: number
+  arc: DesignArc | null
   strokes: DesignStrokeItem[]
   effects: DesignEffectItem[]
   text: string
   fontSize: number
+  fontFamily: string
+  fontWeight: number
+  lineHeight: number | null
+  letterSpacing: number
+  textAlignHorizontal: TextAlignId
+  textAutoResize: TextAutoResizeId
 }
 
 /** 页面列表项（页面面板）。 */

@@ -20,18 +20,24 @@ import { fontManager } from '@open-pencil/core/text'
 import type { CanvasKit, Surface } from 'canvaskit-wasm'
 import type { SceneGraph } from '@open-pencil/scene-graph'
 import { CJK_TEXT_FAMILY } from '../../../core/artifact/design/export-font.ts'
+import { LATIN_TEXT_FAMILY } from '../../../core/artifact/design/node-props.ts'
 import { assetUrl, loadCanvasKit } from './design-canvaskit.ts'
 import { type CanvasKitRuntime, type DesignBackend } from './design-engine-types.ts'
 
 /** The page backdrop behind the containers — matches `.dsh-canvas-design` CSS. */
 const CANVAS_COLOR = { r: 233 / 255, g: 235 / 255, b: 239 / 255, a: 1 }
 
-/** 默认字面四档——排版的地基，首帧之前必须就位（合计约 1.3MB）。 */
+/**
+ * 默认字面四档——排版的地基，首帧之前必须就位（合计约 1.3MB）。
+ *
+ * 族名从 `node-props.ts` 读：属性面板的「字体」下拉里列的就是**这里注册的**那几支字面，
+ * 两处各写一份字符串迟早会漂移，而漂移的后果是「下拉里选得中、画布上画不出」（静默空白）。
+ */
 const CORE_FONTS = [
-  ['Inter', 'Regular', 'Inter-Regular.ttf'],
-  ['Inter', 'Medium', 'Inter-Medium.ttf'],
-  ['Inter', 'SemiBold', 'Inter-SemiBold.ttf'],
-  ['Inter', 'Bold', 'Inter-Bold.ttf'],
+  [LATIN_TEXT_FAMILY, 'Regular', 'Inter-Regular.ttf'],
+  [LATIN_TEXT_FAMILY, 'Medium', 'Inter-Medium.ttf'],
+  [LATIN_TEXT_FAMILY, 'SemiBold', 'Inter-SemiBold.ttf'],
+  [LATIN_TEXT_FAMILY, 'Bold', 'Inter-Bold.ttf'],
 ] as const
 
 /**

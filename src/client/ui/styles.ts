@@ -717,6 +717,20 @@ body[data-ds-dark-theme] .dsh-canvas-root{
 /* 隐藏图层的眼睛常显——不然盖了眼睛的行看起来像凭空消失。 */
 .dsh-canvas-design-layer.is-hidden .dsh-canvas-design-row-act[data-tip='显示']{opacity:1}
 .dsh-canvas-design-row-act:hover{color:var(--dsh-fg)}
+/* 页面行那三枚动作（复制/重命名/删除）：当前页常显——页面这一栏的操作本来就只有这三件，
+   全藏进悬停里等于没有；确认态那一行也常显，「删除 / 取消」两枚若是藏着，这一问就没法回答。 */
+.dsh-canvas-design-panel-list li>div.dsh-canvas-design-page.is-active .dsh-canvas-design-row-act,
+.dsh-canvas-design-panel-list li>div.dsh-canvas-design-page.is-confirming .dsh-canvas-design-row-act{opacity:1}
+/* 删除那一枚悬停转红：一行里没有别的地方在说这一步不可逆。 */
+.dsh-canvas-design-row-act.is-danger:hover{color:var(--dsh-sunset)}
+/* 确认删除的那一行染一层警示色（盖在 hover/active 之上：它是这一刻唯一要回答的事）。 */
+.dsh-canvas-design-panel-list li>div.dsh-canvas-design-page.is-confirming{
+  background:color-mix(in srgb, var(--dsh-sunset) 14%, transparent)}
+/* 确认那一格的两枚按钮是**字**不是图标：按字排（11px、给点内边距），不必挤成 16px 的方框。 */
+.dsh-canvas-design-page-act{flex:none;border:none;background:transparent;cursor:pointer;
+  color:var(--dsh-fg-2);font:11px/16px var(--dsh-font);padding:1px 5px;border-radius:4px}
+.dsh-canvas-design-page-act:hover{background:var(--dsh-soft);color:var(--dsh-fg)}
+.dsh-canvas-design-page-act.is-danger{color:var(--dsh-sunset)}
 /* 属性面板表单：两列几何、整行外观，字段壳沿用属性条一族。
    宽度全是**定宽派生**：列宽来自侧栏、字段吃满一行、输入框吃满剩余——谁也不靠
    自己的固有宽度说话。input[type=number] 的固有宽约 125px，一进 1fr 轨道就

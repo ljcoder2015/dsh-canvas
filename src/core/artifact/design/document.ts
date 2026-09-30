@@ -10,8 +10,22 @@
  * 文件 = 一行头 + 正文。v1 的正文是 base64 的 Kiwi；v2 换成**场景图 JSON 快照**
  * （`SceneNode` 是可 structuredClone 的 plain 数据，JSON 天然无损），可读、
  * 可 diff、isomorphic，二进制（.fig 互通）留给确有刚需的那天。
+ *
+ * **「JSON 天然无损」有一个例外**，就是 {@link decodeDesignFile} 里那句
+ * {@link reviveInstanceOverrides}：实例覆写表里装着两个 `Map`（JSON 写成 `{}`），
+ * `Uint8Array` 类的字段（`textPicture`、几何 blob）同样会被写成对象——前者的复活是必须的
+ * （上游按 Map 用它），后者到目前为止没有来路（我们的稿子不由 .fig 导进来）。这一层吐出去的
+ * 节点必须与 `createNode` 造出来的**一样好用**，否则炸点会出现在很远的地方（复制页面）。
  */
-import { SceneGraph, type Color, type NodeType, type SceneNode } from '@open-pencil/scene-graph'
+import {
+  SceneGraph,
+  createInstanceOverrideState,
+  deserializeInstanceOverrideState,
+  type Color,
+  type NodeType,
+  type SceneNode,
+  type SerializedInstanceOverrideState,
+} from '@open-pencil/scene-graph'
 
 /** The envelope header every `.design` file starts with. */
 export const DESIGN_FILE_PREFIX = 'dsh-design-'
@@ -64,14 +78,37 @@ function containersUnder(graph: SceneGraph, parentId: string): SceneNode[] {
   return containers
 }
 
+/**
+ * **一页**的容器：那一页的 FRAME（穿区域），z 序。
+ *
+ * 画布那一侧（渲染、贴合、命中）要的都是这一份——一次只画一页。多页之后
+ * 「整份文档的容器」与「这一页的容器」是两件事：前者会把别页的容器也画在同一块画布上，
+ * 而两页的内容常常坐标完全相同（复制出来的页就是这样），叠起来看不出错，只看得见怪。
+ */
+export function containersIn(graph: SceneGraph, pageId: string): SceneNode[] {
+  return containersUnder(graph, pageId)
+}
+
 /** The containers of a document: the FRAME nodes of its pages (through regions), in z-order. */
 export function containersOf(graph: SceneGraph): SceneNode[] {
-  return graph.getPages().flatMap((page) => containersUnder(graph, page.id))
+  return graph.getPages().flatMap((page) => containersIn(graph, page.id))
 }
 
 /** The children of one node, in z-order. */
 export function childrenOf(graph: SceneGraph, id: string): SceneNode[] {
   return graph.getChildren(id)
+}
+
+/**
+ * 缩略图用哪一页：**第一页**。
+ *
+ * 不是「当前页」——缩略图是在离屏那侧画的（fig 写器的 `thumbnailPageId`、卡片截图），
+ * 那儿没有「当前」这个概念。也不是「随便一页」：上游的兜底只认一个叫 `cover` 的页
+ * （Figma 的封面页约定），我们的文档没有这个约定，而第一页就是整份文档的那一眼。
+ * 一份文档至少有一页（`canRemovePage`），真取不到时给 `undefined` 让调用方自己兜。
+ */
+export function firstPageId(graph: SceneGraph): string | undefined {
+  return graph.getPages()[0]?.id
 }
 
 /**
@@ -106,8 +143,8 @@ export function designDigest(graph: SceneGraph, budget = 40): { summary: string;
   const lines: string[] = []
   let used = 0
   for (const page of pages) {
-    // 区域里的容器也算这一页的容器——与 containersOf 同一套遍历口径。
-    const boards = containersUnder(graph, page.id)
+    // 区域里的容器也算这一页的容器——与 containersIn 同一套遍历口径。
+    const boards = containersIn(graph, page.id)
     lines.push(`页面 ${page.name}：${boards.length} 个容器`)
     used += 1
     for (const board of boards) {
@@ -171,9 +208,32 @@ export function decodeDesignFile(text: string): SceneGraph {
   graph.rootId = snapshot.rootId
   for (const node of snapshot.nodes) {
     if (typeof node?.id !== 'string') throw new Error('设计文档内容损坏（节点缺 id）')
+    node.instanceOverrides = reviveInstanceOverrides(node.instanceOverrides)
     graph.nodes.set(node.id, node)
   }
   return graph
+}
+
+/**
+ * 把**实例覆写表**从 JSON 里那个形状复活成内存里那个形状。
+ *
+ * 这是「快照是 plain 数据」这话的**例外**：`instanceOverrides` 里装着两个 `Map`
+ * （`createInstanceOverrideState()` 的 `{ self, descendants }`），而 `JSON.stringify` 把 Map
+ * 写成 `{}`。不解回来，任何按 Map 用它 的上游代码都会炸——`cloneTree` 第一句就是
+ * `[...state.self]`，`{}` 不可迭代：**于是「复制页面」在每一份真文档上都直接抛**
+ * （v1.65 做 fig 换行时抓到；`pages.spec.ts` 全绿是因为那些判据都在**内存图**上跑，
+ * 从来没喂过一份 `decodeDesignFile` 出来的图）。
+ *
+ * 空表是常态（覆写只从真 Figma 文件来），所以这里只认一件事：**不是数组的就当空表**，
+ * 是数组的照上游那套反序列化（值本身还带类型标记，不能自己解）。
+ */
+function reviveInstanceOverrides(value: unknown): SceneNode['instanceOverrides'] {
+  const raw = (value ?? {}) as { self?: unknown; descendants?: unknown }
+  if (!Array.isArray(raw.self) && !Array.isArray(raw.descendants)) return createInstanceOverrideState()
+  return deserializeInstanceOverrideState({
+    self: Array.isArray(raw.self) ? raw.self : [],
+    descendants: Array.isArray(raw.descendants) ? raw.descendants : [],
+  } as SerializedInstanceOverrideState)
 }
 
 // ── model-facing JSON (wire) ───────────────────────────────────────────────

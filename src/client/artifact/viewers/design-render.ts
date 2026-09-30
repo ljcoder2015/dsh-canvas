@@ -17,7 +17,7 @@
  * editing UI are later milestones. This module only answers "what does the
  * document look like".
  */
-import { containersOf, colorToCss, type DesignGraph, type SceneNode } from '../../../core/artifact/design/document.ts'
+import { containersIn, colorToCss, type DesignGraph, type SceneNode } from '../../../core/artifact/design/document.ts'
 
 /** The gutter between containers when the zoom-to-fit needs a target box. */
 export const ARTBOARD_GUTTER = 64
@@ -52,11 +52,17 @@ export interface DesignPaintOps {
   popClip(): void
 }
 
-/** The bounding box of all containers, in document units. */
-export function documentBounds(graph: DesignGraph): { x: number; y: number; width: number; height: number } {
+/**
+ * 一页里所有容器的包围盒，文档单位。
+ *
+ * `pageId` 是**必填**的：一次只画一页，贴合也得只按这一页算。传 `''`（还没定页）时
+ * 退回 1×1 的空框——比「把全文档的容器一起框进来」安全得多，后者在多页之后会把镜头
+ * 拉到一屏装下所有页。
+ */
+export function documentBounds(graph: DesignGraph, pageId: string): { x: number; y: number; width: number; height: number } {
   let right = 1
   let bottom = 1
-  for (const board of containersOf(graph)) {
+  for (const board of containersIn(graph, pageId)) {
     // 区域里的容器，坐标是**相对区域**的——取绝对原点才是一份文档里的位置。
     const origin = graph.getAbsolutePosition(board.id)
     right = Math.max(right, origin.x + board.width)
@@ -65,9 +71,9 @@ export function documentBounds(graph: DesignGraph): { x: number; y: number; widt
   return { x: 0, y: 0, width: right, height: bottom }
 }
 
-/** The zoom-to-fit transform for a document inside a viewport of the given size. */
-export function fitTransform(graph: DesignGraph, viewportWidth: number, viewportHeight: number): { x: number; y: number; scale: number } {
-  const bounds = documentBounds(graph)
+/** The zoom-to-fit transform for a page inside a viewport of the given size. */
+export function fitTransform(graph: DesignGraph, pageId: string, viewportWidth: number, viewportHeight: number): { x: number; y: number; scale: number } {
+  const bounds = documentBounds(graph, pageId)
   const scale = Math.min((viewportWidth - ARTBOARD_GUTTER) / bounds.width, (viewportHeight - ARTBOARD_GUTTER) / bounds.height, 1)
   const safe = Math.max(scale, 0.01)
   return {
@@ -77,9 +83,9 @@ export function fitTransform(graph: DesignGraph, viewportWidth: number, viewport
   }
 }
 
-/** Paint the document through `ops`. Screen origin of a container = transform + its absolute origin·scale. */
-export function paintDocument(graph: DesignGraph, ops: DesignPaintOps, transform: { x: number; y: number; scale: number }): void {
-  for (const board of containersOf(graph)) {
+/** 把**这一页**的容器画进 `ops`。屏幕原点 = transform + 容器的绝对原点·scale。 */
+export function paintDocument(graph: DesignGraph, ops: DesignPaintOps, transform: { x: number; y: number; scale: number }, pageId: string): void {
+  for (const board of containersIn(graph, pageId)) {
     if (!board.visible) continue
     // 与 documentBounds 同一口径：区域里的容器要按绝对原点落笔。
     const origin = graph.getAbsolutePosition(board.id)

@@ -18,7 +18,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { CanvasBridge } from '../wire/bridge.ts'
-import { decodeDesignFile } from '../../core/artifact/design/document.ts'
+import { decodeDesignFile, firstPageId } from '../../core/artifact/design/document.ts'
 import { canvas2dBackend, documentBounds, paintDocument } from '../artifact/viewers/design-render.ts'
 
 /** 设计截图的离屏画布尺寸：预览区约 200×114，按 2x 画，缩放板上看不糊。 */
@@ -68,8 +68,12 @@ function designShot(bridge: CanvasBridge, projectId: string, cardId: string, byt
         canvas.height = SHOT_HEIGHT
         const context = canvas.getContext('2d')
         if (context === null) return undefined
+        // 卡片缩略图画的是**第一页**（`firstPageId`：离屏这侧没有「当前页」，与 fig 写器的
+        // 缩略图同一口径）；一页都没有的图（坏文档）就不给缩略图。
+        const pageId = firstPageId(graph)
+        if (pageId === undefined) return undefined
         // 缩放封顶在 1：小文档放大到糊不如留白，与全屏预览的 zoom-to-fit 同一约定。
-        const bounds = documentBounds(graph)
+        const bounds = documentBounds(graph, pageId)
         const scale = Math.min(SHOT_WIDTH / bounds.width, SHOT_HEIGHT / bounds.height, 1)
         paintDocument(
           graph,
@@ -79,6 +83,7 @@ function designShot(bridge: CanvasBridge, projectId: string, cardId: string, byt
             y: (SHOT_HEIGHT - bounds.height * scale) / 2,
             scale,
           },
+          pageId,
         )
         return canvas.toDataURL('image/png')
       })

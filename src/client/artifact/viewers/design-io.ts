@@ -29,6 +29,23 @@
  * `fontManager` 找字面」用的。理由、选名与「PDF 还要顺手收字重」见
  * `core/artifact/design/export-font.ts`。
  *
+ * **五、fig 那条还要多做两件事，都是在**同一份一次性图**上做的**（v1.65，理由与症状见
+ * `core/artifact/design/fig-text.ts`）：
+ *
+ * 1. **把中文字面按稿子用到的每个样式名登记一遍**。写器取字形轮廓与字体摘要都按
+ *    「字族 + 样式名」去 `fontManager` 找，而手里只有一支 Regular——写着 700 的字于是取到
+ *    `null`：字形数组空、摘要空，在 Figma 里就是「这段字不见了」。
+ * 2. **把「写器会烘歪」的文本改写成一行一个节点**。写器的烘字形那一步只对「单行 + 左上对齐」
+ *    成立：它把整段按同一行摆（`baselines` 只写一条、`\n` 还会落到 `.notdef` 变成一个方块），
+ *    坐标又恒从**节点原点**起算（水平居中/右对齐那段偏移、垂直居中/靠底那段偏移都烘不进去）。
+ *    改写用的是**画布自己那份段落**的逐行量，所以折行位置与对齐偏移都必然与画布一致——我们只是
+ *    把「一次画 N 行 / 画在框中间」换成「N 个节点、每个贴住自己那一行」。
+ *
+ * 两件事都**只碰「不修就会烘歪」的那些节点**：字体那一半只碰缺字面的样式；改写那一半只碰
+ * **多行、或对齐偏移非零**的文本（判据在 `fig-text.ts` 的 `worthRewriting`——单行 + 左上对齐
+ * 是写器唯一烘得对的那种形状，一个字段都不碰）。于是这一版的炸面就停在「画布上一眼能看出
+ * 会被烘歪」的那些文字上。
+ *
  * 这个模块**只住在引擎 chunk 里**（`lib/assets/design-engine.js`）：它 import 的是
  * `@open-pencil/core/io`，而场景图的类身份必须全页唯一（见 `design-engine.ts` 开头的两条
  * 理由）。client.js 那边只看 `design-engine-types.ts` 里声明的形状。
@@ -41,12 +58,21 @@ import {
 } from '@open-pencil/core/io'
 import type { ExportTarget, IOContext } from '@open-pencil/core/io'
 import type { SceneGraph, SceneNode } from '@open-pencil/scene-graph'
-import { containersOf, decodeDesignFile, pageOf } from '../../../core/artifact/design/document.ts'
+import { fontManager } from '@open-pencil/core/text'
+import { containersOf, decodeDesignFile, firstPageId, pageOf } from '../../../core/artifact/design/document.ts'
 import {
+  CJK_TEXT_FAMILY,
   exportTextRetarget,
   pdfTextStyles,
   retargetTextFonts,
 } from '../../../core/artifact/design/export-font.ts'
+import {
+  figLineNodes,
+  figTextStyles,
+  type FigLineNode,
+  type FigTextLine,
+} from '../../../core/artifact/design/fig-text.ts'
+import type { SkiaRenderer } from '@open-pencil/core/canvas'
 import { createExportRenderer, ensureCJKFont, type ExportRenderer } from './design-skia.ts'
 import { renderPdfDocument, type PdfPageSource } from './design-pdf.ts'
 import type { DesignExportOutcome, DesignExportRequest, DesignExportUnit } from './design-engine-types.ts'
@@ -111,6 +137,10 @@ export async function exportDesignDocument(request: DesignExportRequest): Promis
 
 /** 整份文档 → 一个 `.fig`。 */
 async function figDocument(graph: SceneGraph, canvas: ExportRenderer | null): Promise<DesignExportOutcome> {
+  // 交出去之前把这份一次性图改写成写器**画得对**的形状（两件事，见文件头第五条）。
+  await registerFigFontStyles(graph)
+  if (canvas !== null) splitFigLines(graph, canvas.renderer)
+
   const result = await IO.writeDocument(
     'fig',
     graph,
@@ -120,14 +150,110 @@ async function figDocument(graph: SceneGraph, canvas: ExportRenderer | null): Pr
       renderThumbnail: canvas !== null,
       // **页必须点名**：`writeDocument` 那条路（整份文档，没有选区可提取）不会替我们猜是
       // 哪一页，而 fig 写器在拿不到页 id 时**直接交那张 1×1 的占位图**——于是「导出成功」
-      // 而 Figma 里的缩略图是一片空白，两处都不报错。上游的兜底只认一个叫 `cover` 的页
-      // （Figma 的封面页约定），我们的文档没有这个约定，于是取第一页：一份设计文档里，
-      // 它就是整体的那一眼。
-      thumbnailPageId: graph.getPages()[0]?.id,
+      // 而 Figma 里的缩略图是一片空白，两处都不报错。取哪一页的口径在 `firstPageId` 里。
+      thumbnailPageId: firstPageId(graph),
     },
     contextOf(canvas),
   )
   return { kind: 'done', units: [{ name: '', bytes: bytesOf(result.data) }] }
+}
+
+/**
+ * 把手上那一支中文字面，按**这份稿子用到的每个样式名**登记一遍。
+ *
+ * 名字必须是换过之后的那个（`retargetTextFonts` 已经跑过），因为写器就是按 `node.fontFamily`
+ * 去查的。查不到时它给的是 `null`——字形数组空、`fontDigest` 也空，静默地在 Figma 里少一段字。
+ *
+ * **同一份字节登记到多个样式名下**是有意的：我们手里只有一支 Regular（仓库 vendored 的
+ * Noto Sans SC），而稿子里的 700 号字问的是 `Bold`。登记之后烘出来的轮廓是常规粗细（本来就
+ * 只有这一支），但**字在、摘要也在**；对方若自己解决得出真正的 Bold，文件名里那个 `Bold` 也
+ * 还留着。取不到字面就照实照旧导——那是「资产没装上」，与这里的登记无关。
+ */
+async function registerFigFontStyles(graph: SceneGraph): Promise<void> {
+  const missing = figTextStyles(graph).filter(
+    (style) => fontManager.loadedData(CJK_TEXT_FAMILY, style) === null,
+  )
+  if (missing.length === 0) return
+  const font = await ensureCJKFont()
+  if (font === null) return
+  for (const style of missing) fontManager.markLoaded(CJK_TEXT_FAMILY, style, font)
+}
+
+/**
+ * 「写器会烘歪」的文本 → 一行一个节点（每个都贴住画布上那一行）。
+ *
+ * 逐行量取的是**画布自己那份段落**（`buildParagraph` 用 `halfLeading: true`——与 `renderText`
+ * 画的时候同一个选项），所以折行位置、对齐偏移、基线高度都是画布上那一份，不是我们另算的。
+ * 排不出来（字面没就位之类）就跳过这个节点：留给上游照旧烘，比切错强。
+ */
+function splitFigLines(graph: SceneGraph, renderer: SkiaRenderer): void {
+  // 先收名单再改图：改的过程中会在同一个父下插节点、删节点。
+  const targets = [...graph.getAllNodes()].filter(
+    (node) => node.type === 'TEXT' && node.visible && node.text.length > 0,
+  )
+  for (const node of targets) {
+    // 自动布局的父容器里不能拆：拆出来的 N 个兄弟会**参与流式排布**（叠起来、把父框撑开），
+    // 而它们本来就是一段文字里的几行。留着不拆，结果是老样子（合成一行），不会画坏。
+    const parent = node.parentId === null ? undefined : graph.getNode(node.parentId)
+    if (parent !== undefined && parent.layoutMode !== 'NONE' && parent.layoutMode !== 'GRID') continue
+
+    let lines: FigTextLine[]
+    let contentHeight: number
+    try {
+      const paragraph = renderer.buildParagraph(node, undefined, { halfLeading: true })
+      try {
+        lines = paragraph.getLineMetrics().map((line) => ({
+          start: line.startIndex,
+          end: line.endIndex,
+          left: line.left,
+          width: line.width,
+          baseline: line.baseline,
+        }))
+        contentHeight = paragraph.getHeight()
+      } finally {
+        paragraph.delete()
+      }
+    } catch {
+      continue
+    }
+
+    const plans = figLineNodes(node, lines, contentHeight)
+    if (plans === null) continue
+    replaceWithLines(graph, node, plans)
+  }
+}
+
+/** 原位换掉：N 个单行节点占住原来的 z 序位置，原节点删掉（只在这份一次性图上做）。 */
+function replaceWithLines(graph: SceneGraph, node: SceneNode, plans: readonly FigLineNode[]): void {
+  const parentId = node.parentId
+  if (parentId === null) return
+  const index = graph.getChildren(parentId).findIndex((child) => child.id === node.id)
+  if (index < 0) return
+
+  plans.forEach((plan, offset) => {
+    // 用上游的 `cloneTree` 而不是手抄一份字段名单：节点的可变字段有二十来个（paint、几何、
+    // 绑定、样式段…），抄一遍就是「同一个东西两个来源」，上游加字段时这里会静默少一个。
+    const line = graph.cloneTree(node.id, parentId, {
+      text: plan.text,
+      x: plan.x,
+      y: plan.y,
+      width: plan.width,
+      height: plan.height,
+      styleRuns: plan.styleRuns,
+      // 「贴住内容、左对齐、单行」——写器烘得对的那一种形状（理由见 `fig-text.ts`）。
+      textAutoResize: 'WIDTH_AND_HEIGHT',
+      textAlignHorizontal: 'LEFT',
+      textAlignVertical: 'TOP',
+      // 路径文字那几张表跟着原节点走没有意义（排版我们已经替它做完了），清掉免得写器又按
+      // 路径烘一遍；`derivedTextGlyphs` / `textPicture` 同理——那是**原来那一段**的烘焙。
+      textPathData: null,
+      textPathBox: null,
+      textPicture: null,
+      derivedTextGlyphs: null,
+    })
+    if (line !== null) graph.insertChildAt(line.id, parentId, index + offset)
+  })
+  graph.deleteNode(node.id)
 }
 
 /** 图片的粒度：一张一个容器。 */
@@ -175,7 +301,9 @@ async function pdfDocument(
     if (svg === null || width <= 0 || height <= 0) {
       throw new Error(`容器「${container.name}」画不出来，这一趟先不导出了。`)
     }
-    pages.push({ svg, width, height })
+    // 容器 id 一起带上：交出去之前要在 SVG 上修三处（折行 / 裁剪的圆角 / 圆角的夹法），
+    // 而 SVG 里没有「我是谁」——配对靠的就是「从哪个容器开始遍历」（见 `design-pdf.ts`）。
+    pages.push({ svg, width, height, containerId: container.id })
   }
 
   // 字体是这一条的命门：不嵌它，svg2pdf 会回落 `times`，中文变成内容流里的乱码（见
@@ -183,7 +311,7 @@ async function pdfDocument(
   const font = await ensureCJKFont()
   if (font === null) throw new Error('取不到中文字面（插件资产没装上），这一趟先不导出了。')
 
-  const bytes = await renderPdfDocument(pages, pdfTextStyles(graph), font)
+  const bytes = await renderPdfDocument(graph, pages, pdfTextStyles(graph), font)
   return { kind: 'done', units: [{ name: '', bytes }] }
 }
 

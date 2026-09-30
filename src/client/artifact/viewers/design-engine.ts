@@ -19,10 +19,13 @@
 import { createEditor } from '@open-pencil/core/editor'
 import type { SceneGraph, SceneNode } from '@open-pencil/scene-graph'
 import { colorFromCss, colorToCss, decodeDesignFile, encodeDesignFile } from '../../../core/artifact/design/document.ts'
+import { clampPointCount, clampRatio } from '../../../core/artifact/design/node-props.ts'
+import { duplicatePageIn, newPageName } from '../../../core/artifact/design/pages.ts'
 import { canvas2dBackend, fitTransform, paintDocument } from './design-render.ts'
 import { createSkiaBackend } from './design-skia.ts'
 import type {
   CreateDesignEngineArgs,
+  DesignArc,
   DesignBackend,
   DesignEngine,
   DesignEffectItem,
@@ -119,7 +122,10 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
     }
   }
 
-  const fit = (width: number, height: number): DesignViewport => fitTransform(graph, width, height)
+  // 贴合按**当前页**算（`editor.state.currentPageId` 现取）：多页之后「整份文档的包围盒」
+  // 会把镜头拉到一屏装下所有页，而画布一次只画一页。
+  const fit = (width: number, height: number): DesignViewport =>
+    fitTransform(graph, editor.state.currentPageId, width, height)
 
   /** The screen→world step every pointer coordinate takes before a hit test. */
   const toWorld = (sx: number, sy: number, viewport: DesignViewport): { x: number; y: number } => ({
@@ -158,10 +164,20 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       bottomLeftRadius: node.bottomLeftRadius,
       independentCorners: node.independentCorners,
       clipsContent: node.clipsContent,
+      blendMode: node.blendMode,
+      pointCount: node.pointCount,
+      starInnerRadius: node.starInnerRadius,
+      arc: readArc(node),
       strokes: readStrokes(node),
       effects: readEffects(node),
       text: node.text,
       fontSize: node.fontSize,
+      fontFamily: node.fontFamily,
+      fontWeight: node.fontWeight,
+      lineHeight: node.lineHeight,
+      letterSpacing: node.letterSpacing,
+      textAlignHorizontal: node.textAlignHorizontal,
+      textAutoResize: node.textAutoResize,
     }
   }
 
@@ -169,7 +185,10 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
   const editing = {
     pick(sx: number, sy: number, viewport: DesignViewport): string | null {
       const world = toWorld(sx, sy, viewport)
-      return graph.hitTestDeep(world.x, world.y)?.id ?? null
+      // 命中**圈在当前页里**（`hitTestDeep` 不给范围就是整棵文档树，一路走到底下每一页）：
+      // 多页之后两页的内容常常坐标完全相同（复制出来的页就是照搬的），不圈的话点在第二页
+      // 上选中的是第一页那个——画面上还看不出错，只是选错了人。
+      return graph.hitTestDeep(world.x, world.y, editor.state.currentPageId)?.id ?? null
     },
     hover: (id: string | null): void => {
       if (hoverId === id) return
@@ -309,13 +328,70 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       if (node === undefined) return false
       const changes: Record<string, unknown> = {}
       const previous: Record<string, unknown> = {}
-      // 直接落在节点标量字段上的项（几何/显隐/命名）——同一套「先记旧值、
+      // 直接落在节点标量字段上的项（几何/显隐/命名/排版）——同一套「先记旧值、
       // 后提交 undo」的节律。
-      for (const key of ['name', 'visible', 'locked', 'x', 'y', 'width', 'height', 'rotation', 'clipsContent', 'independentCorners'] as const) {
+      //
+      // 排版这几项（fontFamily/fontWeight/lineHeight/letterSpacing/textAlignHorizontal）能这么写，
+      // 是因为场景图的 `TEXT_PICTURE_KEYS` 把它们都算作**文本缓存失效**的触发键（幅面/字面都会
+      // 因此重画）；`textAutoResize` 不在其中——它只改布局约束，下一次布局pass自会读它。
+      for (const key of [
+        'name',
+        'visible',
+        'locked',
+        'x',
+        'y',
+        'width',
+        'height',
+        'rotation',
+        'clipsContent',
+        'independentCorners',
+        'blendMode',
+        'fontFamily',
+        'fontWeight',
+        'lineHeight',
+        'letterSpacing',
+        'textAlignHorizontal',
+        'textAutoResize',
+      ] as const) {
         const next = props[key]
         if (next === undefined || node[key] === next) continue
         changes[key] = next
         previous[key] = node[key]
+      }
+      // 形状特有：边数/内径**都要夹**——面板给的是自由输入，半个角、越界的比值都画不出来。
+      if (props.pointCount !== undefined) {
+        const next = clampPointCount(props.pointCount)
+        if (node.pointCount !== next) {
+          changes.pointCount = next
+          previous.pointCount = node.pointCount
+        }
+      }
+      if (props.starInnerRadius !== undefined) {
+        const next = clampRatio(props.starInnerRadius)
+        if (node.starInnerRadius !== next) {
+          changes.starInnerRadius = next
+          previous.starInnerRadius = node.starInnerRadius
+        }
+      }
+      // 弧是**对象**字段（场景图里整组替换，`null` = 完整椭圆）：先逐字段比过再写，
+      // 没变就什么都不记——不然「点一下别的格」也会留一笔假 undo。
+      if (props.arc !== undefined) {
+        const next = props.arc
+        const current = readArc(node)
+        const unchanged =
+          next === null
+            ? current === null
+            : current !== null &&
+              current.startingAngle === next.startingAngle &&
+              current.endingAngle === next.endingAngle &&
+              current.innerRadius === next.innerRadius
+        if (!unchanged) {
+          changes.arcData =
+            next === null
+              ? null
+              : { startingAngle: next.startingAngle, endingAngle: next.endingAngle, innerRadius: clampRatio(next.innerRadius) }
+          previous.arcData = current === null ? null : { ...current }
+        }
       }
       if (props.fill !== undefined) {
         const color = colorFromCss(props.fill)
@@ -423,12 +499,22 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       void editor.switchPage(pageId)
     },
     addPage: () => {
-      editor.addPage()
+      // 名字自己给：上游的默认名是 `Page ${n}`（西文），而 scaffold 建的第一页叫「页面 1」
+      // ——同一份文档里两套命名法并列，页面上看得见。取名口径在 `pages.ts`。
+      editor.addPage(newPageName(graph.getPages().map((page) => page.name)))
+    },
+    duplicatePage: (pageId: string) => {
+      // 复制（上游没有）：新页 + 照搬整棵子树 + 插在源页后面，机制在 `pages.ts` 里（纯的、
+      // 拿真图测得到）；这里只接「切过去」那一步——复制完站在副本上，正是复制这件事的用意。
+      const copyId = duplicatePageIn(graph, pageId)
+      if (copyId !== null) void editor.switchPage(copyId)
     },
     renamePage: (pageId: string, name: string) => {
+      // 空名与同名都不放行：空名会让面板多出一行没有字的行（`pageLabel` 只兜老文档），
+      // 同名则是白记一笔。放行之后交回上游那一支（它就是这个字段的写口）。
       const page = graph.getNode(pageId)
       if (page === undefined || page.name === name || name === '') return
-      graph.updateNode(pageId, { name })
+      editor.renamePage(pageId, name)
     },
     deletePage: (pageId: string) => {
       editor.deletePage(pageId)
@@ -474,7 +560,7 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
       context.clearRect(0, 0, width, height)
       paintGrid(context, width, height, viewport)
-      paintDocument(graph, canvas2dBackend(context), viewport)
+      paintDocument(graph, canvas2dBackend(context), viewport, editor.state.currentPageId)
       paint2DSelection(context, graph, editor.state.selectedIds, viewport)
       if (hoverId !== null) paint2DHover(context, graph, hoverId, viewport)
     },
@@ -489,6 +575,21 @@ async function buildEngine({ twoD, gl, runtime, envelope, onRepaint }: CreateDes
 function firstSolidCss(node: SceneNode): string | null {
   const paint = node.fills.find((entry) => entry.visible !== false && entry.type === 'SOLID')
   return paint === undefined ? null : colorToCss(paint.color)
+}
+
+/**
+ * 椭圆的弧读成面板那一份（`null` = 完整椭圆）。
+ *
+ * **复制一份再交出去**：场景图那个对象是它自己的字段，面板会把它当草稿摆着（「起点 + 扫过角」
+ * 两个输入框共享它），直接引用等于让还没提交的编辑先写回了图上。
+ *
+ * 类型先放宽再判 `undefined`：老文档解出来的节点可能压根没有这一格，而 TS 在
+ * `ArcData | null` 上直接比 `undefined` 会判「不可能」。
+ */
+function readArc(node: SceneNode): DesignArc | null {
+  const arc: SceneNode['arcData'] | undefined = node.arcData
+  if (arc === null || arc === undefined) return null
+  return { startingAngle: arc.startingAngle, endingAngle: arc.endingAngle, innerRadius: arc.innerRadius }
 }
 
 // ── 边框/效果的语义面 ↔ 场景图 plain 数据（属性面板的读写换算） ──────────────

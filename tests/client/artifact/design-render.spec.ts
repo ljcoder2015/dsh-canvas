@@ -5,6 +5,9 @@
  * 容器默认裁切溢出内容（一页一容器），溢出的东西不露头；frame 按自己的 clipsContent
  * 裁（新建的 frame 默认 true，Figma 语义）；section（区域）不裁——容器可以溢出区域照常
  * 显示；叶子（RECTANGLE 等）自己也不产生裁切。
+ *
+ * `paintDocument` 第三枚参数是**页**（F2.8）：多页之后画布一次只画一页，而这一组判据
+ * 只关心裁切，所以都传第一页。「画的确实是这一页」由 `pages.spec.ts` 那一组钉。
  */
 import { describe, expect, it } from 'vitest'
 import type { DesignPaintOps } from '../../../src/client/artifact/viewers/design-render.ts'
@@ -45,15 +48,15 @@ function fixtureGraph() {
   const nav = graph.createNode('FRAME', board.id, { name: '导航栏', x: 0, y: 0, width: 1024, height: 80 })
   graph.createNode('RECTANGLE', nav.id, { name: '溢出的横幅', x: 900, y: 8, width: 400, height: 40 })
   graph.createNode('RECTANGLE', board.id, { name: '容器级元素', x: 40, y: 200, width: 100, height: 60 })
-  return { board, graph, nav }
+  return { board, graph, nav, pageId: page.id }
 }
 
 describe('design painter clipping', () => {
   it('the container clips its overflow; frames without clipsContent do not clip', () => {
-    const { graph, nav } = fixtureGraph()
+    const { graph, nav, pageId } = fixtureGraph()
     const ops = recordingOps()
 
-    paintDocument(graph, ops, { x: 0, y: 0, scale: 1 })
+    paintDocument(graph, ops, { x: 0, y: 0, scale: 1 }, pageId)
 
     // 裁切严格配对且只有容器一对：导航栏这一枚 frame 没带 clipsContent，不产生自己的裁切
     expect(ops.calls.filter((call) => call.op === 'clip')).toHaveLength(1)
@@ -74,10 +77,10 @@ describe('design painter clipping', () => {
   })
 
   it('a rectangle paints but never clips anything itself', () => {
-    const { graph } = fixtureGraph()
+    const { graph, pageId } = fixtureGraph()
     const ops = recordingOps()
 
-    paintDocument(graph, ops, { x: 0, y: 0, scale: 1 })
+    paintDocument(graph, ops, { x: 0, y: 0, scale: 1 }, pageId)
 
     // 只有容器产生裁切；容器级矩形是叶子，不产生自己的裁切
     expect(ops.calls.filter((call) => call.op === 'clip')).toHaveLength(1)
@@ -105,7 +108,7 @@ describe('design painter clipping', () => {
     expect(region?.clipsContent).toBe(false)
 
     const ops = recordingOps()
-    paintDocument(graph, ops, { x: 0, y: 0, scale: 1 })
+    paintDocument(graph, ops, { x: 0, y: 0, scale: 1 }, page.id)
     // 容器 + 弹层各一对；section 不产生裁切
     expect(ops.calls.filter((call) => call.op === 'clip')).toHaveLength(2)
   })
