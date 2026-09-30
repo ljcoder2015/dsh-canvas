@@ -92,7 +92,6 @@ dsh-canvas/
 │       │   ├── text-pdf.ts           # 文本排成 PDF 字节（矢量、文字可搜，v1.57）
 │       │   ├── bundle-export.ts      # 应用节点：整份产物装成一个 zip（v1.58）
 │       │   ├── design-export.ts      # 设计节点：四样产物的命名 / 装包 / 收场（纯，v1.59）
-│       │   ├── pdf-merge.ts          # 一容器一页的 PDF 并成一份多页（v1.59）
 │       │   ├── download.ts           # 那一次「保存到本机」（对象 URL + a[download]）
 │       │   ├── notice.ts             # 画布左上角那条提示：说什么 + 哪一档（纯）
 │       │   ├── wheel-owner.ts        # 滚轮归谁：画布 / 自己会滚的盒子 / ⌘ 缩放（纯）
@@ -128,7 +127,8 @@ dsh-canvas/
 │       │   │   ├── design-engine-types.ts    # 引擎 chunk 两端共享的形状（只有类型）
 │       │   │   ├── design-engine-module.ts   # chunk 加载器（**只此一份**，失败即 null）
 │       │   │   ├── design-engine.ts          # chunk 入口：渲染与导出两个出口
-│       │   │   └── design-io.ts              # 四样出路：fig / png / pdf / pptx（v1.59）
+│       │   │   ├── design-pdf.ts             # PDF 那条：自己建文档 + 嵌中文字面（v1.61）
+│       │   │   └── design-io.ts              # 四样出路：fig / png / pdf / pptx（v1.59–v1.61）
 │       │   ├── editing/              # markdown / 纯文本的编辑面
 │       │   │   ├── use-text-editing.ts       # 状态机（hook）：草稿 / 自动保存 / 写被拒
 │       │   │   ├── editable-text.tsx         # 头部控件 + 条带 + 编辑框（两个文本预览器共用）
@@ -146,7 +146,7 @@ dsh-canvas/
 │           ├── styles.ts
 │           ├── seats.ts              # 借用别包的席位（运行时只要一个字符串键）
 │           └── shortcuts.ts          # 键位真源 + 说明表
-└── tests/                    # 48 个 spec，镜像 src 分层
+└── tests/                    # 51 个 spec，镜像 src 分层
     ├── contract.spec.ts          # 协议基座（镜像 src/ 根）
     ├── core/                     # core.spec.ts 跨三域，另有 canvas/ artifact/ session/
     ├── host/                     # prompt · tools
@@ -795,7 +795,7 @@ IO 层（`core/artifact/artifact-io.ts`）的入参是**项目根 + 项目内的
 
 > **踩过的地方（判据是从这里长出来的）**：条目的 **CRC 属于未压缩内容，不属于 payload**。写入器最初对 payload 算校验和——`stored` 那条路 payload 恰好就是原文，所以一直是对的；压缩一旦启用，包会**带着坏校验**发出去：解压器能列出文件名、能解开 stored 的条目，只在压缩的那些上报 `bad CRC`。抓出它的是把包交给**别人的解压器**那两条判据（`/usr/bin/ditto -x -k` 解出中文目录名、`/usr/bin/unzip -t` 逐条校验），不是回读自己的写器——两个自己的实现会一起错。
 
-### 设计稿的四条出路：fig / 图片 / PDF / PPT 全在浏览器里画（F10.1，v1.59）
+### 设计稿的四条出路：fig / 图片 / PDF / PPT 全在浏览器里画（F10.1，v1.59–v1.61）
 
 设计节点的产物是一份场景图快照，而它要交出去的四样东西**一件都不在部署上**：`.fig` 要 Figma 自己的 kiwi schema，图片与 PPT 要一个真渲染器，PDF 要 DOM（上游那条实现靠 `DOMParser` + `svg2pdf`）。这些全在用户这台浏览器里——而设计稿本来就是浏览器里的场景图。于是这一档继续走「能本地做的在本地做」，与前两档（文本排版 v1.57、应用打包 v1.58）是同一条分工，只是这次落点更远：**四样都自己画**。
 
@@ -803,7 +803,7 @@ IO 层（`core/artifact/artifact-io.ts`）的入参是**项目根 + 项目内的
 |------|------|------|
 | `.fig` | **整份文档一个文件** | `@open-pencil/fig`（kiwi 编解码 + fflate） |
 | 图片（`.png`） | 一容器一张，**2 倍像素**；多张打成一层同名文件夹的 zip | CanvasKit 的渲染器 |
-| PDF | 一容器一页，客户端并成**一份多页**（页面尺寸逐页跟着容器） | `jspdf` + `svg2pdf.js` + `DOMParser` |
+| PDF | **整份文档一个文件**：一容器一页，页写在文档里面（页面尺寸逐页跟着容器） | `jspdf` + `svg2pdf.js` + `DOMParser` |
 | PPT（`.pptx`） | **一页器一份**幻灯片序列；多页就是多个包 | CanvasKit（降级栅格化） |
 
 **分工的界线落在两个模块之间**：`client/canvas/design-export.ts` 管「产物该叫什么、怎么装、怎么说」（纯逻辑，node 里跑得动，判据穷举），画的那一步在引擎 chunk 里（`client/artifact/viewers/design-io.ts` 的 `designExport`，只吐「一件件字节」）。这样切是因为两件事的可测性正好相反：命名与装包要判据，画图非浏览器不可。
@@ -812,7 +812,7 @@ IO 层（`core/artifact/artifact-io.ts`）的入参是**项目根 + 项目内的
 
 上游有一条「headless」的路（`headlessRenderNodes`），它在 node/bun 里靠 `import.meta.resolve('canvaskit-wasm/full')` 找 wasm——**浏览器里 `import.meta.resolve` 根本不存在**。所以图片与 PPT 的降级栅格化必须拿到我们自己的渲染器，经 `context: { canvasKit, renderer }` 递进去（`design-skia.ts` 的 `createExportRenderer`）。它比预览那台多一步：**先等 CJK 字体就位**再声明回落族——中文在没有回落族时渲染成空白，而导出是「一次成品的交付」，不能等到画完才发现字没了。
 
-同理，四条路一律走上游的门面 `IORegistry` + `BUILTIN_IO_FORMATS`，不逐个 import 各家 `exportXxx`：`fig` / `svg` / `raster` 三条子路径在包的 exports map 里，而 **`pdf` 与 `pptx` 不在**（只有格式表里那两个 adapter 认得它们）。门面是唯一处处露着的那一面，也是这个包自己给外部用的那一面。
+门面这条：`fig` / `svg` / `raster` 三条子路径在包的 exports map 里，而 **`pdf` 与 `pptx` 不在**（只有 `BUILTIN_IO_FORMATS` 里那两个 adapter 认得它们）。所以 fig / 图片 / PPT 三条走 `IORegistry.exportContent`（上游自己给外部用的那一面），**PDF 那条绕过它自己建文档**——理由见下面「PDF 那条为什么要自己建文档」。
 
 #### fig 的压缩 worker：一个必须按依赖点名的名字
 
@@ -822,26 +822,56 @@ IO 层（`core/artifact/artifact-io.ts`）的入参是**项目根 + 项目内的
 
 > **踩过的地方（一条真浏览器判据抓出来的）**：**`writeDocument` 那条路必须点名缩略图用哪一页**。`renderFigThumbnail` 拿不到页 id 时**直接交那张 1×1 的占位图**，而 `writeDocument`（整份文档，没有选区可提取）不会替你猜——上游的兜底只认一个叫 `cover` 的页（Figma 的封面页约定），我们的文档没有这个约定。症状是「导出成功」而 Figma 里的缩略图一片空白，**两处都不报错**。现在显式传第一页（`thumbnailPageId`），探针把它钉住：缩略图 512×213，正是第一页上两个容器的并集比例。
 
-#### 幻灯片里的字体名：交出去之前必须换一个（v1.60）
+#### 交出去的图里的字体名：三条路各换各的（v1.60–v1.61）
 
-四条出路里**只有 PPT 这条把字体名交出去**。另外三条的字是我们自己画的：图片与 PDF 栅格化时那个名字是拿去 `fontManager` 里找字面的，fig 那边 `Inter` 恰好是 Figma 自己的默认字体。而幻灯片里的标题与正文是**原生可编辑文本**——上游 `addEditableText` 把文字交给 `pptxgenjs`，名字走的是 `fontFace: s.fontFamily ?? node.fontFamily`，最后落成 run 上那三行：
+四条出路里**三条把字体名交出去**，而三条栽的姿势各不相同；第四条（图片）的字是我们自己画的——那个名字在那边是「拿去 `fontManager` 找字面」用的，换掉反而画不出字。而那个名字是**我们自己这边的东西**：会话预设从不提字体（`host/prompt.ts` 里没有这一项），文字节点全落在 core 的 `DEFAULT_FONT_FAMILY`（`Inter`）上，汉字靠仓库 vendored 的 `Noto Sans SC` 回落——两者都只活在本插件的资产路由里，**对方的机器上没有**。
+
+| 出路 | 那个名字交给谁 | 写 `Inter` 的后果 |
+|------|----------------|-------------------|
+| PPT | 对方的 PowerPoint（原生可编辑文本的 `typeface`） | 找不到这支字体，而它又没有汉字字形 ⇒ 中文**整段丢** |
+| `.fig` | fig 写器，拿它去 `fontManager` 取**字形轮廓**烘进 `derivedTextData`（**不做任何回落**） | 九个汉字全落 `.notdef`：**同一个 738 字节的轮廓写九遍**，Figma 打开是一串同一个形状 |
+| PDF | `svg2pdf`，拿它去 `pdf.getFontList()` 找字面；找不到**一律回落 `times`** | Type1 标准字体没有汉字字形，中文被当单字节写进内容流（`(N;ÆÉÿO`Y}ÿ¾`） |
+| 图片 | —— | （不换） |
+
+PPT 那条的现场：标题与正文是**原生可编辑文本**——上游 `addEditableText` 把文字交给 `pptxgenjs`，名字走 `fontFace: s.fontFamily ?? node.fontFamily`，最后落成 run 上那三行：
 
 ```xml
 <a:latin typeface="…"/><a:ea typeface="…"/><a:cs typeface="…"/>
 ```
 
-（`pptxgenjs` 那段的写法是 `if (opts.fontFace)`——**名字为空就整段不写**，那时 PowerPoint 用主题默认：`minorFont` 的 `ea` 是空的，由打开它的机器自己定。）
+（`pptxgenjs` 那段的写法是 `if (opts.fontFace)`——**名字为空就整段不写**，那时 PowerPoint 用主题默认：`minorFont` 的 `ea` 是空的，由打开它的机器自己定。）这个 `typeface` 会在**对方机器上**解析，于是中文整段丢。用户原话「导出 PPT，第一页的字体丢失」，**而「只有第一页」正是它的指纹**：封面那种纯文字页全走原生文本，后面几页的文字落进了图片回退（渐变 / 遮罩 / 矢量子树），那部分是我们自己画的所以正常。
 
-这个 `typeface` 会在**对方机器上**解析，而我们的字体名是**自己这边的东西**：会话预设从不提字体（`host/prompt.ts` 里没有这一项），文字节点全落在 core 的 `DEFAULT_FONT_FAMILY`（`Inter`）上，而 `Inter` 只活在本插件的资产路由里——对方没有它，**它又没有汉字字形**，中文整段丢。真机报出来的就是这一条（用户原话「导出 PPT，第一页的字体丢失」），**而「只有第一页」正是它的指纹**：封面那种纯文字页全走原生文本，后面几页的文字落进了图片回退（渐变 / 遮罩 / 矢量子树），那部分是我们自己画的所以正常。
+**三条路换名，一张表说了算**：`core/artifact/design/export-font.ts` 的 `EXPORT_TEXT_RETARGET`（`pptx → Microsoft YaHei`、`fig → Noto Sans SC`、`pdf → NotoSansSC`），`retargetTextFonts(graph, retarget)` **逐段 `styleRuns` 一起换**——run 上那个 `fontFamily` 会盖过节点那一个，漏掉它等于漏掉被单独设过字体的那几段。调用点挡在 `design-io.ts` 创建渲染器**之前**：fig 那边写器就是按这个字段去取字形轮廓的，晚了取的就是旧名字。表单独做成一张而不是埋在 `if` 里，是为了让「只有这三条要换、各换成什么」本身被判据点名测到。
 
-所以交出去之前换名：`core/artifact/design/ppt-font.ts` 的 `retargetTextFonts`——**逐段 `styleRuns` 一起换**，run 上那个 `fontFamily` 会盖过节点那一个，漏掉它等于漏掉被单独设过字体的那几段。调用点挡在 `design-io.ts` 创建渲染器之前（它动的是交给对方的那份数据，与画法无关），**且只有 `pptx` 会走进去**（`retargetsTextFonts`）——这一点单独做成函数，好让它被判据点名测到而不是埋在 if 里。选微软雅黑：中文 Windows 与 WPS 必然有它，Mac 上替换成系统黑体，而它是黑体、与设计稿那套「Inter + 思源黑体」最接近。写英文名（`Microsoft YaHei`）而不是「微软雅黑」，OpenXML 的 `typeface` 按字族的英文名解析，各语言版本都认。
+选名各有各的道理：
 
-判据分三层：`tests/core/artifact/design.spec.ts` 用**真图**判换得对不对（含「容器与形状的字体字段碰都不碰」「区域里嵌了层容器也换得到」），`tests/client/artifact/viewers/design-io.spec.ts` 读源码文本判接线（这个模块拉着 CanvasKit，node 里 import 即死），探针**解开 pptx 逐张看 `typeface`**——v1.59 当初只解出 `ppt/slides/slideN.xml` 就算过，这一验是补上的。
+- **PPT → `Microsoft YaHei`**（写英文名：OpenXML 的 `typeface` 按字族的英文名解析，各语言版本都认）。中文 Windows 与 WPS 必然有它，Mac 上替换成系统黑体，而它是黑体、与设计稿那套「Inter + 思源黑体」最接近。
+- **fig → `Noto Sans SC`**。这必须是**我们在 `fontManager` 里注册的那个名字**：fig 写器按它去取字形轮廓，注册名与消费名不是同一个字符串，就是「导出成功而所有字长得一样」这种什么都不报的失败。所以两端共用一个常量 `CJK_TEXT_FAMILY`（`design-skia.ts` 的 `markLoaded` 与 fig 都用它）。
+- **PDF → `NotoSansSC`**。不叫 `Noto Sans SC` 是因为 `svg2pdf` 拿 `font-family` 整串去 `getFontList()` 里**逐字**找键：名字必须与注册时那个 id 一模一样，多一个空格都对不上。
 
-#### 判据分两层，验证交给别人的工具
+#### PDF 那条为什么要自己建文档（v1.61）
+
+上游有一条现成的 `renderNodesToPDF`，做的正是这里做的事（选区 → SVG → `new jsPDF(…)` → `svg2pdf`）。但**字体必须注册在「正要写的那一份文档」上**——svg2pdf 是按 `pdf.getFontList()` 找字面的。而那个函数不在包的 exports map 里（`renderNodesToPDF` 没从 `@open-pencil/core/io` 顶层露出来），从门面走进去就够不着它内部那句 `new jsPDF(…)`。
+
+试过「先随便建一份注册、指望 jsPDF 的全局事件把它带给后面新建的实例」——`jsPDF.API.events` 那条队列**不会**把字体带过去（真测过：新实例的 `getFontList()` 里没有）。所以只能自己建：`client/artifact/viewers/design-pdf.ts` 直接 `new jsPDF(…)`。零件都露着（矢量图是 `renderNodesToSVG`、量尺是 `computeContentBounds`），`jspdf` / `svg2pdf.js` 本来就在引擎 chunk 里（上游那条路也在用它们）。
+
+三件事定在那里：
+
+- **嵌进去的是子集**：`putOnlyUsedFonts: true` 必须**显式**开着。jsPDF 默认 `false`，会把**注册过的每一支字面整个嵌进产物**——四个样式就是四份 17.7MB。这也是个静默失败：开着关着都「导出成功」。实测三页中文稿 **51KB**，`/Type0` + `/Identity-H` + `/FontFile2` + `/ToUnicode` 都在（文字可选中、可搜索）、矢量。
+- **字体名与 SVG 里写的是同一个常量**：注册走 `doc.addFont(PDF_FONT_FILE, PDF_TEXT_FAMILY, style)`，而 `font-family` 由上面那张表换成 `PDF_TEXT_FAMILY`。
+- **PDF 还要顺手收字重**（`snapWeight: true`，三条路里只有它为真）。两个理由叠在一起：我们手里只有一支 `NotoSansSC-Regular`，任何字重画出来都是它；而 svg2pdf 对第三档字重会算出一个**谁也不认的样式名**（jsPDF 4 那条分支是 `(fontWeight + '') + fontStyle`，500 出来就是 `'500normal'`），那一格没注册就**回落 `times`**——又变回这次要修的病。收成 400/700 之后样式名只可能是 normal / bold / italic / bolditalic，正好是 `pdfTextStyles(graph)` 会注册的那几个（它读同一份换过名字的图，永远含 `normal`；只注册用得上的那几个，免得为一篇没粗没斜的稿子把 18MB 字面多解析三遍）。
+
+粒度也随之简化：**PDF 与 `.fig` 一样是整份文档一个文件**（页写在文档里面，一容器一页、页尺寸逐页跟着容器），客户端那边不再有合并这一步——`client/canvas/pdf-merge.ts` 与它带来的 pdf-lib 依赖一起删掉了。
+
+> **踩过的两个地方**：①**判断「字体嵌没嵌」不能用裸 grep**。jsPDF 开着 `compress`，字形程序与 CMap 都压过，`/BaseFont` 一个都 grep 不到——最初因此误以为「没嵌」，改用 pdf-lib 摊开对象才看见真相：**42 个 `/Type1`**（jsPDF 的 14 支标准字体 × 3 份），每页只有一个 `Tj`，参数是中文原始字节。②**「一个字符一个字节」的编码不能多走一趟**：`addFont` 那条二进制口子要的是 `String.fromCharCode` 拼出来的字符串（一个字符 = 一个字节），拿 UTF-8 编过一遍字体表整张就烂；而 17.7MB 一次铺开 `String.fromCharCode(...bytes)` 会**爆栈**，所以按 16KB 分块（`binaryStringOf`）。
+
+#### 判据分两层，验证交给别人的工具（v1.61 补字体）
 
 - **浏览器里**（`.workbuddy/repro/design-export/`）：起一个最小的静态服务复刻资产路由，真 Chrome 打开一页，动态 import 真的 chunk、真跑四次 `designExport`，把四份产物的**字节**带出来。信封不是手抄的——`gen-doc.mjs` 用产品自己那条编码路（`encodeDesignFile`）生成，手抄一份快照结构就等于在探针里养第二个「信封长什么样」。
-- **node 里**：`unzip -t` 逐条校 CRC、自己解 PNG 的 IHDR 验 2 倍、pdf-lib 数页数与页尺寸、解 `.pptx` 看有没有 `ppt/slides/slide1.xml`、看 `canvas.fig` 的 `fig-kiwi` 签名。**回读自己的写器两个实现会一起错**（v1.58 的 CRC 就是这么抓出来的），所以这一层一律交给别人的解压器与别人的 PDF 库。
+- **node 里**：`unzip -t` 逐条校 CRC、自己解 PNG 的 IHDR 验 2 倍、解 `.pptx` 逐张看 `typeface` 与中文还在不在、看 `canvas.fig` 的 `fig-kiwi` 签名。**回读自己的写器两个实现会一起错**（v1.58 的 CRC 就是这么抓出来的），所以这一层一律交给别人的解压器与别人的库：
+  - **PDF**：pdf-lib 摊开对象数页数、页尺寸与字体（`/Type0` + `/Identity-H` + `/FontFile2` + `/ToUnicode`，且**一支 `/Type1` 都不在用**），再用 `node:zlib` 把 `ToUnicode` 的 CMap 自己解开、看汉字的码位（`4f60` 你 / `597d` 好）真的在表里——**CMap 说的是「这个字形是哪个字」，它对了就意味着字与码位没有错位**，而那正是「同一个字形写九遍」这类错误会留下的痕迹。
+  - **`.fig`**：用**上游自己的读器**（`parseFigFile`）把产物解回场景图，逐字形比 `commandsBlob`：**不同轮廓数 === 不同的字数**。修之前这一条是 `1 / 17`（全是同一个 `.notdef`），现在是 `17 / 17`。
+  - 两条还能互相印证：**fig 写器烘了几个不同的轮廓，jsPDF 就写了几条字形↔码位映射**（探针里比 `pdf=17 fig=17`）——两个独立实现对同一份稿子说同一件事。
 
 ### 「手动输入」落到空座位：先落一份空文件（F3.13，v1.57）
 

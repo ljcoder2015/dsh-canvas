@@ -3,10 +3,10 @@
  *
  * 画的那一步（fig / PNG / PDF / PPT 到底怎么画出来）在引擎 chunk 里，浏览器之外跑不动；
  * 这一份判据钉的是**它的外面**：产物读没读全、引擎在不在、一件还是多件、多件怎么装、
- * 落盘叫什么、被拒时是哪一种拒绝。引擎与「保存」都是注入的，PDF 合并那一步也是，所以整个
- * 文件在 node 里跑得动——而**包里的字节是对的**这件事不靠回读自己的写器来证明：装出来的
- * 那个 zip 交给 `tests/core/artifact/zip-reader.ts`（按规范从尾部读中央目录，deflate 用
- * `node:zlib`），两个实现互不相识。
+ * 落盘叫什么、被拒时是哪一种拒绝。引擎与「保存」都是注入的，所以整个文件在 node 里跑得动
+ * ——而**包里的字节是对的**这件事不靠回读自己的写器来证明：装出来的那个 zip 交给
+ * `tests/core/artifact/zip-reader.ts`（按规范从尾部读中央目录，deflate 用 `node:zlib`），
+ * 两个实现互不相识。
  */
 import { describe, expect, it } from 'vitest'
 import type { ArtifactView } from '../../../src/types.ts'
@@ -71,7 +71,6 @@ function saver() {
 /** 一次导出所需的全部注入，只改要测的那一样。 */
 function input(over: Partial<Parameters<typeof exportDesign>[0]> = {}) {
   const { saved, save } = saver()
-  const merged: Uint8Array[][] = []
   const requests: DesignExportRequest[] = []
   const base: Parameters<typeof exportDesign>[0] = {
     view: view(),
@@ -84,13 +83,9 @@ function input(over: Partial<Parameters<typeof exportDesign>[0]> = {}) {
       },
     },
     save,
-    mergePdf: async (parts) => {
-      merged.push([...parts])
-      return bytes('MERGED')
-    },
     ...over,
   }
-  return { saved, merged, requests, input: base }
+  return { saved, requests, input: base }
 }
 
 describe('exportDesign：四样出路各自的收场', () => {
@@ -210,34 +205,19 @@ describe('exportDesign：一件与多件', () => {
     ])
   })
 
-  it('多页 PDF 并成**一份**，不走打包那条路', async () => {
-    const { saved, merged, input: given } = input({
+  it('PDF 是**一件**：一容器一页全写在同一份文档里，直接给，不打包也不合并', async () => {
+    // v1.61 之前这里是「一容器一份单页 PDF，客户端用 pdf-lib 并起来」。现在引擎自己建文档
+    // （要嵌字体，就得够得着那句 `new jsPDF(...)`），页在文档里面——于是这一条的契约变成
+    // 「一件就是一份多页 PDF」，客户端不必再认识 pdf-lib。
+    const { saved, input: given } = input({
       format: 'pdf',
-      engine: engineOf({
-        kind: 'done',
-        units: [
-          { name: '第 1 页', bytes: bytes('P1') },
-          { name: '第 2 页', bytes: bytes('P2') },
-        ],
-      }),
-    })
-
-    expect(await exportDesign(given)).toEqual({ kind: 'done', name: '设计1.pdf', files: 2 })
-    // 交出去的是一份 PDF，不是 zip——而且合并那一步收到的是**两页**，顺序没乱。
-    expect(saved[0]?.name).toBe('设计1.pdf')
-    expect(saved[0]?.mime).toBe('application/pdf')
-    expect(new TextDecoder().decode(saved[0]?.bytes)).toBe('MERGED')
-    expect(merged[0]?.map((part) => new TextDecoder().decode(part))).toEqual(['P1', 'P2'])
-  })
-
-  it('只有一页 PDF 时不去劳烦合并那一步（那份字节本来就是完整合法的单页）', async () => {
-    const { merged, input: given } = input({
-      format: 'pdf',
-      engine: engineOf({ kind: 'done', units: [{ name: '第 1 页', bytes: bytes('P1') }] }),
+      engine: engineOf({ kind: 'done', units: [{ name: '', bytes: bytes('%PDF-1.7 三页') }] }),
     })
 
     expect(await exportDesign(given)).toEqual({ kind: 'done', name: '设计1.pdf', files: 1 })
-    expect(merged).toEqual([])
+    expect(saved[0]?.name).toBe('设计1.pdf')
+    expect(saved[0]?.mime).toBe('application/pdf')
+    expect(new TextDecoder().decode(saved[0]?.bytes)).toBe('%PDF-1.7 三页')
   })
 
   it('装包那一步抛了异常照实说，不假装导出成功', async () => {

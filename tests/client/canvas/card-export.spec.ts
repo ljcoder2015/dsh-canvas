@@ -83,7 +83,7 @@ describe('应用卡片的导出：先在本地打包', () => {
 })
 
 describe('设计稿的导出：整趟都在浏览器里画', () => {
-  it('读产物、取引擎、交给 `exportDesign`，落盘与合并都是注入的那两个', () => {
+  it('读产物、取引擎、交给 `exportDesign`——落盘是注入的那一个', () => {
     const body = bodyOf('const exportDesignCard = useCallback(')
 
     expect(body).toContain('bridge.readArtifact(')
@@ -92,7 +92,9 @@ describe('设计稿的导出：整趟都在浏览器里画', () => {
     expect(body).toContain('await loadDesignEngine()')
     expect(body).toContain('exportDesign({')
     expect(body).toContain('save: downloadBytes')
-    expect(body).toContain('mergePdf: mergePdfPages')
+    // 这里**没有**合并那一步了（v1.61）：PDF 的页由引擎自己写进同一份文档——它要嵌字体，
+    // 就得够得着那句 `new jsPDF(...)`，于是客户端不必再认识 pdf-lib。
+    expect(body).not.toContain('mergePdf')
     expect(body).toContain('designExportNotice(')
   })
 

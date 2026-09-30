@@ -19,6 +19,7 @@ import { SkiaRenderer } from '@open-pencil/core/canvas'
 import { fontManager } from '@open-pencil/core/text'
 import type { CanvasKit, Surface } from 'canvaskit-wasm'
 import type { SceneGraph } from '@open-pencil/scene-graph'
+import { CJK_TEXT_FAMILY } from '../../../core/artifact/design/export-font.ts'
 import { assetUrl, loadCanvasKit } from './design-canvaskit.ts'
 import { type CanvasKitRuntime, type DesignBackend } from './design-engine-types.ts'
 
@@ -33,8 +34,13 @@ const CORE_FONTS = [
   ['Inter', 'Bold', 'Inter-Bold.ttf'],
 ] as const
 
-/** 中文字面（17.7MB）：只做回落，绝不参与首帧门禁——晚到再补画。 */
-const CJK_FAMILY = 'Noto Sans SC'
+/**
+ * 中文字面（17.7MB）：只做回落，绝不参与首帧门禁——晚到再补画。
+ *
+ * **名字从 core 读**（`export-font.ts` 的 `CJK_TEXT_FAMILY`）而不是在这里写一遍：fig 与 PDF
+ * 两条导出路是按这个名字去 `fontManager` 取字面/字形轮廓的，两处各写一份字符串就会漂移，
+ * 而漂移的后果是「导出里的中文不见了」这种什么都不报的失败。注册名与消费名必须是同一个。
+ */
 const CJK_FONT_FILE = 'NotoSansSC-Regular.ttf'
 
 let coreFontsPreloaded: Promise<void> | undefined
@@ -83,8 +89,22 @@ function preloadCoreFonts(): Promise<void> {
  * 不等它，到货后补画一次即可。
  */
 function preloadCJKFont(): Promise<ArrayBuffer | null> {
-  cjkFontPreloaded ??= loadFontFile(CJK_FAMILY, 'Regular', CJK_FONT_FILE)
+  cjkFontPreloaded ??= loadFontFile(CJK_TEXT_FAMILY, 'Regular', CJK_FONT_FILE)
   return cjkFontPreloaded
+}
+
+/**
+ * 中文字面的**字节**——这一趟没有人在画图也拿得到。
+ *
+ * PDF 那条导出路要的不是「画得出来」，而是那支字体本身（要嵌进文档里），而这件事与
+ * CanvasKit 无关：这台机器上取不到 CanvasKit 时 PDF 照样该导得出来，只要字面到货。所以这个
+ * 口子单开在预载函数旁边、不经过任何渲染器。同页取过一次之后就是内存里那一份
+ * （`markLoaded` 之后 `loadedData` 直接命中），17.7MB 只走一次网络。
+ *
+ * 返回 `null` 是**答案**：资产路由没装上或离线——调用方那边有「取不到中文字面」这句话。
+ */
+export async function ensureCJKFont(): Promise<ArrayBuffer | null> {
+  return fontManager.loadedData(CJK_TEXT_FAMILY, 'Regular') ?? (await preloadCJKFont())
 }
 
 /**
@@ -98,8 +118,8 @@ function preloadCJKFont(): Promise<ArrayBuffer | null> {
  */
 function declareCJKFallback(data: ArrayBuffer): boolean {
   const before = fontManager.generation()
-  fontManager.markLoaded(CJK_FAMILY, 'Regular', data)
-  fontManager.setCJKFallbackFamily(CJK_FAMILY)
+  fontManager.markLoaded(CJK_TEXT_FAMILY, 'Regular', data)
+  fontManager.setCJKFallbackFamily(CJK_TEXT_FAMILY)
   return fontManager.generation() !== before
 }
 
@@ -165,7 +185,7 @@ export async function createSkiaBackend(
 
   // 中文字面：同页已经握在手里就直接补齐（这张卡的首帧就有中文）；否则后台
   // 到货再补——首帧只欠图形与拉丁文，不被 17.7MB 按住。
-  const cachedCJK = fontManager.loadedData(CJK_FAMILY, 'Regular')
+  const cachedCJK = fontManager.loadedData(CJK_TEXT_FAMILY, 'Regular')
   if (cachedCJK !== null) {
     registerCJKFallback(cachedCJK)
   } else {
@@ -247,7 +267,7 @@ export async function createExportRenderer(): Promise<ExportRenderer | null> {
   const runtime = await loadCanvasKit()
   if (runtime === null) return null
   await preloadCoreFonts()
-  const cjk = fontManager.loadedData(CJK_FAMILY, 'Regular') ?? (await preloadCJKFont())
+  const cjk = fontManager.loadedData(CJK_TEXT_FAMILY, 'Regular') ?? (await preloadCJKFont())
   if (cjk !== null) declareCJKFallback(cjk)
 
   const ck = runtime as unknown as CanvasKit

@@ -12,9 +12,10 @@
  *
  * 三件已经定下来的事：
  *
- * - **粒度**：`.fig` 是整份文档一个文件；图片一张一个容器；PDF 一容器一页（客户端合并成
- *   一份多页 PDF）；PPT 一页器一份幻灯片序列。多件就是多件——**按全仓同一条规矩打成一个包**
- *   （里面一层同名文件夹，与 v1.58 的应用导出同一个包法），不是随手丢几个文件到下载目录。
+ * - **粒度**：`.fig` 与 PDF 是**整份文档一个文件**（PDF 一容器一页，页在文档里面——见
+ *   `viewers/design-pdf.ts`）；图片一张容器一份；PPT 一页器一份幻灯片序列。多件就是多件——
+ *   **按全仓同一条规矩打成一个包**（里面一层同名文件夹，与 v1.58 的应用导出同一个包法），
+ *   不是随手丢几个文件到下载目录。
  * - **图片倍率 2×**（设计稿是 1× 逻辑像素）：在引擎那一侧定，这里不掺和。
  * - **切不动就说**。任何一个可见容器画不出来，那趟在引擎里已经是 `error`；这里只多做一件
  *   事——**装包失败不假装成功**（异常照实转成一句话，口气是 `error`）。
@@ -162,18 +163,11 @@ export interface DesignExportInput {
   /** 引擎 chunk 的入口；chunk 没加载上时 `null`（那是「取不到渲染引擎」的一种）。 */
   engine: DesignExportEngine | null
   save: DesignExportSaver
-  /**
-   * 把多页 PDF 并成一份（pdf-lib，注入同理——它碰的是浏览器之外的库）。
-   *
-   * PDF 是四样里唯一「多件并成一件」的：一容器一页，合起来才是那份多页文档。其余几样多件
-   * 时按包走（见 {@link designArchiveName}）。
-   */
-  mergePdf: (parts: readonly Uint8Array[]) => Promise<Uint8Array>
 }
 
 /** 读一份设计稿并按格式导出来。 */
 export async function exportDesign(input: DesignExportInput): Promise<DesignExportOutcome> {
-  const { view, format, title, engine, save, mergePdf } = input
+  const { view, format, title, engine, save } = input
   if (!view.present) return { kind: 'refused', reason: 'absent' }
   // 读到半份就不导：设计文档是个 JSON 快照，切掉一半连解都解不开，拿走的只会是一份坏文件。
   if (view.truncated) return { kind: 'refused', reason: 'truncated' }
@@ -193,11 +187,6 @@ export async function exportDesign(input: DesignExportInput): Promise<DesignExpo
   const name = designExportName(title, format)
 
   try {
-    if (format === 'pdf' && units.length > 1) {
-      // 一容器一页 → 一份多页 PDF（这一步要 pdf-lib，所以是注入进来的）。
-      save(name, await mergePdf(units.map((unit) => unit.bytes)), DESIGN_EXPORT_MIME[format])
-      return { kind: 'done', name, files: units.length }
-    }
     if (units.length > 1) {
       save(designArchiveName(title), await packUnits(title, units, format), ZIP_MIME)
       return { kind: 'done', name: designArchiveName(title), files: units.length }

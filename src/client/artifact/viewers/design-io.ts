@@ -12,30 +12,43 @@
  * 找 wasm——浏览器里 `import.meta.resolve` 根本不存在，一调就炸。所以图片、PPT 的降级栅格
  * 化都必须拿到**我们自己的**渲染器（`createExportRenderer`），走 `context` 递进去。
  *
- * **二、粒度是「一样东西一份」。** 图片一容器一张、PDF 一容器一页、PPT 一页面一份幻灯片
- * 序列——而 `.fig` 是整份文档一个文件。这不是美学：open-pencil 的导出器按**选区**取节点，
- * 而选区不许跨页面（跨页它会直接抛）。所以「按容器切」既是产物该有的样子（海报系列、幻灯片
- * 每一页各是一张），也正好落在导出器能接受的形状里。
+ * **二、粒度是「一样东西一份」。** 图片一容器一张、PPT 一页面一份幻灯片序列——而 `.fig` 与
+ * PDF 是**整份文档一个文件**（PDF 一容器一页，页在文档里面）。这不是美学：open-pencil 的
+ * 导出器按**选区**取节点，而选区不许跨页面（跨页它会直接抛）。所以「按容器切」既是产物该有
+ * 的样子（海报系列、幻灯片每一页各是一张），也正好落在导出器能接受的形状里；PDF 那些页再
+ * 一起写进同一份文档（见 `design-pdf.ts`）。
  *
  * **三、切不动就说，不交半份。** 任何一个可见容器画不出来，整趟就当没导成（`kind: 'error'`，
  * 名字报出来）。悄悄少一张图比导不出来坏得多——这条规矩与 v1.57 的文本导出、v1.58 的应用
  * 打包是同一条。
  *
- * **四、只有 PPT 那条路要换字体名。** 另外三条的字是我们自己画出来的，字体名在那边是
- * 「拿去 fontManager 里找字面」用的，动了反而画不出字；而幻灯片里的原生文本是把文字连同
- * `typeface` 一起交给**对方的 PowerPoint** 排，那个名字得在对方机器上成立。理由与选名
- * 见 `core/artifact/design/ppt-font.ts`。
+ * **四、交出去之前要换字体名——PPT、fig、PDF 三条都要。** 三者的理由不同但同源：那个名字
+ * 是**我们自己这边的东西**（拉丁 `Inter`、汉字靠 vendored 的 Noto Sans SC 回落），而这三条
+ * 交出去的产物会被别人的软件解析——PowerPoint 拿它排原生文本、Figma 拿它取字形轮廓、jsPDF
+ * 拿它在自己的字体表里查。只有图片那条不换：字是我们自己画的，那个名字在那边就是「拿去
+ * `fontManager` 找字面」用的。理由、选名与「PDF 还要顺手收字重」见
+ * `core/artifact/design/export-font.ts`。
  *
  * 这个模块**只住在引擎 chunk 里**（`lib/assets/design-engine.js`）：它 import 的是
  * `@open-pencil/core/io`，而场景图的类身份必须全页唯一（见 `design-engine.ts` 开头的两条
  * 理由）。client.js 那边只看 `design-engine-types.ts` 里声明的形状。
  */
-import { BUILTIN_IO_FORMATS, IORegistry } from '@open-pencil/core/io'
+import {
+  BUILTIN_IO_FORMATS,
+  IORegistry,
+  computeContentBounds,
+  renderNodesToSVG,
+} from '@open-pencil/core/io'
 import type { ExportTarget, IOContext } from '@open-pencil/core/io'
 import type { SceneGraph, SceneNode } from '@open-pencil/scene-graph'
 import { containersOf, decodeDesignFile, pageOf } from '../../../core/artifact/design/document.ts'
-import { retargetsTextFonts, retargetTextFonts } from '../../../core/artifact/design/ppt-font.ts'
-import { createExportRenderer, type ExportRenderer } from './design-skia.ts'
+import {
+  exportTextRetarget,
+  pdfTextStyles,
+  retargetTextFonts,
+} from '../../../core/artifact/design/export-font.ts'
+import { createExportRenderer, ensureCJKFont, type ExportRenderer } from './design-skia.ts'
+import { renderPdfDocument, type PdfPageSource } from './design-pdf.ts'
 import type { DesignExportOutcome, DesignExportRequest, DesignExportUnit } from './design-engine-types.ts'
 
 /**
@@ -66,10 +79,10 @@ export async function exportDesignDocument(request: DesignExportRequest): Promis
   const containers = containersOf(graph).filter((node) => node.visible)
   if (containers.length === 0) return { kind: 'refused', reason: 'empty' }
 
-  // 幻灯片里的文字是**对方**的 PowerPoint 排的，字体名得在对方机器上成立：先把设计稿
-  // 那套内部名字换掉，否则中文整段丢（见 `core/artifact/design/ppt-font.ts`）。另外三条
-  // 路的字体名是拿去给我们的渲染器找字面的，一个字都不能动。
-  if (retargetsTextFonts(request.format)) retargetTextFonts(graph)
+  // 交出去之前把字体名换掉（三条路各有各的理由，见 `core/artifact/design/export-font.ts`）。
+  // **必须在这一步之前**——fig 那边写器就是按这个字段去取字形轮廓的，晚了就取的是旧名字。
+  const retarget = exportTextRetarget(request.format)
+  if (retarget !== null) retargetTextFonts(graph, retarget)
 
   // 渲染器**先起**：fig 用它画缩略图（没有也照导，只是缩略图退成 1×1），图片与 PPT 则
   // 非要它不可。一条路起一次，四种格式共用同一个判断。
@@ -83,9 +96,9 @@ export async function exportDesignDocument(request: DesignExportRequest): Promis
       case 'fig':
         return await figDocument(graph, canvas)
       case 'png':
-        return await perContainer(graph, containers, 'png', { scale: request.scale ?? DESIGN_EXPORT_SCALE }, canvas)
+        return await perContainer(graph, containers, { scale: request.scale ?? DESIGN_EXPORT_SCALE }, canvas)
       case 'pdf':
-        return await perContainer(graph, containers, 'pdf', {}, canvas)
+        return await pdfDocument(graph, containers)
       default:
         return await perPage(graph, containers, canvas)
     }
@@ -117,21 +130,61 @@ async function figDocument(graph: SceneGraph, canvas: ExportRenderer | null): Pr
   return { kind: 'done', units: [{ name: '', bytes: bytesOf(result.data) }] }
 }
 
-/** 图片与 PDF 的粒度相同：一张一个容器（PDF 那边，客户端再把它们并成一份多页）。 */
+/** 图片的粒度：一张一个容器。 */
 async function perContainer(
   graph: SceneGraph,
   containers: readonly SceneNode[],
-  format: 'png' | 'pdf',
   options: Record<string, unknown>,
   canvas: ExportRenderer | null,
 ): Promise<DesignExportOutcome> {
   const units: DesignExportUnit[] = []
   for (const container of containers) {
-    const data = await draw(graph, format, nodeTarget(container.id), options, canvas)
+    const data = await draw(graph, 'png', nodeTarget(container.id), options, canvas)
     if (data === undefined) throw new Error(`容器「${container.name}」画不出来，这一趟先不导出了。`)
     units.push({ name: container.name, bytes: data })
   }
   return { kind: 'done', units }
+}
+
+/**
+ * PDF 的粒度：**一容器一页，全在一份文档里**。
+ *
+ * 与图片那条分开写，是因为这一条根本没走 `IORegistry`——上游那个 `renderNodesToPDF` 不在包
+ * 的 exports map 里，而它内部那句 `new jsPDF(...)` 又够不着（字体必须注册在正要写的那一份
+ * 文档上），于是我们自己建（`design-pdf.ts`）。好在零件都露着：矢量图是
+ * `renderNodesToSVG`、量尺是 `computeContentBounds`。
+ *
+ * 一份文档而不是一页一份再拼：少一次 18MB 字面的解析，产物里也少几份重复的字体子集。
+ * 于是这一条交回**一件**字节——客户端那边按「一件就是一件」直接给他，不必合并。
+ */
+async function pdfDocument(
+  graph: SceneGraph,
+  containers: readonly SceneNode[],
+): Promise<DesignExportOutcome> {
+  const pages: PdfPageSource[] = []
+  for (const container of containers) {
+    // SVG 里根元素就写着 width/height/viewBox（上游照选区算好的），页面按这个尺寸建。
+    const svg = renderNodesToSVG(graph, pageOf(graph, container.id) ?? '', [container.id], {
+      xmlDeclaration: false,
+    })
+    const bounds = computeContentBounds(graph, [container.id])
+    // 量不到内容就是 0×0，落到下面那句「画不出来」上——别写成 `=== undefined`（它给的是
+    // `null`，那样会直接走进 `bounds.maxX` 而抛一个谁也读不懂的 TypeError）。
+    const width = bounds === null ? 0 : bounds.maxX - bounds.minX
+    const height = bounds === null ? 0 : bounds.maxY - bounds.minY
+    if (svg === null || width <= 0 || height <= 0) {
+      throw new Error(`容器「${container.name}」画不出来，这一趟先不导出了。`)
+    }
+    pages.push({ svg, width, height })
+  }
+
+  // 字体是这一条的命门：不嵌它，svg2pdf 会回落 `times`，中文变成内容流里的乱码（见
+  // `design-pdf.ts`）。取不到就照实说，不交一份没有字的产物。
+  const font = await ensureCJKFont()
+  if (font === null) throw new Error('取不到中文字面（插件资产没装上），这一趟先不导出了。')
+
+  const bytes = await renderPdfDocument(pages, pdfTextStyles(graph), font)
+  return { kind: 'done', units: [{ name: '', bytes }] }
 }
 
 /**

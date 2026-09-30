@@ -21,10 +21,14 @@ import {
 } from '../../../src/core/artifact/design/document.ts'
 import { applyDesignOps } from '../../../src/core/artifact/design/ops.ts'
 import {
+  CJK_TEXT_FAMILY,
+  PDF_TEXT_FAMILY,
   PPT_TEXT_FAMILY,
-  retargetsTextFonts,
+  exportTextRetarget,
+  pdfTextStyles,
   retargetTextFonts,
-} from '../../../src/core/artifact/design/ppt-font.ts'
+  type ExportTextRetarget,
+} from '../../../src/core/artifact/design/export-font.ts'
 
 /** The page of a freshly scaffolded (or hydrated) document. */
 const firstPage = (graph: SceneGraph) => {
@@ -225,29 +229,89 @@ describe('colors', () => {
 })
 
 /**
- * 交出去的 PPT 里的字体名（v1.60）。
+ * 交出去的图里的字体名（v1.60 起，v1.61 补齐 fig 与 PDF）。
  *
- * 这一组钉的是一次真机事故：设计稿里的字体名是**我们自己这边的东西**（拉丁字面 `Inter`、
- * 汉字靠 vendored 的 `Noto Sans SC` 回落），而幻灯片里的原生文本是**对方的 PowerPoint**
- * 排的——那个 `typeface` 会在对方机器上解析，写 `Inter` 的结果是找不到字体、汉字又没有
- * 字形，中文整段丢。
+ * 这一组钉的是连着两轮的真机事故。设计稿里的字体名是**我们自己这边的东西**（拉丁字面
+ * `Inter`、汉字靠 vendored 的 `Noto Sans SC` 回落，两者都只活在本插件的资产路由里），而四条
+ * 出路里三条要把这个名字**交出去**——交给对方的 PowerPoint 排（PPT 原生文本）、交给 fig 写器
+ * 烘字形轮廓、交给 svg2pdf 查字面。三条栽的姿势各不相同，写 `Inter` 的结果分别是：中文整段丢
+ * （对方没有这支字体、也没有汉字字形）、九个汉字全落 `.notdef` 画成同一个形状（写器按名字取
+ * 轮廓、**不做回落**）、回落 Type1 标准字体把中文当单字节写进内容流（`(N;ÆÉÿO`Y}ÿ¾`）。
+ *
+ * 图片那条**不换**：字是我们自己画的，那个名字在那边是「拿去 `fontManager` 找字面」用的。
  */
-describe('ppt fonts', () => {
-  it('只有幻灯片那条路要换：图片 / PDF / fig 的字体名是拿去给渲染器找字面的，动不得', () => {
-    expect(retargetsTextFonts('pptx')).toBe(true)
-    for (const other of ['fig', 'png', 'pdf']) expect(retargetsTextFonts(other)).toBe(false)
+describe('export fonts', () => {
+  /** 表里查一个格式；查不到就炸——判据里不该出现「静默不换」。 */
+  const retargetOf = (format: string): ExportTextRetarget => {
+    const retarget = exportTextRetarget(format)
+    if (retarget === null) throw new Error(`表里没有 ${format}`)
+    return retarget
+  }
+
+  it('一张表说了算：三条交出去的路各换各的，图片与不是产物的格式不换', () => {
+    expect(retargetOf('pptx')).toEqual({ family: PPT_TEXT_FAMILY, snapWeight: false })
+    expect(retargetOf('fig')).toEqual({ family: CJK_TEXT_FAMILY, snapWeight: false })
+    expect(retargetOf('pdf')).toEqual({ family: PDF_TEXT_FAMILY, snapWeight: true })
+    expect(exportTextRetarget('png')).toBeNull()
+    expect(exportTextRetarget('svg')).toBeNull()
   })
 
-  it('把设计稿那套内部字体名换成对方机器上有的那个', () => {
+  it('PPT 换成对方机器上必然有的那一个', () => {
     const graph = scaffoldDesignDocument()
     const title = graph.createNode('TEXT', firstBoard(graph).id, { name: '标题', text: '主视觉：你好' })
     // 先钉住「设计稿里确实是 Inter」——不然这条判据可能什么都没测到。
     expect(title.fontFamily).toBe('Inter')
 
-    retargetTextFonts(graph)
+    retargetTextFonts(graph, retargetOf('pptx'))
 
     expect(title.fontFamily).toBe(PPT_TEXT_FAMILY)
     expect(PPT_TEXT_FAMILY).toBe('Microsoft YaHei')
+  })
+
+  it('fig 换成我们 vendored 那支中文字面：写器按这个名字取字形轮廓，取不到就全落 .notdef', () => {
+    const graph = scaffoldDesignDocument()
+    const title = graph.createNode('TEXT', firstBoard(graph).id, { name: '标题', text: '你好，设计' })
+
+    retargetTextFonts(graph, retargetOf('fig'))
+
+    expect(title.fontFamily).toBe(CJK_TEXT_FAMILY)
+    expect(CJK_TEXT_FAMILY).toBe('Noto Sans SC')
+  })
+
+  it('PDF 换成无空格那个 id：svg2pdf 拿 font-family 整串去 getFontList 里逐字找键', () => {
+    const graph = scaffoldDesignDocument()
+    const title = graph.createNode('TEXT', firstBoard(graph).id, { name: '标题', text: '你好，设计' })
+
+    retargetTextFonts(graph, retargetOf('pdf'))
+
+    expect(title.fontFamily).toBe(PDF_TEXT_FAMILY)
+    expect(PDF_TEXT_FAMILY).toBe('NotoSansSC')
+    expect(PDF_TEXT_FAMILY).not.toContain(' ')
+  })
+
+  it('PDF 把字重收成 400/700 两档：我们只有一支 Regular，而 500 会让 svg2pdf 算出没注册的 `500normal`', () => {
+    const graph = scaffoldDesignDocument()
+    const board = firstBoard(graph)
+    const light = graph.createNode('TEXT', board.id, { name: '细的', text: '细', fontWeight: 500 })
+    const heavy = graph.createNode('TEXT', board.id, { name: '粗的', text: '粗', fontWeight: 800 })
+    const plain = graph.createNode('TEXT', board.id, { name: '常规', text: '常规' })
+
+    retargetTextFonts(graph, retargetOf('pdf'))
+
+    expect(light.fontWeight).toBe(400)
+    expect(heavy.fontWeight).toBe(700)
+    expect(plain.fontWeight).toBe(400)
+  })
+
+  it('PPT 与 fig 不收字重：那两边的粗体是交给对方合成的，收掉等于白丢信息', () => {
+    const graph = scaffoldDesignDocument()
+    const title = graph.createNode('TEXT', firstBoard(graph).id, { name: '标题', text: '粗', fontWeight: 500 })
+
+    retargetTextFonts(graph, retargetOf('fig'))
+    expect(title.fontWeight).toBe(500)
+
+    retargetTextFonts(graph, retargetOf('pptx'))
+    expect(title.fontWeight).toBe(500)
   })
 
   it('逐段字体一起换：run 上的名字会盖过节点那一个', () => {
@@ -259,10 +323,27 @@ describe('ppt fonts', () => {
       styleRuns: [{ start: 2, length: 2, style: { fontFamily: 'Noto Sans SC' } }],
     })
 
-    retargetTextFonts(graph)
+    retargetTextFonts(graph, retargetOf('pptx'))
 
     expect(title.fontFamily).toBe(PPT_TEXT_FAMILY)
     expect(title.styleRuns[0]?.style.fontFamily).toBe(PPT_TEXT_FAMILY)
+  })
+
+  it('逐段的字重也一起收：漏了它，那一段照样会算出没注册的样式名', () => {
+    const graph = scaffoldDesignDocument()
+    const title = graph.createNode('TEXT', firstBoard(graph).id, {
+      name: '标题',
+      text: '普通粗体',
+      styleRuns: [
+        { start: 2, length: 2, style: { fontWeight: 500 } },
+        { start: 4, length: 2, style: { fontWeight: 900 } },
+      ],
+    })
+
+    retargetTextFonts(graph, retargetOf('pdf'))
+
+    expect(title.styleRuns[0]?.style.fontWeight).toBe(400)
+    expect(title.styleRuns[1]?.style.fontWeight).toBe(700)
   })
 
   it('只换文字：容器与形状碰都不碰（字体字段在那儿不代表画得出字）', () => {
@@ -271,7 +352,7 @@ describe('ppt fonts', () => {
     const rect = graph.createNode('RECTANGLE', board.id, { name: '色块' })
     graph.createNode('TEXT', board.id, { name: '标题', text: '设计' })
 
-    retargetTextFonts(graph)
+    retargetTextFonts(graph, retargetOf('pptx'))
 
     expect(board.fontFamily).toBe('Inter')
     expect(rect.fontFamily).toBe('Inter')
@@ -283,8 +364,27 @@ describe('ppt fonts', () => {
     const inner = graph.createNode('FRAME', region.id, { name: '区域里的容器' })
     const deep = graph.createNode('TEXT', inner.id, { name: '标题', text: '深一层' })
 
-    retargetTextFonts(graph)
+    retargetTextFonts(graph, retargetOf('pptx'))
 
     expect(deep.fontFamily).toBe(PPT_TEXT_FAMILY)
+  })
+
+  it('要注册给 jsPDF 的样式名从这份图算出来，`normal` 永远在（SVG 不带 font-weight 时 svg2pdf 算的就是它）', () => {
+    const graph = scaffoldDesignDocument()
+    graph.createNode('TEXT', firstBoard(graph).id, { name: '标题', text: '设计' })
+
+    expect(pdfTextStyles(graph)).toEqual(['normal'])
+  })
+
+  it('只注册用得上的那几个：一份没粗没斜的稿子不白解析三遍 18MB 的中文字面', () => {
+    const graph = scaffoldDesignDocument()
+    const board = firstBoard(graph)
+    graph.createNode('TEXT', board.id, { name: '细的', text: '细', fontWeight: 500 })
+    graph.createNode('TEXT', board.id, { name: '斜的', text: '斜', italic: true })
+    graph.createNode('TEXT', board.id, { name: '粗斜的', text: '粗斜', fontWeight: 900, italic: true })
+
+    retargetTextFonts(graph, retargetOf('pdf'))
+
+    expect(pdfTextStyles(graph).sort()).toEqual(['bolditalic', 'italic', 'normal'])
   })
 })

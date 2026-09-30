@@ -68,7 +68,6 @@ import {
 } from './notice.ts'
 import { exportOfferOf, type ExportOffer } from './export-plan.ts'
 import { exportDesign, type DesignExportFormat } from './design-export.ts'
-import { mergePdfPages } from './pdf-merge.ts'
 import { loadDesignEngine } from '../artifact/viewers/design-engine-module.ts'
 import {
   docxBytes,
@@ -978,7 +977,6 @@ export function CanvasBoard(props: CanvasBoardProps) {
               title,
               engine: await loadDesignEngine(),
               save: downloadBytes,
-              mergePdf: mergePdfPages,
             }),
             t,
           ),
