@@ -46,6 +46,20 @@
  * 是写器唯一烘得对的那种形状，一个字段都不碰）。于是这一版的炸面就停在「画布上一眼能看出
  * 会被烘歪」的那些文字上。
  *
+ * **六、PPT 那条要改两次输入：把越界的子块预夹掉，夹不动的就地烘成图片**（v1.66 / v1.68，
+ * 理由与症状见 `core/artifact/design/pptx-preclip.ts` 与 `pptx-raster.ts`）。上游 pptx 导出器
+ * 本来是「可编辑混合导出」，但 root 容器只要**开着裁切又有子孙越界**（>0.5px），它就放弃逐元素
+ * 转换、**把整页栅格成一张图**——而我们的容器默认就开裁切、AI 画稿时装饰子块贴边又是常态，
+ * 于是真机上每页都是一张图片、所有文字跟着落进那张图。两步都抵着同一句话：**越界的那部分在
+ * 画布上本来就被裁掉、不可见**，所以
+ *
+ * 1. **直角矩形叶子**：夹进所有裁切祖先边界的**交**（矩形 ∩ 矩形 = 矩形，逐像素等价）；
+ * 2. **夹不动的**（圆角矩 / 椭圆 / 文本 / 矢量 / 带子树的容器）：套一个同尺寸的裁切框、连
+ *    裁切一起画成 PNG，再用它顶掉（图片是矩形，夹过之后裁剪与画布上裁掉同一块完全一样）。
+ *
+ * 第二步**要渲染器**，所以它排在渲染器起好之后；画不出来就回滚成原样（照旧退图，但画布外观
+ * 一字未改）。两步都只碰那份一次性图，且**只有 PPT 这条路**走它们。
+ *
  * 这个模块**只住在引擎 chunk 里**（`lib/assets/design-engine.js`）：它 import 的是
  * `@open-pencil/core/io`，而场景图的类身份必须全页唯一（见 `design-engine.ts` 开头的两条
  * 理由）。client.js 那边只看 `design-engine-types.ts` 里声明的形状。
@@ -72,6 +86,8 @@ import {
   type FigLineNode,
   type FigTextLine,
 } from '../../../core/artifact/design/fig-text.ts'
+import { preclipOverflowingRects } from '../../../core/artifact/design/pptx-preclip.ts'
+import { rasterizeStubbornOverflows } from '../../../core/artifact/design/pptx-raster.ts'
 import type { SkiaRenderer } from '@open-pencil/core/canvas'
 import { createExportRenderer, ensureCJKFont, type ExportRenderer } from './design-skia.ts'
 import { renderPdfDocument, type PdfPageSource } from './design-pdf.ts'
@@ -125,8 +141,25 @@ export async function exportDesignDocument(request: DesignExportRequest): Promis
         return await perContainer(graph, containers, { scale: request.scale ?? DESIGN_EXPORT_SCALE }, canvas)
       case 'pdf':
         return await pdfDocument(graph, containers)
-      default:
+      default: {
+        // PPT 那条多两步，都是在交出去之前、只碰这份一次性图：
+        //
+        // 1. **夹**：把越界的直角矩形叶子收进裁切边界（矩形 ∩ 矩形 = 矩形，逐像素等价）。
+        // 2. **烘**：夹不动的那些（圆角矩 / 椭圆 / 文本 / 矢量 / 带子树的容器）连同裁切一起
+        //    画成一张 PNG，再用它顶掉——因为上游那条拱门是**整页**退图，一个夹不动的越界
+        //    子孙就够让这一页的可编辑性全丢、所有文字落进图片。理由与边界见
+        //    `core/artifact/design/pptx-preclip.ts` 与 `pptx-raster.ts`。
+        //
+        // **只有这条路夹与烘**：图片 / PDF / fig 各有各的保真手段。
+        preclipOverflowingRects(graph)
+        await rasterizeStubbornOverflows(
+          graph,
+          async (nodeId, scale) =>
+            (await draw(graph, 'png', nodeTarget(nodeId), { scale }, canvas)) ?? null,
+          DESIGN_EXPORT_SCALE,
+        )
         return await perPage(graph, containers, canvas)
+      }
     }
   } catch (error) {
     return { kind: 'error', message: error instanceof Error ? error.message : String(error) }

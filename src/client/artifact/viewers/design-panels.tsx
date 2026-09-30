@@ -54,6 +54,13 @@ import {
   weightsOf,
 } from '../../../core/artifact/design/node-props.ts'
 import { canRemovePage, pageLabel } from '../../../core/artifact/design/pages.ts'
+import {
+  emptyCollapse,
+  expandNodes,
+  toggleCollapse,
+  withNewNodesCollapsed,
+  type LayerCollapseState,
+} from '../../../core/artifact/design/layer-tree.ts'
 import { useChrome } from '../chrome.tsx'
 import { ModelPicker } from '../../ui/model-picker.tsx'
 import { PromptInput } from '../../ui/prompt-input.tsx'
@@ -653,13 +660,27 @@ function LayersPanel({
   onAction,
   onSelectLayer,
 }: DesignPanelsProps & { onSelectLayer: (id: string, range: boolean) => void }): ReactElement {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  /**
+   * 展开状态**默认全折叠**（F2.9，v1.67）：一进来只看得见顶层那几个画板。
+   *
+   * 状态本体与那两条规矩（新节点默认折叠、动过的不再自动改）都在
+   * `core/artifact/design/layer-tree.ts` 里——面板这一层只负责把三条路接上去：
+   * 初次挂载、快照刷新、用户点箭头。
+   */
+  const [collapse, setCollapse] = useState<LayerCollapseState>(() =>
+    withNewNodesCollapsed(snapshot.layers, emptyCollapse()),
+  )
   const [renaming, setRenaming] = useState<string | null>(null)
   const selected = new Set(snapshot.selection)
   const listRef = useRef<HTMLUListElement | null>(null)
   // 上次滚动聚焦的选区——同一选区的快照刷新（重画/落盘 bump）不再滚动。
   const scrolledRef = useRef<string>('')
   const selectionKey = snapshot.selection.join(',')
+
+  // 快照换了：新出现的可展开节点收进折叠集合（用户动过的保持原样）。
+  useEffect(() => {
+    setCollapse((previous) => withNewNodesCollapsed(snapshot.layers, previous))
+  }, [snapshot.layers])
 
   // 画布上点选后，图层面板滚动到选中行。选中行若藏在折叠的祖先里，先展开
   // 祖先（否则行根本没渲染、无从滚动），再 rAF 等行挂载后 scrollIntoView。
@@ -676,12 +697,7 @@ function LayersPanel({
     }
     walk(snapshot.layers, [])
     if (ancestors.size > 0) {
-      setCollapsed((previous) => {
-        if (![...ancestors].some((id) => previous.has(id))) return previous
-        const next = new Set(previous)
-        for (const id of ancestors) next.delete(id)
-        return next
-      })
+      setCollapse((previous) => expandNodes(previous, ancestors))
     }
     const frame = requestAnimationFrame(() => {
       listRef.current?.querySelector('.is-active')?.scrollIntoView({ block: 'nearest' })
@@ -692,7 +708,7 @@ function LayersPanel({
   const row = (node: DesignLayerNode, depth: number): ReactElement => {
     const isSelected = selected.has(node.id)
     const hasChildren = node.children.length > 0
-    const isCollapsed = collapsed.has(node.id)
+    const isCollapsed = collapse.collapsed.has(node.id)
     return (
       <li key={node.id}>
         <div
@@ -714,12 +730,7 @@ function LayersPanel({
               className="dsh-canvas-design-caret"
               onClick={(event) => {
                 event.stopPropagation()
-                setCollapsed((previous) => {
-                  const next = new Set(previous)
-                  if (next.has(node.id)) next.delete(node.id)
-                  else next.add(node.id)
-                  return next
-                })
+                setCollapse((previous) => toggleCollapse(previous, node.id))
               }}
             >
               {isCollapsed ? '▸' : '▾'}
