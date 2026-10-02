@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "DeepSeek Harness 通用创作画布插件：文件即产物、卡片即会话、引用即数据。",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "packageManager": "pnpm@10.17.0",
   "pnpm": {
@@ -178,9 +181,11 @@
     "conventional-changelog-conventionalcommits": "^10.4.0",
     "esbuild": "^0.25.0",
     "eslint": "^9.30.0",
+    "jspdf": "^4.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "release-it": "^21.1.0",
+    "svg2pdf.js": "^2.8.1",
     "typescript": "^6.0.0",
     "typescript-eslint": "^8.35.0",
     "vitest": "^3.2.0"

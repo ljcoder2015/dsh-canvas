@@ -138,6 +138,9 @@ importers:
       eslint:
         specifier: ^9.30.0
         version: 9.39.5(jiti@2.7.0)
+      jspdf:
+        specifier: ^4.2.1
+        version: 4.2.1
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -147,6 +150,9 @@ importers:
       release-it:
         specifier: ^21.1.0
         version: 21.1.0(@types/node@22.20.4)
+      svg2pdf.js:
+        specifier: ^2.8.1
+        version: 2.8.1(jspdf@4.2.1)
       typescript:
         specifier: ^6.0.0
         version: 6.0.3
