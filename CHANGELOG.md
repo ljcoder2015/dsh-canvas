@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.2](https://github.com/ljcoder2015/dsh-canvas/compare/v1.0.1...v1.0.2) (2026-10-08)
+
+### ⚠ BREAKING CHANGES
+
+* 包名改为 dsh-canvas-flow
+
+### Code Refactoring
+
+* 包名改为 dsh-canvas-flow ([aea1b95](https://github.com/ljcoder2015/dsh-canvas/commit/aea1b9557599af82edc2c22bfa2c73b051bb228b))
+
 ## 1.0.1 (2026-10-08)
 
 ### Features

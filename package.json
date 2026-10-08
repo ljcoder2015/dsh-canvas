@@ -1,6 +1,6 @@
 {
   "name": "dsh-canvas-flow",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "DeepSeek Harness 通用创作画布插件：文件即产物、卡片即会话、引用即数据。",
   "license": "MIT",
   "repository": {
