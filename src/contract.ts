@@ -17,7 +17,7 @@ import type { InvocationDescriptor } from '@deepseek-ai/dsh-typert-protocol'
  * string that must equal `package.json` `name` — the human-facing label
  * (`host/prompt.ts` `PLUGIN_ID`) is deliberately a different, stable word.
  */
-export const PACKAGE_NAME = '@ljcoder/dsh-canvas'
+export const PACKAGE_NAME = 'dsh-canvas-flow'
 
 /**
  * Model-facing tool names, declared once.
@@ -391,67 +391,67 @@ const resultOf = (typeSymbol: string, schema: z.ZodType) => ({
 })
 
 const P = {
-  projectId: json('projectId', 'projectId', '@ljcoder/dsh-canvas#ProjectId', projectIdSchema),
-  cardId: json('cardId', 'cardId', '@ljcoder/dsh-canvas#CardId', cardIdSchema),
-  upstream: json('upstream', 'upstream', '@ljcoder/dsh-canvas#CardId', cardIdSchema),
-  downstream: json('downstream', 'downstream', '@ljcoder/dsh-canvas#CardId', cardIdSchema),
-  sourceCardId: json('sourceCardId', 'sourceCardId', '@ljcoder/dsh-canvas#CardId', cardIdSchema),
-  sourceId: json('sourceId', 'sourceId', '@ljcoder/dsh-canvas#SourceId', sourceIdSchema),
-  noteId: json('noteId', 'noteId', '@ljcoder/dsh-canvas#NoteId', noteIdSchema),
-  path: json('path', 'path', '@ljcoder/dsh-canvas#DirectoryPath', directoryPathSchema),
-  name: json('name', 'name', '@ljcoder/dsh-canvas#ProjectName', z.string().trim().max(120)),
-  content: json('content', 'content', '@ljcoder/dsh-canvas#FileContent', z.string().max(2_000_000)),
-  text: json('text', 'text', '@ljcoder/dsh-canvas#NoteText', z.string().trim().min(1).max(2_000)),
-  mode: json('mode', 'mode', '@ljcoder/dsh-canvas#InjectionMode', z.enum(['summary', 'full'])),
-  format: json('format', 'format', '@ljcoder/dsh-canvas#ExportFormat', z.enum(['html', 'pdf', 'pptx', 'png', 'svg', 'zip'])),
-  strategy: json('strategy', 'strategy', '@ljcoder/dsh-canvas#ArrangeStrategy', z.enum(['source-chain', 'grid', 'organize'])),
-  position: json('position', 'position', '@ljcoder/dsh-canvas#Point', pointSchema),
-  viewport: json('viewport', 'viewport', '@ljcoder/dsh-canvas#Viewport', viewportSchema),
-  kind: json('kind', 'kind', '@ljcoder/dsh-canvas#KindId', z.string().trim().min(1).max(80)),
+  projectId: json('projectId', 'projectId', 'dsh-canvas-flow#ProjectId', projectIdSchema),
+  cardId: json('cardId', 'cardId', 'dsh-canvas-flow#CardId', cardIdSchema),
+  upstream: json('upstream', 'upstream', 'dsh-canvas-flow#CardId', cardIdSchema),
+  downstream: json('downstream', 'downstream', 'dsh-canvas-flow#CardId', cardIdSchema),
+  sourceCardId: json('sourceCardId', 'sourceCardId', 'dsh-canvas-flow#CardId', cardIdSchema),
+  sourceId: json('sourceId', 'sourceId', 'dsh-canvas-flow#SourceId', sourceIdSchema),
+  noteId: json('noteId', 'noteId', 'dsh-canvas-flow#NoteId', noteIdSchema),
+  path: json('path', 'path', 'dsh-canvas-flow#DirectoryPath', directoryPathSchema),
+  name: json('name', 'name', 'dsh-canvas-flow#ProjectName', z.string().trim().max(120)),
+  content: json('content', 'content', 'dsh-canvas-flow#FileContent', z.string().max(2_000_000)),
+  text: json('text', 'text', 'dsh-canvas-flow#NoteText', z.string().trim().min(1).max(2_000)),
+  mode: json('mode', 'mode', 'dsh-canvas-flow#InjectionMode', z.enum(['summary', 'full'])),
+  format: json('format', 'format', 'dsh-canvas-flow#ExportFormat', z.enum(['html', 'pdf', 'pptx', 'png', 'svg', 'zip'])),
+  strategy: json('strategy', 'strategy', 'dsh-canvas-flow#ArrangeStrategy', z.enum(['source-chain', 'grid', 'organize'])),
+  position: json('position', 'position', 'dsh-canvas-flow#Point', pointSchema),
+  viewport: json('viewport', 'viewport', 'dsh-canvas-flow#Viewport', viewportSchema),
+  kind: json('kind', 'kind', 'dsh-canvas-flow#KindId', z.string().trim().min(1).max(80)),
   intentKind: json(
     'kind',
     'kind',
-    '@ljcoder/dsh-canvas#PendingIntentKind',
+    'dsh-canvas-flow#PendingIntentKind',
     z.enum(['text-edit', 'region-comment', 'element-style', 'reorder']),
   ),
-  intentPayload: json('payload', 'payload', '@ljcoder/dsh-canvas#IntentPayload', z.string().max(200_000)),
-  intentImage: json('image', 'image', '@ljcoder/dsh-canvas#IntentImage', z.string().max(4_000_000)),
-  prompt: json('prompt', 'prompt', '@ljcoder/dsh-canvas#PromptText', z.string().trim().min(1).max(32_000)),
-  file: json('file', 'file', '@ljcoder/dsh-canvas#CardFile', cardFileSchema),
-  cardName: json('name', 'name', '@ljcoder/dsh-canvas#CardName', z.string().max(120)),
-  version: json('version', 'version', '@ljcoder/dsh-canvas#FsVersion', z.string().min(1).max(200)),
-  designOps: json('ops', 'ops', '@ljcoder/dsh-canvas#DesignOps', z.array(designOpSchema).min(1).max(200)),
-  style: json('style', 'style', '@ljcoder/dsh-canvas#StyleProfile', styleProfileSchema),
+  intentPayload: json('payload', 'payload', 'dsh-canvas-flow#IntentPayload', z.string().max(200_000)),
+  intentImage: json('image', 'image', 'dsh-canvas-flow#IntentImage', z.string().max(4_000_000)),
+  prompt: json('prompt', 'prompt', 'dsh-canvas-flow#PromptText', z.string().trim().min(1).max(32_000)),
+  file: json('file', 'file', 'dsh-canvas-flow#CardFile', cardFileSchema),
+  cardName: json('name', 'name', 'dsh-canvas-flow#CardName', z.string().max(120)),
+  version: json('version', 'version', 'dsh-canvas-flow#FsVersion', z.string().min(1).max(200)),
+  designOps: json('ops', 'ops', 'dsh-canvas-flow#DesignOps', z.array(designOpSchema).min(1).max(200)),
+  style: json('style', 'style', 'dsh-canvas-flow#StyleProfile', styleProfileSchema),
 }
 
 const R = {
-  board: resultOf('@ljcoder/dsh-canvas#BoardSnapshot', boardSnapshotSchema),
-  project: resultOf('@ljcoder/dsh-canvas#Project', projectSchema),
-  projectList: resultOf('@ljcoder/dsh-canvas#ProjectList', z.array(projectSchema)),
-  binding: resultOf('@ljcoder/dsh-canvas#ProjectBinding', projectBindingSchema),
-  folders: resultOf('@ljcoder/dsh-canvas#FolderEntryList', z.array(folderEntrySchema)),
-  card: resultOf('@ljcoder/dsh-canvas#BoardCard', boardCardSchema),
-  cardList: resultOf('@ljcoder/dsh-canvas#BoardCardList', z.array(boardCardSchema)),
-  source: resultOf('@ljcoder/dsh-canvas#BoardSource', boardSourceSchema),
-  sourceList: resultOf('@ljcoder/dsh-canvas#BoardSourceList', z.array(boardSourceSchema)),
-  chain: resultOf('@ljcoder/dsh-canvas#SourceChain', sourceChainSchema),
-  referencedFiles: resultOf('@ljcoder/dsh-canvas#ReferencedFiles', referencedFilesSchema),
-  note: resultOf('@ljcoder/dsh-canvas#Note', noteSchema),
-  style: resultOf('@ljcoder/dsh-canvas#StyleProfile', styleProfileSchema),
-  summary: resultOf('@ljcoder/dsh-canvas#CardSummary', cardSummarySchema),
-  summaryList: resultOf('@ljcoder/dsh-canvas#CardSummaryList', z.array(cardSummarySchema)),
-  artifact: resultOf('@ljcoder/dsh-canvas#ArtifactView', artifactViewSchema),
-  bundle: resultOf('@ljcoder/dsh-canvas#BundleView', bundleViewSchema),
-  write: resultOf('@ljcoder/dsh-canvas#WriteResult', writeResultSchema),
-  designDocument: resultOf('@ljcoder/dsh-canvas#DesignDocument', designDocumentSchema),
-  designEdit: resultOf('@ljcoder/dsh-canvas#DesignEditResult', designEditResultSchema),
-  export: resultOf('@ljcoder/dsh-canvas#ExportResult', exportResultSchema),
-  session: resultOf('@ljcoder/dsh-canvas#SessionBinding', sessionBindingSchema),
-  lastPrompt: resultOf('@ljcoder/dsh-canvas#LastPrompt', lastPromptSchema),
-  pending: resultOf('@ljcoder/dsh-canvas#PendingIntentList', z.array(pendingIntentSchema)),
-  boolean: resultOf('@ljcoder/dsh-canvas#Boolean', z.boolean()),
-  count: resultOf('@ljcoder/dsh-canvas#Count', z.number()),
-  text: resultOf('@ljcoder/dsh-canvas#Text', z.string()),
+  board: resultOf('dsh-canvas-flow#BoardSnapshot', boardSnapshotSchema),
+  project: resultOf('dsh-canvas-flow#Project', projectSchema),
+  projectList: resultOf('dsh-canvas-flow#ProjectList', z.array(projectSchema)),
+  binding: resultOf('dsh-canvas-flow#ProjectBinding', projectBindingSchema),
+  folders: resultOf('dsh-canvas-flow#FolderEntryList', z.array(folderEntrySchema)),
+  card: resultOf('dsh-canvas-flow#BoardCard', boardCardSchema),
+  cardList: resultOf('dsh-canvas-flow#BoardCardList', z.array(boardCardSchema)),
+  source: resultOf('dsh-canvas-flow#BoardSource', boardSourceSchema),
+  sourceList: resultOf('dsh-canvas-flow#BoardSourceList', z.array(boardSourceSchema)),
+  chain: resultOf('dsh-canvas-flow#SourceChain', sourceChainSchema),
+  referencedFiles: resultOf('dsh-canvas-flow#ReferencedFiles', referencedFilesSchema),
+  note: resultOf('dsh-canvas-flow#Note', noteSchema),
+  style: resultOf('dsh-canvas-flow#StyleProfile', styleProfileSchema),
+  summary: resultOf('dsh-canvas-flow#CardSummary', cardSummarySchema),
+  summaryList: resultOf('dsh-canvas-flow#CardSummaryList', z.array(cardSummarySchema)),
+  artifact: resultOf('dsh-canvas-flow#ArtifactView', artifactViewSchema),
+  bundle: resultOf('dsh-canvas-flow#BundleView', bundleViewSchema),
+  write: resultOf('dsh-canvas-flow#WriteResult', writeResultSchema),
+  designDocument: resultOf('dsh-canvas-flow#DesignDocument', designDocumentSchema),
+  designEdit: resultOf('dsh-canvas-flow#DesignEditResult', designEditResultSchema),
+  export: resultOf('dsh-canvas-flow#ExportResult', exportResultSchema),
+  session: resultOf('dsh-canvas-flow#SessionBinding', sessionBindingSchema),
+  lastPrompt: resultOf('dsh-canvas-flow#LastPrompt', lastPromptSchema),
+  pending: resultOf('dsh-canvas-flow#PendingIntentList', z.array(pendingIntentSchema)),
+  boolean: resultOf('dsh-canvas-flow#Boolean', z.boolean()),
+  count: resultOf('dsh-canvas-flow#Count', z.number()),
+  text: resultOf('dsh-canvas-flow#Text', z.string()),
 }
 
 const signal = { parameter: 'signal' as const }
@@ -468,171 +468,171 @@ const signal = { parameter: 'signal' as const }
 export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
   // ── canvas: projects ────────────────────────────────────────────────────
   {
-    id: '@ljcoder/dsh-canvas#canvas/list_projects', service: 'canvas', namespace: 'canvas', method: 'listProjects',
+    id: 'dsh-canvas-flow#canvas/list_projects', service: 'canvas', namespace: 'canvas', method: 'listProjects',
     invocation: { kind: 'direct' }, parameters: [], cancellation: signal, result: R.projectList,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/create_project', service: 'canvas', namespace: 'canvas', method: 'createProject',
+    id: 'dsh-canvas-flow#canvas/create_project', service: 'canvas', namespace: 'canvas', method: 'createProject',
     invocation: { kind: 'direct' }, parameters: [P.name, P.path], cancellation: signal, result: R.binding,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/remove_project', service: 'canvas', namespace: 'canvas', method: 'removeProject',
+    id: 'dsh-canvas-flow#canvas/remove_project', service: 'canvas', namespace: 'canvas', method: 'removeProject',
     invocation: { kind: 'direct' }, parameters: [P.projectId], cancellation: signal, result: R.boolean,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/list_folders', service: 'canvas', namespace: 'canvas', method: 'listFolders',
+    id: 'dsh-canvas-flow#canvas/list_folders', service: 'canvas', namespace: 'canvas', method: 'listFolders',
     invocation: { kind: 'direct' }, parameters: [P.path], cancellation: signal, result: R.folders,
   },
 
   // ── canvas: board ───────────────────────────────────────────────────────
   {
-    id: '@ljcoder/dsh-canvas#canvas/set_active_project', service: 'canvas', namespace: 'canvas', method: 'setActiveProject',
+    id: 'dsh-canvas-flow#canvas/set_active_project', service: 'canvas', namespace: 'canvas', method: 'setActiveProject',
     invocation: { kind: 'direct' }, parameters: [P.projectId], cancellation: signal, result: R.project,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/read_board', service: 'canvas', namespace: 'canvas', method: 'readBoard',
+    id: 'dsh-canvas-flow#canvas/read_board', service: 'canvas', namespace: 'canvas', method: 'readBoard',
     invocation: { kind: 'direct' }, parameters: [P.projectId], cancellation: signal, result: R.board,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/set_viewport', service: 'canvas', namespace: 'canvas', method: 'setViewport',
+    id: 'dsh-canvas-flow#canvas/set_viewport', service: 'canvas', namespace: 'canvas', method: 'setViewport',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.viewport], cancellation: signal, result: R.project,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/set_style', service: 'canvas', namespace: 'canvas', method: 'setStyle',
+    id: 'dsh-canvas-flow#canvas/set_style', service: 'canvas', namespace: 'canvas', method: 'setStyle',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.style], cancellation: signal, result: R.style,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/move_card', service: 'canvas', namespace: 'canvas', method: 'moveCard',
+    id: 'dsh-canvas-flow#canvas/move_card', service: 'canvas', namespace: 'canvas', method: 'moveCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.position], cancellation: signal, result: R.card,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/arrange', service: 'canvas', namespace: 'canvas', method: 'arrange',
+    id: 'dsh-canvas-flow#canvas/arrange', service: 'canvas', namespace: 'canvas', method: 'arrange',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.strategy], cancellation: signal, result: R.board,
   },
 
   // ── canvas: source edges ────────────────────────────────────────────────
   {
-    id: '@ljcoder/dsh-canvas#canvas/link_source', service: 'canvas', namespace: 'canvas', method: 'linkSource',
+    id: 'dsh-canvas-flow#canvas/link_source', service: 'canvas', namespace: 'canvas', method: 'linkSource',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.upstream, P.downstream], cancellation: signal, result: R.source,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/unlink_source', service: 'canvas', namespace: 'canvas', method: 'unlinkSource',
+    id: 'dsh-canvas-flow#canvas/unlink_source', service: 'canvas', namespace: 'canvas', method: 'unlinkSource',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.sourceId], cancellation: signal, result: R.boolean,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/get_sources', service: 'canvas', namespace: 'canvas', method: 'getSources',
+    id: 'dsh-canvas-flow#canvas/get_sources', service: 'canvas', namespace: 'canvas', method: 'getSources',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.chain,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/reconcile', service: 'canvas', namespace: 'canvas', method: 'reconcile',
+    id: 'dsh-canvas-flow#canvas/reconcile', service: 'canvas', namespace: 'canvas', method: 'reconcile',
     invocation: { kind: 'direct' }, parameters: [P.projectId], cancellation: signal, result: R.sourceList,
   },
 
   // ── canvas: notes ───────────────────────────────────────────────────────
   {
-    id: '@ljcoder/dsh-canvas#canvas/create_note', service: 'canvas', namespace: 'canvas', method: 'createNote',
+    id: 'dsh-canvas-flow#canvas/create_note', service: 'canvas', namespace: 'canvas', method: 'createNote',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.text, P.position], cancellation: signal, result: R.note,
   },
   {
-    id: '@ljcoder/dsh-canvas#canvas/remove_note', service: 'canvas', namespace: 'canvas', method: 'removeNote',
+    id: 'dsh-canvas-flow#canvas/remove_note', service: 'canvas', namespace: 'canvas', method: 'removeNote',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.noteId], cancellation: signal, result: R.boolean,
   },
 
   // ── card: artifacts ─────────────────────────────────────────────────────
   {
-    id: '@ljcoder/dsh-canvas#card/create_card', service: 'card', namespace: 'card', method: 'createCard',
+    id: 'dsh-canvas-flow#card/create_card', service: 'card', namespace: 'card', method: 'createCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.file, P.kind, P.position], cancellation: signal, result: R.card,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/scaffold_webapp', service: 'card', namespace: 'card', method: 'scaffoldWebapp',
+    id: 'dsh-canvas-flow#card/scaffold_webapp', service: 'card', namespace: 'card', method: 'scaffoldWebapp',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.name, P.position], cancellation: signal, result: R.card,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/scaffold_design', service: 'card', namespace: 'card', method: 'scaffoldDesign',
+    id: 'dsh-canvas-flow#card/scaffold_design', service: 'card', namespace: 'card', method: 'scaffoldDesign',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.name, P.position], cancellation: signal, result: R.card,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/read_design', service: 'card', namespace: 'card', method: 'readDesign',
+    id: 'dsh-canvas-flow#card/read_design', service: 'card', namespace: 'card', method: 'readDesign',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.designDocument,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/edit_design', service: 'card', namespace: 'card', method: 'editDesign',
+    id: 'dsh-canvas-flow#card/edit_design', service: 'card', namespace: 'card', method: 'editDesign',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.designOps], cancellation: signal, result: R.designEdit,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/rename_card', service: 'card', namespace: 'card', method: 'renameCard',
+    id: 'dsh-canvas-flow#card/rename_card', service: 'card', namespace: 'card', method: 'renameCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.cardName], cancellation: signal, result: R.card,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/remove_card', service: 'card', namespace: 'card', method: 'removeCard',
+    id: 'dsh-canvas-flow#card/remove_card', service: 'card', namespace: 'card', method: 'removeCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.boolean,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/remove_missing_cards', service: 'card', namespace: 'card', method: 'removeMissingCards',
+    id: 'dsh-canvas-flow#card/remove_missing_cards', service: 'card', namespace: 'card', method: 'removeMissingCards',
     invocation: { kind: 'direct' }, parameters: [P.projectId], cancellation: signal, result: R.count,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/read_summary', service: 'card', namespace: 'card', method: 'readSummary',
+    id: 'dsh-canvas-flow#card/read_summary', service: 'card', namespace: 'card', method: 'readSummary',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.summary,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/read_artifact', service: 'card', namespace: 'card', method: 'readArtifact',
+    id: 'dsh-canvas-flow#card/read_artifact', service: 'card', namespace: 'card', method: 'readArtifact',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.artifact,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/read_bundle', service: 'card', namespace: 'card', method: 'readBundle',
+    id: 'dsh-canvas-flow#card/read_bundle', service: 'card', namespace: 'card', method: 'readBundle',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.bundle,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/read_sources', service: 'card', namespace: 'card', method: 'readSources',
+    id: 'dsh-canvas-flow#card/read_sources', service: 'card', namespace: 'card', method: 'readSources',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.summaryList,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/reference_files', service: 'card', namespace: 'card', method: 'referenceFiles',
+    id: 'dsh-canvas-flow#card/reference_files', service: 'card', namespace: 'card', method: 'referenceFiles',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.referencedFiles,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/inject_card', service: 'card', namespace: 'card', method: 'injectCard',
+    id: 'dsh-canvas-flow#card/inject_card', service: 'card', namespace: 'card', method: 'injectCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.sourceCardId, P.mode], cancellation: signal, result: R.summary,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/open_session', service: 'card', namespace: 'card', method: 'openSession',
+    id: 'dsh-canvas-flow#card/open_session', service: 'card', namespace: 'card', method: 'openSession',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.session,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/release_session', service: 'card', namespace: 'card', method: 'releaseSession',
+    id: 'dsh-canvas-flow#card/release_session', service: 'card', namespace: 'card', method: 'releaseSession',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.boolean,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/write_text', service: 'card', namespace: 'card', method: 'writeText',
+    id: 'dsh-canvas-flow#card/write_text', service: 'card', namespace: 'card', method: 'writeText',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.content], cancellation: signal, result: R.write,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/edit_text', service: 'card', namespace: 'card', method: 'editText',
+    id: 'dsh-canvas-flow#card/edit_text', service: 'card', namespace: 'card', method: 'editText',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.content, P.version], cancellation: signal, result: R.write,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/queue_intent', service: 'card', namespace: 'card', method: 'queueIntent',
+    id: 'dsh-canvas-flow#card/queue_intent', service: 'card', namespace: 'card', method: 'queueIntent',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.intentKind, P.intentPayload, P.intentImage], cancellation: signal, result: R.pending,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/read_pending', service: 'card', namespace: 'card', method: 'readPending',
+    id: 'dsh-canvas-flow#card/read_pending', service: 'card', namespace: 'card', method: 'readPending',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.pending,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/export_card', service: 'card', namespace: 'card', method: 'exportCard',
+    id: 'dsh-canvas-flow#card/export_card', service: 'card', namespace: 'card', method: 'exportCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.format], cancellation: signal, result: R.export,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/publish_card', service: 'card', namespace: 'card', method: 'publishCard',
+    id: 'dsh-canvas-flow#card/publish_card', service: 'card', namespace: 'card', method: 'publishCard',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.export,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/send_message', service: 'card', namespace: 'card', method: 'sendMessage',
+    id: 'dsh-canvas-flow#card/send_message', service: 'card', namespace: 'card', method: 'sendMessage',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId, P.prompt], cancellation: signal, result: R.session,
   },
   {
-    id: '@ljcoder/dsh-canvas#card/read_last_prompt', service: 'card', namespace: 'card', method: 'readLastPrompt',
+    id: 'dsh-canvas-flow#card/read_last_prompt', service: 'card', namespace: 'card', method: 'readLastPrompt',
     invocation: { kind: 'direct' }, parameters: [P.projectId, P.cardId], cancellation: signal, result: R.lastPrompt,
   },
 ]

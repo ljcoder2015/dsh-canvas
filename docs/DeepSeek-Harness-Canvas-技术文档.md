@@ -172,7 +172,7 @@ Harness 只认 `package.json`。两个关键字段把它变成插件：
 
 ```json
 {
-  "name": "@ljcoder/dsh-canvas",
+  "name": "dsh-canvas-flow",
   "version": "1.0.0",
   "type": "module",
   "main": "lib/index.js",
@@ -204,8 +204,8 @@ Harness 只认 `package.json`。两个关键字段把它变成插件：
 
 ```yaml
 - insert:
-    - id: '@ljcoder/dsh-canvas'
-      name: '@ljcoder/dsh-canvas'
+    - id: 'dsh-canvas-flow'
+      name: 'dsh-canvas-flow'
       # 可选：覆盖 src/index.ts 的 Config 默认值
       # config:
       #   workspaceRoot: ./canvas
@@ -215,7 +215,7 @@ Harness 只认 `package.json`。两个关键字段把它变成插件：
 
 ```json
 {
-  "id": "@ljcoder/dsh-canvas",
+  "id": "dsh-canvas-flow",
   "version": "1.0.0",
   "main": "lib/index.js",
   "engines": { "dsh": ">=0.1.0-rc.6" },
@@ -254,7 +254,7 @@ Harness 只认 `package.json`。两个关键字段把它变成插件：
 | `src/client/wire/model-memory.ts` | `'dsh-canvas:model-by-kind:v1'` | 浏览器本地存储键（改了会丢用户已选的模型） |
 | 画布目录 / 样式 | `.dsh-canvas/board.json` / `.dsh-canvas-*` | 目录约定与 CSS 类前缀 |
 
-> 包名现为 **scoped 的 `@ljcoder/dsh-canvas`**（v1.50 起走 scope；v1.69 由 `@ljcoder2015/dsh-canvas` 改为 `@ljcoder/dsh-canvas`）：裸名 `dsh-canvas` 在 npm 上被他人占位（2026-08-19 发布的 0.0.1），发布只能走 scope。**GitHub 账号名（`github.com/ljcoder2015/…`）与 npm scope 是两件事**，改名只动包身份，仓库地址、`LICENSE` / `README` 署名照旧。服务键 `canvas` 的十六进制命名空间名仍是 `TypertRemoteNamespace$63616e766173`、`card` 是 `$63617264`——它由**服务键**决定，与包名无关。
+> 包名现为 **scoped 的 `dsh-canvas-flow`**（v1.50 起走 scope；v1.69 由 `@ljcoder2015/dsh-canvas` 改为 `dsh-canvas-flow`）：裸名 `dsh-canvas` 在 npm 上被他人占位（2026-08-19 发布的 0.0.1），发布只能走 scope。**GitHub 账号名（`github.com/ljcoder2015/…`）与 npm scope 是两件事**，改名只动包身份，仓库地址、`LICENSE` / `README` 署名照旧。服务键 `canvas` 的十六进制命名空间名仍是 `TypertRemoteNamespace$63616e766173`、`card` 是 `$63617264`——它由**服务键**决定，与包名无关。
 
 ## 四、契约层：一份 descriptors，三处引用
 
@@ -274,9 +274,9 @@ export const cardSummarySchema = z.object({
 
 export const DSH_CANVAS_INVOCATIONS: readonly InvocationDescriptor[] = [
   {
-    id: '@ljcoder/dsh-canvas#card/read_sources', service: 'card', namespace: 'card', method: 'readSources',
+    id: 'dsh-canvas-flow#card/read_sources', service: 'card', namespace: 'card', method: 'readSources',
     invocation: { kind: 'direct' }, parameters: [], cancellation: { parameter: 'signal' },
-    result: { mode: 'strict', typeSymbol: '@ljcoder/dsh-canvas#CardSummaryList', schema: z.array(cardSummarySchema) },
+    result: { mode: 'strict', typeSymbol: 'dsh-canvas-flow#CardSummaryList', schema: z.array(cardSummarySchema) },
   },
   // …其余 canvas.* / card.* 方法同理，一个方法一条 descriptor
 ]
@@ -1055,7 +1055,7 @@ await build({ entryPoints: ['src/client/index.tsx'], outfile: 'lib/client.js', b
   format: 'cjs', platform: 'browser', target: ['es2022'], sourcemap: true, jsx: 'automatic',
   external: [...dshExternal, 'react', 'react-dom', 'react-dom/client',
              'react/jsx-runtime', 'react/jsx-dev-runtime', 'scheduler'],
-  banner: { js: "window.__ModuleLoader__.load({ id: '@ljcoder/dsh-canvas', factory: (require) => { var module = { exports: {} }; var exports = module.exports;" },
+  banner: { js: "window.__ModuleLoader__.load({ id: 'dsh-canvas-flow', factory: (require) => { var module = { exports: {} }; var exports = module.exports;" },
   footer: { js: 'return module.exports; } });' } })
 ```
 
@@ -1098,10 +1098,10 @@ CI：**尚未落地**——仓库里还没有 `.github/workflows/`，`check` 目
 pnpm install && pnpm run build
 dsh plugin --profile web add .              # 本地目录安装
 dsh plugin --profile web add https://github.com/ljcoder2015/dsh-canvas   # 从 Git 安装（会跑 prepare 构建）
-dsh plugin --profile web remove @ljcoder/dsh-canvas
+dsh plugin --profile web remove dsh-canvas-flow
 ```
 
-Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在该 profile 的 `pnpm-workspace.yaml` 里加 `allowBuilds: { '@ljcoder/dsh-canvas': true }`——**该授权允许包在安装时执行代码，只对可信来源开放并锁定 commit**。开发期把包加进工作区软链后，`dsh-client-hmr` 会轮询客户端 bundle 变化并热重载（仅 sourcemap 变化不触发），Host 侧改动需重启 Web Harness。
+Git 安装时 pnpm ≥10 会拦截 `prepare` 构建，需按 `dsh` 的提示在该 profile 的 `pnpm-workspace.yaml` 里加 `allowBuilds: { 'dsh-canvas-flow': true }`——**该授权允许包在安装时执行代码，只对可信来源开放并锁定 commit**。开发期把包加进工作区软链后，`dsh-client-hmr` 会轮询客户端 bundle 变化并热重载（仅 sourcemap 变化不触发），Host 侧改动需重启 Web Harness。
 
 ## 十一、与初版技术设想的差异（必读）
 

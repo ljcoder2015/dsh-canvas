@@ -4,8 +4,8 @@
 # backend, so it is inserted after the storage domain consumer (order 100).
 # Override the Config defaults from src/index.ts by adding a `config` block:
 #   - insert:
-#       - id: '@ljcoder/dsh-canvas'
-#         name: '@ljcoder/dsh-canvas'
+#       - id: 'dsh-canvas-flow'
+#         name: 'dsh-canvas-flow'
 #         config:
 #           workspaceRoot: ./canvas
 #           arrangeGap: 88
@@ -16,5 +16,5 @@
 # logs and prompt sections use is a label (`src/host/prompt.ts` `PLUGIN_ID`), not
 # this identity.
 - insert:
-    - id: '@ljcoder/dsh-canvas'
-      name: '@ljcoder/dsh-canvas'
+    - id: 'dsh-canvas-flow'
+      name: 'dsh-canvas-flow'
