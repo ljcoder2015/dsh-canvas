@@ -379,12 +379,15 @@ const json = (name: string, wire: string, typeSymbol: string, schema: z.ZodType)
   name,
   wire,
   source: 'json' as const,
-  codec: { mode: 'strict' as const, typeSymbol, schema },
+  // A strict codec materializes its realm schema lazily: `create()` is called on
+  // first boundary use, so the same descriptor object can cross a process or
+  // worker boundary without carrying a non-serializable schema with it.
+  codec: { mode: 'strict' as const, typeSymbol, create: () => schema },
 })
 const resultOf = (typeSymbol: string, schema: z.ZodType) => ({
   mode: 'strict' as const,
   typeSymbol,
-  schema,
+  create: () => schema,
 })
 
 const P = {

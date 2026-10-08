@@ -19,7 +19,7 @@
  * not inside one of the user's own canvas projects — everything else falls
  * through to the viewers that already handle it.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { BUILTIN_KINDS } from '../../core/artifact/kind-registry.ts'
 import type { KindDefinition, Project } from '../../types.ts'
 import type { CanvasBridge } from '../wire/bridge.ts'
@@ -140,6 +140,7 @@ export function registerCanvasTabs(ctx: ClientContext, deps: CanvasTabDeps): Pro
         title: () => ctx.locale.bind(NS)('canvas.label'),
         guide: [
           {
+            id: WORKBENCH_ID,
             order: 10,
             title: () => ctx.locale.bind(NS)('canvas.guide.title'),
             description: () => ctx.locale.bind(NS)('canvas.guide.description'),

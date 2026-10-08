@@ -5,15 +5,19 @@
  * (§4.8: subscribe, never mirror). Everything in this module derives a card's
  * face from the two live faces the framework already owns:
  *
- *   - `ctx.sessions.list` — the session rows, which carry `running`, the
- *     pending-interaction flag and the finished-while-away flag.
+ *   - `ctx.sessions.list` — the session rows, which carry `running` and the
+ *     update stamp.
+ *   - `useSessionStatus` — the live UI status rows, which carry the
+ *     pending-interaction and finished-while-away facts the list does not.
  *   - `SessionFace` — the per-session `ObservableSnapshot<ConversationSnapshot>`
  *     obtained from `ctx.sessions.binding(id).session`, which is how a card's
  *     last message is read without that card being the current session.
  *
  * Both are read-only here: nothing in this file writes to a session.
  */
-import type { ConversationSnapshot, SessionListState, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { SessionStatus, SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 
 /** The card state the board draws as a status dot. */
 export type CardState = 'running' | 'notified' | 'idle' | 'missing'
@@ -25,19 +29,43 @@ export type CardState = 'running' | 'notified' | 'idle' | 'missing'
  * "this artifact is missing" even if its conversation is still running,
  * because the missing file is the thing the user has to fix.
  *
+ * Running and "notified" come from two faces: the list row carries `running`,
+ * and the UI status row carries the pending-interaction and unread-completion
+ * flags. A status row wins where it exists, because it is the live one; the
+ * list row is the fallback for a card whose session the status source has not
+ * seen yet.
+ *
  * @param summary - the session row, or `undefined` when no session is bound.
  * @param missing - whether the artifact is *provably gone* (F1.11). Not "the
  *   file could not be read right now": a seat whose artifact has not been
  *   written yet, and one no probe could judge, are both ordinary cards — the
  *   host decides, so the board and the cleanup agree on one set (F1.11).
+ * @param status - the card session's live UI status row, when one exists.
  * @returns the state to draw.
  */
-export function cardStateOf(summary: SessionSummary | undefined, missing: boolean): CardState {
+export function cardStateOf(
+  summary: SessionSummary | undefined,
+  missing: boolean,
+  status?: SessionStatus,
+): CardState {
   if (missing) return 'missing'
-  if (summary === undefined) return 'idle'
-  if (summary.running) return 'running'
-  if (summary.pendingInteraction !== undefined || summary.completed === true) return 'notified'
+  if (summary === undefined && status === undefined) return 'idle'
+  const running = status?.running ?? summary?.running ?? false
+  if (running) return 'running'
+  if (status?.pendingInteraction !== undefined || status?.completionUnread === true) return 'notified'
   return 'idle'
+}
+
+/**
+ * One card session's live UI status row, or `undefined` before one exists.
+ *
+ * The snapshot is keyed by the branded `SessionId`; a card carries a plain
+ * string, so the cast lives here — beside {@link summaryOf} — rather than at
+ * every call site.
+ */
+export function statusOf(statuses: SessionStatusSnapshot, sessionId: string): SessionStatus | undefined {
+  if (sessionId === '') return undefined
+  return (statuses as ReadonlyMap<string, SessionStatus>).get(sessionId)
 }
 
 /**

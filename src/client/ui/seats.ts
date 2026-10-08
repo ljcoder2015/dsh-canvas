@@ -14,7 +14,7 @@
  * seat is never declared, the callback never runs, and the canvas simply does
  * not contribute. Absence is a no-op, never a crash.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ReactNode } from 'react'
 
 /** One registration, at the level of detail this package needs. */

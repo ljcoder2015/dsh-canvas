@@ -14,9 +14,9 @@
  * Three rules shape the board:
  *
  * 1. It never mirrors session state. A card's status — which is what draws its
- *    shimmer — is read through the framework's own live face, `useSessions`,
- *    so the board stays correct while a card's agent is running, without
- *    polling anything.
+ *    shimmer — is read through the framework's own live faces, `useSessions`
+ *    and `useSessionStatus`, so the board stays correct while a card's agent is
+ *    running, without polling anything.
  * 2. The board itself has no push channel, so it re-reads on the signals that
  *    can actually mean "the board changed": the seat was navigated to, the
  *    sessions domain moved (a tool call re-seated a card), or one of our own
@@ -33,7 +33,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
-import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { InjectFace, PropsRuntime, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   BoardCard,
@@ -49,7 +50,7 @@ import { kindLabel } from '../../core/artifact/kind-registry.ts'
 import { autoNameOf } from '../../core/canvas/card-name.ts'
 import type { CanvasBridge } from '../wire/bridge.ts'
 import type { CanvasKey, Translate } from '../ui/locales.ts'
-import { activityOf, cardStateOf, summaryOf } from '../wire/session-read.ts'
+import { activityOf, cardStateOf, statusOf, summaryOf } from '../wire/session-read.ts'
 import { CardTile } from './card-tile.tsx'
 import { CardSelection, ComposerBody, type MaterialRef } from './card-overlay.tsx'
 import type { ComposerSize } from './composer-size.ts'
@@ -230,6 +231,8 @@ export type CanvasBoardProps = InjectFace<CanvasInject> & {
   t: Translate
   /** The session list, read whole: the board needs every row for card state. */
   useSessions: SnapshotSelectorHook<SessionListState>
+  /** The live per-session UI status rows: pending interaction and unread completion. */
+  useSessionStatus: SnapshotSelectorHook<SessionStatusSnapshot>
   /** Re-read trigger for a seat that can be navigated again. */
   revision?: number
   /** The address the seat was opened at, used to pick the canvas to draw. */
@@ -294,7 +297,7 @@ function projectHolding(projects: readonly Project[], path: string): Project | u
  * @returns the board, hosted by the tab.
  */
 export function CanvasView(props: CanvasViewProps) {
-  const { bridge, t, activateSession, useTabInfo, useSessions } = props
+  const { bridge, t, activateSession, useTabInfo, useSessions, useSessionStatus } = props
 
   const tab = useTabInfo()
 
@@ -304,6 +307,7 @@ export function CanvasView(props: CanvasViewProps) {
       t={t}
       activateSession={activateSession}
       useSessions={useSessions}
+      useSessionStatus={useSessionStatus}
       revision={tab.tab.navigation.revision}
       address={tab.tab.navigation.address}
     />
@@ -312,7 +316,7 @@ export function CanvasView(props: CanvasViewProps) {
 
 /** Render the infinite board. */
 export function CanvasBoard(props: CanvasBoardProps) {
-  const { bridge, t, activateSession, useSessions, onSelectProject } = props
+  const { bridge, t, activateSession, useSessions, useSessionStatus, onSelectProject } = props
 
   const navigationRevision = props.revision ?? 0
   const openedAddress = props.address ?? ''
@@ -320,6 +324,9 @@ export function CanvasBoard(props: CanvasBoardProps) {
   // The list store is read whole on purpose: the board needs the rows, and the
   // alternative — a selector per card id — is one hook inside a loop.
   const sessions = useSessions((state: SessionListState) => state)
+  // Same read-whole rule as the list: the board needs a row per card, and the
+  // status source is one snapshot, so a selector per card would be a hook in a loop.
+  const statuses = useSessionStatus((state: SessionStatusSnapshot) => state)
   /**
    * A coarse integer that moves when the sessions domain moves. Used as the
    * board's re-read trigger: a card that was re-seated by a tool call shows up
@@ -526,9 +533,9 @@ export function CanvasBoard(props: CanvasBoardProps) {
 
   // ── derived ───────────────────────────────────────────────────────────────
 
-  const statusOf = useCallback(
-    (card: BoardCard) => cardStateOf(summaryOf(sessions, card.sessionId), card.missing),
-    [sessions],
+  const stateOf = useCallback(
+    (card: BoardCard) => cardStateOf(summaryOf(sessions, card.sessionId), card.missing, statusOf(statuses, card.sessionId)),
+    [sessions, statuses],
   )
 
   const selectedCard = cards.find((card) => card.id === selected)
@@ -1579,7 +1586,7 @@ export function CanvasBoard(props: CanvasBoardProps) {
               <CardTile
                 key={card.id}
                 card={card}
-                state={statusOf(card)}
+                state={stateOf(card)}
                 summary={summaries[card.id]}
                 projectId={projectId}
                 bridge={bridge}

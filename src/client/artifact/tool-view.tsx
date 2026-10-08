@@ -15,7 +15,7 @@
  * with the owner's published contract is a follow-up, not a placeholder.
  */
 import type { ReactNode } from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { TOOL_NAMES } from '../../contract.ts'
 import type { Translate } from '../ui/locales.ts'
 import { foreignSeats } from '../ui/seats.ts'

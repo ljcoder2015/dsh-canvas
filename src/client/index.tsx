@@ -17,10 +17,15 @@
  * dictionaries, the tab types, the seats and the in-flight calls with it and
  * leaves the product exactly as it was.
  */
-import type { ClientContext, ISessions, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { UiWorkspace } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { DSH_CANVAS_REMOTE, type CanvasFace, type CardFace } from './wire/remote.ts'
 import { NS, en, zh } from './ui/locales.ts'
 import { CanvasBridge } from './wire/bridge.ts'
@@ -33,20 +38,17 @@ import { registerToolViews } from './artifact/tool-view.tsx'
 export const inject = ['slots', 'layout', 'remote', 'locale', 'sessions', 'sidebarRight', 'sidebarRightTabs', 'uiWorkspace']
 
 /**
- * Read the two services this half needs off a context that declares one of them
- * twice.
+ * Read the two services this half needs off the client root context.
  *
- * Both halves of the harness ship a package registering a Context member under
- * the key `sessions` — a `SessionStore` on the host, an `ISessions` read face in
- * the browser — so a program with both installed merges to the host's type. The
- * browser half is what runs here, so it says so once, here, rather than casting
- * at each use.
+ * The browser half's "which session is the user looking at" action lives on the
+ * workspace's navigation service (`uiWorkspace.openSession`), not on the
+ * sessions read face, so the sessions domain is not read here at all.
  *
  * @param ctx - the client root context.
- * @returns the browser faces of the sessions domain and the Remote gateway.
+ * @returns the navigation service and the Remote gateway.
  */
-function clientFaces(ctx: ClientContext): { sessions: ISessions; remote: TypertClientRemote } {
-  return ctx as unknown as { sessions: ISessions; remote: TypertClientRemote }
+function clientFaces(ctx: ClientContext): { uiWorkspace: UiWorkspace; remote: TypertClientRemote } {
+  return ctx as unknown as { uiWorkspace: UiWorkspace; remote: TypertClientRemote }
 }
 
 /** Start the canvas: copy, seats, Remote, wiring. */
@@ -66,7 +68,7 @@ export function apply(ctx: ClientContext): void {
 
   const roots = registerCanvasTabs(ctx, {
     bridge,
-    activateSession: (sessionId: string) => faces.sessions.open(sessionId as SessionId),
+    activateSession: (sessionId: string) => faces.uiWorkspace.openSession(sessionId as SessionId),
   })
 
   registerToolViews(ctx)
@@ -77,8 +79,8 @@ export function apply(ctx: ClientContext): void {
   // exist before it.
   const panels = registerCanvasPanels(ctx, {
     bridge,
-    openSession: (sessionId: string) => faces.sessions.open(sessionId as SessionId),
-    pickDirectory: () => (ctx as unknown as { uiWorkspace: { pickDirectory: () => Promise<string | null> } }).uiWorkspace.pickDirectory(),
+    openSession: (sessionId: string) => faces.uiWorkspace.openSession(sessionId as SessionId),
+    pickDirectory: () => faces.uiWorkspace.pickDirectory(),
     // The tab types' veto reads the same list; handing it over here keeps that
     // cache from refusing a canvas the user created a moment ago.
     onProjects: (projects) => roots.ingest(projects),

@@ -11,9 +11,10 @@
  * `tests/session-log.spec.ts`.
  */
 import { describe, expect, it } from 'vitest'
-import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { SessionStatus } from '@deepseek-ai/dsh-client-ui-session/client'
 import { activityOf, cardStateOf, latestLine, summaryOf } from '../../../src/client/wire/session-read.ts'
-import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 
 /** A snapshot as the store hands it over; only the fields under test are set. */
 const snapshot = (fields: Record<string, unknown>): ConversationSnapshot =>
@@ -99,11 +100,27 @@ describe('cardStateOf', () => {
   })
 
   it('reads a finished or pending session as notified', () => {
-    expect(cardStateOf(row({ running: false, completed: true }), false)).toBe('notified')
+    const unsettled: SessionStatus = { running: false, pendingInteraction: undefined, completionUnread: true }
+    expect(cardStateOf(row({ running: false }), false, unsettled)).toBe('notified')
+    const awaiting: SessionStatus = {
+      running: false,
+      pendingInteraction: { key: 'k', kind: 'approval', sessionId: 'a' } as SessionStatus['pendingInteraction'],
+      completionUnread: false,
+    }
+    expect(cardStateOf(row({ running: false }), false, awaiting)).toBe('notified')
+  })
+
+  it('lets live status outrank the list row', () => {
+    const stopped: SessionStatus = { running: false, pendingInteraction: undefined, completionUnread: false }
+    expect(cardStateOf(row({ running: true }), false, stopped)).toBe('idle')
   })
 
   it('reads a card with no session as idle', () => {
     expect(cardStateOf(undefined, false)).toBe('idle')
+  })
+
+  it('reads a card whose session the status source has not seen as idle', () => {
+    expect(cardStateOf(row({ running: false }), false, undefined)).toBe('idle')
   })
 })
 

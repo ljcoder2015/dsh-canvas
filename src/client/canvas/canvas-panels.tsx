@@ -14,7 +14,7 @@
  * 里的「对话」动作在把会话设为当前会话之后，还要把主区域交回对话。
  */
 import { useEffect, useState } from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { Project } from '../../types.ts'
 import { NS, type Translate } from '../ui/locales.ts'

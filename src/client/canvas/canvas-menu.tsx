@@ -31,9 +31,9 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import {
   Button,
-  IconEllipsisOutline16,
-  IconFolderOpenOutline16,
-  IconTrashOutline16,
+  IconEllipsisOutlineRegular,
+  IconFolderOpenOutlineRegular,
+  IconTrashOutlineRegular,
   Menu,
   Modal,
   type MenuEntry,
@@ -55,8 +55,8 @@ import { ROW_ACTIONS, rowActions, type RowActionId } from './row-actions.ts'
  */
 export function rowMenuItems(app: string, t: Translate): MenuEntry[] {
   const icons: Record<RowActionId, ReactNode> = {
-    open: <IconFolderOpenOutline16 />,
-    remove: <IconTrashOutline16 />,
+    open: <IconFolderOpenOutlineRegular />,
+    remove: <IconTrashOutlineRegular />,
   }
   return rowActions(app).map((id) => ({
     id,
@@ -122,7 +122,7 @@ export function CanvasRowMenu(props: CanvasRowMenuProps) {
               onOpenChange(!open)
             }}
           >
-            <IconEllipsisOutline16 />
+            <IconEllipsisOutlineRegular />
           </button>
         )}
         items={rowMenuItems(app, t)}

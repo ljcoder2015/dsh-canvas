@@ -1,7 +1,9 @@
 # deps + build
 node_modules/
+.pnpm-store/
 lib/
 client/dist/
+*.tgz
 *.tsbuildinfo
 *.profraw
 

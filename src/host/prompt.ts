@@ -18,13 +18,30 @@
  * card's requests.
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed, UserMessage } from '@deepseek-ai/dsh-llm'
 import { createUserMessage, boundContextSummary } from '@deepseek-ai/dsh-llm'
 import type { CardId, CardSummary, Project } from '../types.ts'
 import { renderFileReferences, type FileReference } from '../core/artifact/file-reference.ts'
 import { TOOL_NAMES } from '../contract.ts'
 
-/** Plugin identity used on every injected message source. */
+/**
+ * This plugin's own message-source kind.
+ *
+ * 0.2.0's source vocabulary is merge-extensible and has no shared catch-all
+ * `plugin` kind: each producer names itself in its own module, and the form it
+ * carries declares whether the content is a superseding snapshot or a one-off
+ * notice. Declaring the kind here is what makes the three injected messages
+ * below attributable to the canvas rather than to an anonymous producer.
+ */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-canvas': {
+      kind: 'dsh-canvas'
+    } & ContextFormed
+  }
+}
+
+/** Plugin identity used on every injected message source and log line. */
 export const PLUGIN_ID = 'dsh-canvas'
 
 /** Section name of the global tool guidance. */
@@ -172,8 +189,7 @@ export function upstreamChangedMessage(upstream: CardId, downstream: CardId, dig
   return createUserMessage({
     content: [{ type: 'text', text: body }],
     source: {
-      kind: 'plugin',
-      plugin: PLUGIN_ID,
+      kind: 'dsh-canvas',
       form: 'snapshot',
       sections: [{ name: UPSTREAM_CONTEXT, text: body }],
     },
@@ -183,7 +199,7 @@ export function upstreamChangedMessage(upstream: CardId, downstream: CardId, dig
 /**
  * Build the message that hands a downstream session its material as file names.
  *
- * The source is `kind: 'plugin'`, never `kind: 'user'`: the board is naming the
+ * The source is `kind: 'dsh-canvas'`, never `kind: 'user'`: the board is naming the
  * files, not putting words in the user's mouth, and the harness's own `@file`
  * guidance already tells the model how to treat such tokens. The body carries
  * no file content at all — a reference is an offer to read, and its whole value
@@ -197,8 +213,7 @@ export function referenceMessage(
   return createUserMessage({
     content: [{ type: 'text', text: body }],
     source: {
-      kind: 'plugin',
-      plugin: PLUGIN_ID,
+      kind: 'dsh-canvas',
       form: 'notice',
       summary: boundContextSummary(`引用 ${references.map((reference) => reference.cardId).join(' / ')}`),
     },
@@ -253,8 +268,7 @@ export function injectionMessage(source: CardSummary, mode: 'summary' | 'full', 
   return createUserMessage({
     content: [{ type: 'text', text }],
     source: {
-      kind: 'plugin',
-      plugin: PLUGIN_ID,
+      kind: 'dsh-canvas',
       form: 'notice',
       summary: boundContextSummary(`引用 ${source.cardId}`),
     },

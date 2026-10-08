@@ -124,6 +124,28 @@ export interface LocatedCard {
 }
 
 /**
+ * A stand-in for a Remote namespace the mount has not delivered yet.
+ *
+ * The seats are registered synchronously, before `ctx.remote.$mount` resolves,
+ * so a component can legitimately call the bridge in that gap — a mount effect
+ * runs before the wiring effect that attaches the namespaces. Every method on
+ * the stand-in returns a **rejected promise** rather than throwing
+ * synchronously: a synchronous throw from an effect body happens before the
+ * caller's `.catch` is attached, and the slot runtime reports that as a crashed
+ * seat. "Not mounted yet" is meant to be one missed read, not a torn-down
+ * board, and a rejection is exactly what a `Promise`-returning call surface
+ * promises.
+ *
+ * @param what - the namespace name, for the message.
+ * @returns the stand-in, typed as the real face so call sites stay unchanged.
+ */
+function unmounted<Face extends object>(what: string): Face {
+  const fail = (): Promise<never> =>
+    Promise.reject(new Error(`dsh-canvas: the ${what} Remote namespace is not mounted yet`))
+  return new Proxy({} as Face, { get: () => fail })
+}
+
+/**
  * The plugin's whole call surface, unwrapped.
  *
  * Grouped by the namespace it wraps rather than by the screen that uses it:
@@ -158,16 +180,14 @@ export class CanvasBridge {
     this.#session = session
   }
 
-  /** The `canvas` namespace, or a clear failure while it is not mounted. */
+  /** The `canvas` namespace, or a stand-in that reports the gap as a rejection. */
   private get canvas(): CanvasFace {
-    if (this.#canvas === undefined) throw new Error('dsh-canvas: the canvas Remote namespace is not mounted yet')
-    return this.#canvas
+    return this.#canvas ?? unmounted<CanvasFace>('canvas')
   }
 
-  /** The `card` namespace, or a clear failure while it is not mounted. */
+  /** The `card` namespace, or a stand-in that reports the gap as a rejection. */
   private get card(): CardFace {
-    if (this.#card === undefined) throw new Error('dsh-canvas: the card Remote namespace is not mounted yet')
-    return this.#card
+    return this.#card ?? unmounted<CardFace>('card')
   }
 
   // ── canvas: projects ──────────────────────────────────────────────────────
@@ -383,8 +403,7 @@ export class CanvasBridge {
 
   /** The Host-generation model catalog, shared by every session's picker. */
   modelCatalog(): Promise<ModelCatalog> {
-    if (this.#session === undefined) throw new Error('dsh-canvas: the session Remote namespace is not mounted')
-    return unwrap(this.#session.modelCatalog())
+    return unwrap(this.session.modelCatalog())
   }
 
   /**
@@ -393,8 +412,7 @@ export class CanvasBridge {
    * same wire call the host composer's model seat makes.
    */
   async selectModel(sessionId: string, provider: string, model: string): Promise<void> {
-    if (this.#session === undefined) throw new Error('dsh-canvas: the session Remote namespace is not mounted')
-    await unwrap(this.#session.selectModel({ sessionId, provider, model }))
+    await unwrap(this.session.selectModel({ sessionId, provider, model }))
   }
 
   /**
@@ -413,7 +431,6 @@ export class CanvasBridge {
    *   list (nothing to say) — see `selectionOf` for reading the view itself.
    */
   async readModelSelection(sessionId: string): Promise<ModelSelectionView | undefined> {
-    if (this.#session === undefined) throw new Error('dsh-canvas: the session Remote namespace is not mounted')
     const cached = this.#sessionList
     const fresh = cached !== undefined && Date.now() - cached.at < SESSION_LIST_TTL_MS
     // The cache only ever answers a *hit*. A miss — a card whose session was
@@ -432,10 +449,9 @@ export class CanvasBridge {
     return rows
   }
 
-  /** The `session` Remote namespace, or a clear failure while it is not mounted. */
+  /** The `session` Remote namespace, or a stand-in that reports the gap as a rejection. */
   private get session(): SessionModelFace {
-    if (this.#session === undefined) throw new Error('dsh-canvas: the session Remote namespace is not mounted')
-    return this.#session
+    return this.#session ?? unmounted<SessionModelFace>('session')
   }
 
   /** Stop the card's live agent. Its log stays on disk. */

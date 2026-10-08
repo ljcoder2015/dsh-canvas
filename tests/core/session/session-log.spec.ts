@@ -60,8 +60,7 @@ describe('lastUserPromptOfEvents', () => {
     const events = [
       userEvent('write a poem'),
       userEvent('Material injected from canvas card `a.md` (markdown).', 1_000, {
-        kind: 'plugin',
-        plugin: 'dsh-canvas',
+        kind: 'dsh-canvas',
         form: 'notice',
         summary: '引用 a.md',
       }),
