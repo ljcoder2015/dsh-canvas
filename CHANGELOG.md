@@ -1,5 +1,7 @@
 # Changelog
 
+## [1.0.3](https://github.com/ljcoder2015/dsh-canvas-flow/compare/v1.0.2...v1.0.3) (2026-10-09)
+
 ## [1.0.2](https://github.com/ljcoder2015/dsh-canvas/compare/v1.0.1...v1.0.2) (2026-10-08)
 
 ### ⚠ BREAKING CHANGES

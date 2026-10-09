@@ -1,6 +1,6 @@
 {
   "name": "dsh-canvas-flow",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "在画布上，搭出你的工作流 —— 跑在 DeepSeek Harness 上的无限画布插件",
   "license": "MIT",
   "repository": {
