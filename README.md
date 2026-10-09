@@ -1,9 +1,12 @@
 
-# dsh-canvas
+# dsh-canvas-flow
 
-跑在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 上的**无限画布插件**：把一个项目铺成一张无限画布，通过创建不同的卡片类型，卡片间通过连线引用，共同配合完成大型复杂的任务。
+> **在画布上，搭出你的工作流。**
+> 拖拽成流程，连线传数据，每一步都看得见。
 
-<video src="docs/Dsh_Canvas_Tutorial.mp4" controls muted width="100%"></video>
+**dsh-canvas-flow** 是跑在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 上的**无限画布插件**：一个项目铺在同一张画布上 —— 文本卡片写规范、设计卡片出设计稿、应用卡片做出能跑的 Web 应用，还能在预览里按元素精修。
+
+卡片之间用连线引用，上游的产物直接喂给下游，几个卡片配合起来就能完成大型复杂任务。
 
 ---
 
@@ -26,6 +29,9 @@
 ## 安装插件
 
 在 DeepSeek Harness 客户端中安装插件。
+在插件市场中搜索 dsh-canvas-flow，点击安装即可。
+
+![alt text](docs/images/install-plugin.gif)
 
 ## 路线图
 

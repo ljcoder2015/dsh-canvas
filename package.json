@@ -1,15 +1,15 @@
 {
   "name": "dsh-canvas-flow",
   "version": "1.0.2",
-  "description": "DeepSeek Harness 通用创作画布插件：文件即产物、卡片即会话、引用即数据。",
+  "description": "在画布上，搭出你的工作流 —— 跑在 DeepSeek Harness 上的无限画布插件",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ljcoder2015/dsh-canvas.git"
+    "url": "git+https://github.com/ljcoder2015/dsh-canvas-flow.git"
   },
-  "homepage": "https://github.com/ljcoder2015/dsh-canvas#readme",
+  "homepage": "https://github.com/ljcoder2015/dsh-canvas-flow#readme",
   "bugs": {
-    "url": "https://github.com/ljcoder2015/dsh-canvas/issues"
+    "url": "https://github.com/ljcoder2015/dsh-canvas-flow/issues"
   },
   "publishConfig": {
     "access": "public"
